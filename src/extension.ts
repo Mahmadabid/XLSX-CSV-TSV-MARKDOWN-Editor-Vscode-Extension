@@ -164,14 +164,32 @@ export function activate(context: vscode.ExtensionContext) {
                     await cfg.update('workbench.editorAssociations', newAssociations, vscode.ConfigurationTarget.Global);
                     vscode.window.showInformationMessage(`XLSX Viewer is now set as the default editor for ${label} files.`);
                 } else {
-                    if (Array.isArray(associations)) {
-                        newAssociations = associations.filter(a => a.viewType !== viewType && a.filenamePattern !== pattern && a.filenamePattern !== `**/${pattern}`);
-                    } else {
-                        newAssociations = { ...associations };
-                        delete (newAssociations as any)[pattern];
-                        delete (newAssociations as any)[`**/${pattern}`];
+                    const inspect = cfg.inspect('workbench.editorAssociations');
+                    const targets: Array<{ target: vscode.ConfigurationTarget; value: any }> = [
+                        { target: vscode.ConfigurationTarget.Global, value: inspect?.globalValue },
+                        { target: vscode.ConfigurationTarget.Workspace, value: inspect?.workspaceValue },
+                        { target: vscode.ConfigurationTarget.WorkspaceFolder, value: inspect?.workspaceFolderValue }
+                    ];
+
+                    for (const t of targets) {
+                        if (!t.value) {
+                            continue;
+                        }
+
+                        if (Array.isArray(t.value)) {
+                            newAssociations = t.value.filter(a => a.viewType !== viewType); // Remove all associations for this viewer
+                        } else {
+                            newAssociations = { ...t.value };
+                            Object.keys(newAssociations).forEach(key => {
+                                if (newAssociations[key] === viewType) {
+                                    delete newAssociations[key];
+                                }
+                            });
+                        }
+
+                        await cfg.update('workbench.editorAssociations', newAssociations, t.target);
                     }
-                    await cfg.update('workbench.editorAssociations', newAssociations, vscode.ConfigurationTarget.Global);
+
                     vscode.window.showInformationMessage(`${label} association has been removed from settings.`);
                 }
             } catch (err) {

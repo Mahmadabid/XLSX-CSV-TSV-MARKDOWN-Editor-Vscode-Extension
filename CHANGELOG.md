@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.6.9 - Editor Association Fixes (2026-01-15)
+- Fixed bug where disabling the Markdown custom editor could leave workspace or workspace-folder settings such that new `.md` files still opened in the extension. The disable flow now removes `xlsxViewer.md` associations across all configuration scopes (Global, Workspace, Workspace Folder) so your chosen default editor is preserved.
+- Set the Markdown custom editor priority to `option` so it won't open automatically unless explicitly selected.
+
 ## v1.6.8 - Theme & UI Fixes
 - **Settings Panel**: Fixed settings panel colors so they now follow the active VS Code theme when `vscode` theme mode is selected; checkboxes are themed and accessible.
 - **Tooltips**: Root/global tooltip background was changed from black to the root theme background so it matches the overall theme and improves contrast.
