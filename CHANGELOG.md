@@ -1,6 +1,11 @@
 # Changelog
 
-## v1.6.7 - Editor Association Management (2026-01-08)
+## v1.6.8 - Theme & UI Fixes
+- **Settings Panel**: Fixed settings panel colors so they now follow the active VS Code theme when `vscode` theme mode is selected; checkboxes are themed and accessible.
+- **Tooltips**: Root/global tooltip background was changed from black to the root theme background so it matches the overall theme and improves contrast.
+- **Visual Tweaks**: Refined glass backdrop and shadow values for better integration with VS Code widgets and improved focus/contrast for checkboxes.
+
+## v1.6.7 - Editor Association Management
 - **Markdown Editor Controls**: Added a toolbar **Disable MD** button in the Markdown viewer that lets users disable the extension for `.md` files. The button prompts for confirmation, removes the association, and triggers VS Code's **"Reopen With..."** picker to select a new default editor.
 - **Enable Button for Markdown**: When viewing a Markdown file via "Open With..." while it is not the default editor, an **Enable MD** button appears in the toolbar to quickly set XLSX Viewer as the default for `.md` files.
 - **Set as Default for All File Types**: Added a **"Set as Default"** button (lightning bolt icon) to CSV, TSV, and XLSX viewers. This button only appears when this extension is NOT currently the default editor for that file type, allowing you to quickly make XLSX Viewer the default.

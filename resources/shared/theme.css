@@ -48,9 +48,9 @@
     --header-hover-bg: #e8e8ed;
     
     /* Tooltip - Refined */
-    --tooltip-bg: #1d1d1f;
-    --tooltip-text: #ffffff;
-    --tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --tooltip-bg: #ffffff;
+    --tooltip-text: #1d1d1f;
+    --tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
     
     /* Shadows - Restored for depth */
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
@@ -276,6 +276,14 @@ body.vscode-theme {
     /* Focus */
     --focus-outline: color-mix(in srgb, var(--accent-color) 20%, transparent);
 
+    /* Glass Effects for VS Code Theme */
+    --glass-bg: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff)) 85%, transparent);
+    --glass-bg-strong: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff)) 92%, transparent);
+    --glass-bg-heavy: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff)) 98%, transparent);
+    --glass-shadow: var(--shadow-lg);
+    --glass-shadow-light: var(--shadow-md);
+    --glass-border: var(--border-color);
+
     /* Inverted colors */
     --inverted-bg: var(--vscode-editor-foreground, #000000);
     --inverted-text: var(--vscode-editor-background, #f5f5f7);
@@ -477,6 +485,43 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     color: var(--text-color);
     user-select: none;
     cursor: pointer;
+}
+
+.setting-item input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-color);
+    cursor: pointer;
+    position: relative;
+    outline: none;
+    transition: all 0.2s ease;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.setting-item input[type="checkbox"]:checked {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+}
+
+.setting-item input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--contrast-text);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.setting-item input[type="checkbox"]:focus-visible {
+    box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .setting-item input[type="checkbox"]:disabled {
