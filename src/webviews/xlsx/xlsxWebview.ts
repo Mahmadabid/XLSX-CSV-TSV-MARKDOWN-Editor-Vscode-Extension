@@ -1747,11 +1747,6 @@ import { InfoTooltip } from '../shared/infoTooltip';
             renderWorksheet(currentWorksheet);
         });
         
-        toolbar.prependElement(sheetSelector);
-
-        // Inject tooltip if variables are present
-        InfoTooltip.inject('toolbar', (window as any).viewImgUri, (window as any).logoSvgUri, 'table view');
-
         toolbar.setButtons([
             {
                 id: 'toggleTableEditButton',
@@ -1858,6 +1853,11 @@ import { InfoTooltip } from '../shared/infoTooltip';
             }
         ]);
 
+        toolbar.prependElement(sheetSelector);
+
+        // Inject tooltip if variables are present
+        InfoTooltip.inject('toolbar', (window as any).viewImgUri, (window as any).logoSvgUri, 'table view');
+
         // Ensure the "Plain/Styled" toggle shows the correct label on initial render
         const togglePlainViewBtn = document.getElementById('togglePlainViewButton');
         if (togglePlainViewBtn) {
@@ -1882,7 +1882,18 @@ import { InfoTooltip } from '../shared/infoTooltip';
         worksheetsMeta.forEach((ws, i) => {
             const opt = document.createElement('option');
             opt.value = String(i);
-            opt.textContent = ws.name;
+            
+            // Format name to "Sheet X" if generic
+            let name = ws.name || `Sheet ${i + 1}`;
+            const genericRegex = /^sheet\s*(\d+)$/i;
+            if (genericRegex.test(name)) {
+                const match = name.match(genericRegex);
+                if (match) {
+                    name = `Sheet ${match[1]}`;
+                }
+            }
+            
+            opt.textContent = name;
             selector.appendChild(opt);
         });
         selector.value = '0';
@@ -1934,8 +1945,9 @@ import { InfoTooltip } from '../shared/infoTooltip';
             const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : 60;
             document.documentElement.style.setProperty('--row-header-width', rowHeaderWidth + 'px');
 
-            populateSheetSelector();
             attachHandlersOnce();
+            populateSheetSelector();
+            
             if (currentSettings) {
                 applySettings(currentSettings);
             }
@@ -1973,8 +1985,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
             const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : 60;
             document.documentElement.style.setProperty('--row-header-width', rowHeaderWidth + 'px');
 
-            populateSheetSelector();
             attachHandlersOnce();
+            populateSheetSelector();
             const expandBtn = document.getElementById('toggleExpandButton');
             if (expandBtn) expandBtn.setAttribute('data-state', 'default');
             setExpandedMode(false);

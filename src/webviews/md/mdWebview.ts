@@ -386,13 +386,11 @@ function applySettings(settings: any, persist = false) {
     const chkStickyToolbar = $('chkStickyToolbar') as HTMLInputElement;
     const chkSyncScroll = $('chkSyncScroll') as HTMLInputElement;
     const chkPreviewLeft = $('chkPreviewLeft') as HTMLInputElement;
-    const chkMdEnabled = $('chkMdEnabled') as HTMLInputElement;
 
     if (chkWordWrap) chkWordWrap.checked = currentSettings.wordWrap;
     if (chkStickyToolbar) chkStickyToolbar.checked = currentSettings.stickyToolbar;
     if (chkSyncScroll) chkSyncScroll.checked = currentSettings.syncScroll;
     if (chkPreviewLeft) chkPreviewLeft.checked = currentSettings.previewPosition === 'left';
-    if (chkMdEnabled) chkMdEnabled.checked = currentSettings.isMdEnabled;
 
     if (toolbarManager) {
         toolbarManager.setButtonVisibility('disableMdEditorButton', !!currentSettings.isMdEnabled);
@@ -440,15 +438,6 @@ function initializeSettings() {
             onChange: (val: boolean) => {
                 currentSettings.previewPosition = val ? 'left' : 'right';
                 applySettings(currentSettings, true);
-            }
-        },
-        {
-            id: 'chkMdEnabled',
-            label: 'Enable XLSX Viewer for .md files',
-            defaultValue: currentSettings.isMdEnabled,
-            onChange: (val: boolean) => {
-                currentSettings.isMdEnabled = val;
-                vscode.postMessage({ command: 'toggleMdAssociation', enable: val });
             }
         }
     ];

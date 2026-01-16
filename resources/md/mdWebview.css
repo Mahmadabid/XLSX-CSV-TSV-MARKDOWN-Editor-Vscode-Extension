@@ -35,6 +35,19 @@ body.edit-mode #content {
     flex-shrink: 0;
 }
 
+.toggle-button.active {
+    background-color: var(--accent-bg);
+    border-color: var(--accent-color);
+}
+
+.toggle-button.active .btn-label {
+    color: var(--accent-color);
+}
+
+.toggle-button.active svg {
+    stroke: var(--accent-color);
+}
+
 /* ===== Hover Tooltip (fixed positioned - matches tableWebview.css style) ===== */
 .hover-tooltip {
     position: fixed;

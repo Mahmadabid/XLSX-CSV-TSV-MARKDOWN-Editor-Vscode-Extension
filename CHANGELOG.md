@@ -1,6 +1,9 @@
 # Changelog
 
-## v1.6.9 - Editor Association Fixes (2026-01-15)
+## v1.7.0 - XLSX Toolbar Fix
+- Restored the XLSX sheet selector at the start of the toolbar.
+
+## v1.6.9 - Editor Association Fixes
 - Fixed bug where disabling the Markdown custom editor could leave workspace or workspace-folder settings such that new `.md` files still opened in the extension. The disable flow now removes `xlsxViewer.md` associations across all configuration scopes (Global, Workspace, Workspace Folder) so your chosen default editor is preserved.
 - Set the Markdown custom editor priority to `option` so it won't open automatically unless explicitly selected.
 
