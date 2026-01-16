@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.1 - Markdown Outline & UI Tweaks
+- **Markdown Outline**: Added an Outline panel with heading navigation and a setting to control its visibility via the Settings panel.
+- **Copy Enhancements**: Added **Copy** buttons for code blocks, heading anchors that copy deep links to the clipboard, and improved inline/code block labeling.
+- **External Link Handling**: External links now open via VS Code's external API for consistent behavior.
+- **UI Tweaks & Fixes**: Refined button colors, fixed split-edit visibility for Save/Cancel, and improved heading anchor UX.
+
 ## v1.7.0 - XLSX Toolbar Fix
 - Restored the XLSX sheet selector at the start of the toolbar.
 

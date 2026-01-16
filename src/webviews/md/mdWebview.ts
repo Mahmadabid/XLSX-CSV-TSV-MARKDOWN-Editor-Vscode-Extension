@@ -42,11 +42,29 @@ let currentSettings = {
     wordWrap: true,
     syncScroll: true,
     previewPosition: 'right',
+    showOutline: true,
     isMdEnabled: true
 };
 
 // ===== Utilities =====
 const $ = Utils.$;
+
+function slugify(text: string) {
+    return text
+        .toLowerCase()
+        .trim()
+        .replace(/[`~!@#$%^&*()+=\[\]{}|\\;:'",.<>/?]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-');
+}
+
+function escapeHtmlAttr(value: string) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
 
 function setButtonsEnabled(enabled: boolean) {
     const ids = ['toggleViewButton', 'toggleEditModeButton', 'saveEditsButton',
@@ -90,6 +108,17 @@ md.use(ins);
 md.use(mark);
 md.use(abbr);
 
+// Inline code styling
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const defaultInlineCode = md.renderer.rules.code_inline || function(tokens: any, idx: number, options: any, env: any, self: any) {
+    return self.renderToken(tokens, idx, options);
+};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+md.renderer.rules.code_inline = function(tokens: any, idx: number, options: any, env: any, self: any) {
+    tokens[idx].attrJoin('class', 'inline-code');
+    return defaultInlineCode(tokens, idx, options, env, self);
+};
+
 // Inject line numbers for sync scroll
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function injectLineNumbers(tokens: any, idx: number, options: any, env: any, self: any) {
@@ -115,29 +144,94 @@ md.renderer.rules.table_open = function(tokens: any, idx: number, options: any, 
 
 // Fence (code blocks) needs special handling as it's a self-closing block token in terms of rendering
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const defaultFence = md.renderer.rules.fence || function(tokens: any, idx: number, options: any, env: any, self: any) {
-    return self.renderToken(tokens, idx, options);
-};
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 md.renderer.rules.fence = function (tokens: any, idx: number, options: any, env: any, self: any) {
-    if (tokens[idx].map && tokens[idx].level === 0) {
-        tokens[idx].attrSet('data-line', String(tokens[idx].map[0]));
+    const token = tokens[idx];
+    const info = token.info ? md.utils.unescapeAll(token.info).trim() : '';
+    const langName = info ? info.split(/\s+/g)[0] : '';
+    const code = token.content || '';
+
+    let highlighted = '';
+    if (langName && hljs.getLanguage(langName)) {
+        try {
+            highlighted = hljs.highlight(code, { language: langName }).value;
+        } catch {
+            highlighted = md.utils.escapeHtml(code);
+        }
+    } else {
+        highlighted = md.utils.escapeHtml(code);
     }
-    tokens[idx].attrJoin('class', 'code-block');
-    return defaultFence(tokens, idx, options, env, self);
+
+    const dataLine = token.map && token.level === 0 ? ` data-line="${token.map[0]}"` : '';
+    const langLabel = langName ? `<div class="code-lang">${md.utils.escapeHtml(langName)}</div>` : `<div class="code-lang muted">text</div>`;
+    const encoded = encodeURIComponent(code);
+    const copyButton = `<button class="code-copy" data-code="${escapeHtmlAttr(encoded)}" title="Copy code">${Icons.Copy}<span>Copy</span></button>`;
+    const langClass = langName ? ` class="language-${langName}"` : '';
+
+    return `<div class="code-block"${dataLine}><div class="code-block-header">${langLabel}${copyButton}</div><pre><code${langClass}>${highlighted}</code></pre></div>`;
 };
 
-function parseGFM(text: string) {
-    if (!text) return '';
-    return md.render(text);
+function addHeadingIds(tokens: any[]) {
+    const slugCounts: Record<string, number> = {};
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (token.type === 'heading_open') {
+            const inline = tokens[i + 1];
+            const text = inline && inline.type === 'inline' ? inline.content : '';
+            const baseSlug = slugify(text);
+            if (!baseSlug) continue;
+
+            const count = (slugCounts[baseSlug] || 0) + 1;
+            slugCounts[baseSlug] = count;
+            const id = count > 1 ? `${baseSlug}-${count}` : baseSlug;
+            token.attrSet('id', id);
+            token.attrJoin('class', 'md-heading');
+        }
+    }
+}
+
+function buildToc(tokens: any[]) {
+    const items: Array<{ id: string; level: number; text: string }> = [];
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (token.type === 'heading_open') {
+            const inline = tokens[i + 1];
+            const text = inline && inline.type === 'inline' ? inline.content : '';
+            const id = token.attrGet('id');
+            const level = parseInt((token.tag || 'h2').replace('h', ''), 10);
+            if (id && text) {
+                items.push({ id, level, text });
+            }
+        }
+    }
+
+    if (!items.length) {
+        return '<div class="toc-empty">No headings found</div>';
+    }
+
+    return items.map(item => {
+        const safeText = md.utils.escapeHtml(item.text);
+        return `<div class="toc-item toc-level-${item.level}"><a href="#${item.id}" data-target="${item.id}">${safeText}</a></div>`;
+    }).join('');
 }
 
 // ===== Rendering =====
 function renderMarkdown(content: string) {
     const preview = $('markdownPreview');
     if (preview) {
-        preview.innerHTML = parseGFM(content);
+        const env: any = {};
+        const tokens = md.parse(content || '', env);
+        addHeadingIds(tokens);
+        preview.innerHTML = md.renderer.render(tokens, md.options, env);
+        updateToc(tokens);
+        decorateHeadings(preview as HTMLElement);
     }
+}
+
+function updateToc(tokens: any[]) {
+    const tocBody = $('tocBody');
+    if (!tocBody) return;
+    tocBody.innerHTML = buildToc(tokens);
 }
 
 // ===== Edit Mode (Split View) =====
@@ -152,9 +246,13 @@ function setEditMode(enabled: boolean) {
     const editor = $('markdownEditor') as HTMLTextAreaElement;
     const preview = $('markdownPreview');
 
-    if (saveBtn) saveBtn.classList.toggle('hidden', !enabled);
-    if (cancelBtn) cancelBtn.classList.toggle('hidden', !enabled);
-    if (editBtn) editBtn.classList.toggle('hidden', enabled);
+    const saveTarget = (saveBtn?.closest('.tooltip') as HTMLElement | null) || saveBtn;
+    const cancelTarget = (cancelBtn?.closest('.tooltip') as HTMLElement | null) || cancelBtn;
+    const editTarget = (editBtn?.closest('.tooltip') as HTMLElement | null) || editBtn;
+
+    if (saveTarget) saveTarget.classList.toggle('hidden', !enabled);
+    if (cancelTarget) cancelTarget.classList.toggle('hidden', !enabled);
+    if (editTarget) editTarget.classList.toggle('hidden', enabled);
 
     if (enabled) {
         // Enter split-view edit mode
@@ -386,11 +484,22 @@ function applySettings(settings: any, persist = false) {
     const chkStickyToolbar = $('chkStickyToolbar') as HTMLInputElement;
     const chkSyncScroll = $('chkSyncScroll') as HTMLInputElement;
     const chkPreviewLeft = $('chkPreviewLeft') as HTMLInputElement;
+    const chkShowOutline = $('chkShowOutline') as HTMLInputElement;
 
     if (chkWordWrap) chkWordWrap.checked = currentSettings.wordWrap;
     if (chkStickyToolbar) chkStickyToolbar.checked = currentSettings.stickyToolbar;
     if (chkSyncScroll) chkSyncScroll.checked = currentSettings.syncScroll;
     if (chkPreviewLeft) chkPreviewLeft.checked = currentSettings.previewPosition === 'left';
+    if (chkShowOutline) chkShowOutline.checked = currentSettings.showOutline;
+
+        const tocPanel = $('tocPanel');
+        if (container) container.classList.toggle('toc-open', !!currentSettings.showOutline);
+    if (tocPanel) tocPanel.classList.toggle('hidden', !currentSettings.showOutline);
+
+    if (toolbarManager) {
+        const btn = toolbarManager.getButton('toggleTocButton');
+        if (btn) btn.classList.toggle('active', !!currentSettings.showOutline);
+    }
 
     if (toolbarManager) {
         toolbarManager.setButtonVisibility('disableMdEditorButton', !!currentSettings.isMdEnabled);
@@ -437,6 +546,15 @@ function initializeSettings() {
             defaultValue: currentSettings.previewPosition === 'left',
             onChange: (val: boolean) => {
                 currentSettings.previewPosition = val ? 'left' : 'right';
+                applySettings(currentSettings, true);
+            }
+        },
+        {
+            id: 'chkShowOutline',
+            label: 'Show Outline',
+            defaultValue: currentSettings.showOutline,
+            onChange: (val: boolean) => {
+                currentSettings.showOutline = val;
                 applySettings(currentSettings, true);
             }
         }
@@ -670,6 +788,89 @@ function wireEditor() {
     });
 }
 
+// ===== Preview Interactions =====
+function decorateHeadings(preview: HTMLElement) {
+    const headings = preview.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]');
+    headings.forEach(h => {
+        if (h.querySelector('.heading-anchor')) return;
+        const id = h.getAttribute('id');
+        if (!id) return;
+        const anchor = document.createElement('a');
+        anchor.className = 'heading-anchor';
+        anchor.href = `#${id}`;
+        anchor.title = 'Copy link to heading';
+        anchor.innerHTML = Icons.Link;
+        anchor.addEventListener('click', (e) => {
+            e.preventDefault();
+            const target = preview.querySelector(`#${CSS.escape(id)}`);
+            if (target) (target as HTMLElement).scrollIntoView({ block: 'start', behavior: 'smooth' });
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(`#${id}`).then(() => showToast('Link copied')).catch(() => {});
+            }
+        });
+        h.appendChild(anchor);
+    });
+}
+
+function wirePreviewInteractions() {
+    const preview = $('markdownPreview');
+    if (!preview) return;
+    const wired = (preview as any)._wired;
+    if (wired) return;
+    (preview as any)._wired = true;
+
+    preview.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        const copyBtn = target.closest('.code-copy') as HTMLElement | null;
+        if (copyBtn) {
+            e.preventDefault();
+            const encoded = copyBtn.getAttribute('data-code') || '';
+            const code = decodeURIComponent(encoded);
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(code).then(() => showToast('Copied')).catch(() => showToast('Copy failed'));
+            }
+            return;
+        }
+
+        const link = target.closest('a') as HTMLAnchorElement | null;
+        if (link && link.href) {
+            const href = link.getAttribute('href') || '';
+            if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:')) {
+                e.preventDefault();
+                vscode.postMessage({ command: 'openExternal', url: href });
+            }
+        }
+    });
+}
+
+function wireTocPanel() {
+    const tocBody = $('tocBody');
+    const closeBtn = $('tocCloseButton');
+
+    if (tocBody) {
+        tocBody.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            const link = target.closest('a[data-target]') as HTMLAnchorElement | null;
+            if (!link) return;
+            e.preventDefault();
+            const id = link.getAttribute('data-target') || '';
+            if (!id) return;
+            const preview = $('markdownPreview');
+            const el = preview?.querySelector(`#${CSS.escape(id)}`) as HTMLElement | null;
+            if (el) {
+                el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            }
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            currentSettings.showOutline = false;
+            applySettings(currentSettings, true);
+        });
+    }
+}
+
 // ===== Hover Tooltip =====
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let hoverHideTimer: any = null;
@@ -728,6 +929,8 @@ wireButtons();
 initializeSettings();
 wireEditor();
 wireHoverTooltip();
+wirePreviewInteractions();
+wireTocPanel();
 updateHeaderHeight();
 
 // Ensure settings are applied once toolbar is ready

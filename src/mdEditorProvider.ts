@@ -65,6 +65,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 wordWrap: cfg.get('md.wordWrap', true),
                                 syncScroll: cfg.get('md.syncScroll', true),
                                 previewPosition: cfg.get('md.previewPosition', 'right'),
+                                showOutline: cfg.get('md.showOutline', true),
                                 isMdEnabled: isMdEnabled
                             };
                             webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -87,6 +88,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('md.wordWrap', !!s.wordWrap, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.syncScroll', !!s.syncScroll, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.previewPosition', s.previewPosition || 'right', vscode.ConfigurationTarget.Global);
+                            if (typeof s.showOutline === 'boolean') {
+                                await cfg.update('md.showOutline', !!s.showOutline, vscode.ConfigurationTarget.Global);
+                            }
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
                         }
@@ -152,6 +156,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                  wordWrap: cfg.get('md.wordWrap', true),
                                  syncScroll: cfg.get('md.syncScroll', true),
                                  previewPosition: cfg.get('md.previewPosition', 'right'),
+                                 showOutline: cfg.get('md.showOutline', true),
                                  isMdEnabled: true
                              };
                              webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -188,6 +193,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         wordWrap: cfg.get('md.wordWrap', true),
                         syncScroll: cfg.get('md.syncScroll', true),
                         previewPosition: cfg.get('md.previewPosition', 'right'),
+                        showOutline: cfg.get('md.showOutline', true),
                         isMdEnabled: isMdEnabled
                     };
                     try {
@@ -249,6 +255,13 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             <div id="content">
                 <div id="loadingIndicator" class="loading-indicator">Loading Markdown...</div>
                 <div class="markdown-container" id="markdownContainer">
+                    <aside id="tocPanel" class="toc-panel hidden" aria-label="Outline">
+                        <div class="toc-header">
+                            <span class="toc-title">Outline</span>
+                            <button id="tocCloseButton" class="toc-close" title="Hide outline">x</button>
+                        </div>
+                        <div id="tocBody" class="toc-body"></div>
+                    </aside>
                     <div class="editor-wrapper">
                         <textarea id="markdownEditor" class="markdown-editor" spellcheck="false"></textarea>
                     </div>
