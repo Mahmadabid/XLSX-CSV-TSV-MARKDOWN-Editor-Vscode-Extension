@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.2 - Remove heading anchors & fix external link popup
+- Removed heading anchor copy links from Markdown preview.
+- Fixed external link handling so VS Code's confirmation popup opens correctly (added e.stopPropagation on link clicks).
+- Minor CSS cleanup to remove heading anchor styles.
+
 ## v1.7.1 - Markdown Outline & UI Tweaks
 - **Markdown Outline**: Added an Outline panel with heading navigation and a setting to control its visibility via the Settings panel.
 - **Copy Enhancements**: Added **Copy** buttons for code blocks, heading anchors that copy deep links to the clipboard, and improved inline/code block labeling.

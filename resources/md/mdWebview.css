@@ -522,35 +522,6 @@ body:not(.sticky-toolbar-enabled) #content {
     color: inherit;
 }
 
-/* ===== Heading Anchors ===== */
-.markdown-preview h1,
-.markdown-preview h2,
-.markdown-preview h3,
-.markdown-preview h4,
-.markdown-preview h5,
-.markdown-preview h6 {
-    position: relative;
-}
-
-.heading-anchor {
-    margin-left: 8px;
-    opacity: 0;
-    color: var(--text-muted);
-    text-decoration: none;
-}
-
-.markdown-preview h1:hover .heading-anchor,
-.markdown-preview h2:hover .heading-anchor,
-.markdown-preview h3:hover .heading-anchor,
-.markdown-preview h4:hover .heading-anchor,
-.markdown-preview h5:hover .heading-anchor,
-.markdown-preview h6:hover .heading-anchor {
-    opacity: 1;
-}
-
-.heading-anchor:hover {
-    color: var(--accent-color);
-}
 
 /* Lists */
 .markdown-preview ul,

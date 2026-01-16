@@ -224,7 +224,6 @@ function renderMarkdown(content: string) {
         addHeadingIds(tokens);
         preview.innerHTML = md.renderer.render(tokens, md.options, env);
         updateToc(tokens);
-        decorateHeadings(preview as HTMLElement);
     }
 }
 
@@ -789,29 +788,6 @@ function wireEditor() {
 }
 
 // ===== Preview Interactions =====
-function decorateHeadings(preview: HTMLElement) {
-    const headings = preview.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]');
-    headings.forEach(h => {
-        if (h.querySelector('.heading-anchor')) return;
-        const id = h.getAttribute('id');
-        if (!id) return;
-        const anchor = document.createElement('a');
-        anchor.className = 'heading-anchor';
-        anchor.href = `#${id}`;
-        anchor.title = 'Copy link to heading';
-        anchor.innerHTML = Icons.Link;
-        anchor.addEventListener('click', (e) => {
-            e.preventDefault();
-            const target = preview.querySelector(`#${CSS.escape(id)}`);
-            if (target) (target as HTMLElement).scrollIntoView({ block: 'start', behavior: 'smooth' });
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(`#${id}`).then(() => showToast('Link copied')).catch(() => {});
-            }
-        });
-        h.appendChild(anchor);
-    });
-}
-
 function wirePreviewInteractions() {
     const preview = $('markdownPreview');
     if (!preview) return;
@@ -837,6 +813,7 @@ function wirePreviewInteractions() {
             const href = link.getAttribute('href') || '';
             if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:')) {
                 e.preventDefault();
+                e.stopPropagation();
                 vscode.postMessage({ command: 'openExternal', url: href });
             }
         }
