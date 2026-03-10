@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.7.3 - Advanced Markdown Editing & UI Fixes
+- **Outline Toggle Button Fix**: The outline toggle button now shows a visible accent-colored background when active, making it clearly distinguishable from inactive state.
+- **Formatting Toolbar**: A full formatting toolbar appears in edit mode with grouped buttons for text formatting, headings, lists, inserts, undo/redo, line operations, and text transforms.
+- **New Editing Features**:
+  - **Duplicate Line** (Ctrl+Shift+D): Duplicate the current line below.
+  - **Delete Line** (Ctrl+Shift+K): Delete the current line.
+  - **Move Line Up/Down** (Alt+Up/Down): Move the current line or selection up or down.
+  - **Select Word** (Ctrl+D): Select the word at cursor.
+  - **Go to Line** (Ctrl+G): Jump to a specific line number.
+  - **Transform Case**: Uppercase (Ctrl+Shift+U), lowercase (Ctrl+U), and Title Case transforms for selected text.
+  - **Sort Lines**: Sort selected lines alphabetically.
+  - **Trim Trailing Whitespace**: Remove trailing spaces from all lines.
+- **Scroll Performance**: All scroll handlers now use requestAnimationFrame throttling and passive event listeners. Data-line element queries are cached for smoother sync scrolling.
+- **Outline Auto-Scroll**: The TOC panel now auto-scrolls to keep the active heading visible as you scroll through the document.
+
 ## v1.7.2 - Remove heading anchors & fix external link popup
 - Removed heading anchor copy links from Markdown preview.
 - Fixed external link handling so VS Code's confirmation popup opens correctly (added e.stopPropagation on link clicks).

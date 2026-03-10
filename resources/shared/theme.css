@@ -95,6 +95,12 @@
     --button-shadow: 0 1px 3px rgba(0, 113, 227, 0.2);
     --button-shadow-hover: 0 4px 8px rgba(0, 113, 227, 0.3);
     
+    /* Interactive states */
+    --hover-bg: rgba(0, 0, 0, 0.06);
+    --active-bg: rgba(0, 0, 0, 0.1);
+    --text-primary: #1d1d1f;
+    --text-secondary: #86868b;
+
     /* Inverted */
     --inverted-bg: #000000;
     --inverted-text: #ffffff;
@@ -191,6 +197,12 @@ body.dark-mode {
 
     --focus-outline: rgba(41, 151, 255, 0.3);
 
+    /* Interactive states */
+    --hover-bg: rgba(255, 255, 255, 0.08);
+    --active-bg: rgba(255, 255, 255, 0.12);
+    --text-primary: #f5f5f7;
+    --text-secondary: #86868b;
+
     /* Inverted colors */
     --inverted-bg: #f5f5f7;
     --inverted-text: #1d1d1f;
@@ -283,6 +295,12 @@ body.vscode-theme {
     --glass-shadow: var(--shadow-lg);
     --glass-shadow-light: var(--shadow-md);
     --glass-border: var(--border-color);
+
+    /* Interactive states */
+    --hover-bg: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.06));
+    --active-bg: color-mix(in srgb, var(--vscode-focusBorder, #007aff) 12%, transparent);
+    --text-primary: var(--vscode-editor-foreground, #1d1d1f);
+    --text-secondary: var(--vscode-descriptionForeground, #86868b);
 
     /* Inverted colors */
     --inverted-bg: var(--vscode-editor-foreground, #000000);

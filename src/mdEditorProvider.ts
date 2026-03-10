@@ -66,6 +66,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 syncScroll: cfg.get('md.syncScroll', true),
                                 previewPosition: cfg.get('md.previewPosition', 'right'),
                                 showOutline: cfg.get('md.showOutline', true),
+                                showLineNumbers: cfg.get('md.showLineNumbers', true),
                                 isMdEnabled: isMdEnabled
                             };
                             webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -90,6 +91,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('md.previewPosition', s.previewPosition || 'right', vscode.ConfigurationTarget.Global);
                             if (typeof s.showOutline === 'boolean') {
                                 await cfg.update('md.showOutline', !!s.showOutline, vscode.ConfigurationTarget.Global);
+                            }
+                            if (typeof s.showLineNumbers === 'boolean') {
+                                await cfg.update('md.showLineNumbers', !!s.showLineNumbers, vscode.ConfigurationTarget.Global);
                             }
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
@@ -157,6 +161,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                  syncScroll: cfg.get('md.syncScroll', true),
                                  previewPosition: cfg.get('md.previewPosition', 'right'),
                                  showOutline: cfg.get('md.showOutline', true),
+                                 showLineNumbers: cfg.get('md.showLineNumbers', true),
                                  isMdEnabled: true
                              };
                              webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -194,6 +199,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         syncScroll: cfg.get('md.syncScroll', true),
                         previewPosition: cfg.get('md.previewPosition', 'right'),
                         showOutline: cfg.get('md.showOutline', true),
+                        showLineNumbers: cfg.get('md.showLineNumbers', true),
                         isMdEnabled: isMdEnabled
                     };
                     try {
@@ -249,8 +255,70 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             </script>
         </head>
         <body>
+            <div id="readingProgressBar" class="reading-progress-bar"></div>
             <div class="header-background"></div>
             <div class="toolbar" id="toolbar"></div>
+
+            <div id="formattingToolbar" class="formatting-toolbar hidden">
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="bold" title="Bold (Ctrl+B)"></button>
+                    <button class="fmt-btn" data-format="italic" title="Italic (Ctrl+I)"></button>
+                    <button class="fmt-btn" data-format="strikethrough" title="Strikethrough (Ctrl+Shift+X)"></button>
+                    <button class="fmt-btn" data-format="inlineCode" title="Inline Code (Ctrl+E)"></button>
+                </div>
+                <div class="fmt-sep"></div>
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="heading1" title="Heading 1 (Ctrl+1)"></button>
+                    <button class="fmt-btn" data-format="heading2" title="Heading 2 (Ctrl+2)"></button>
+                    <button class="fmt-btn" data-format="heading3" title="Heading 3 (Ctrl+3)"></button>
+                </div>
+                <div class="fmt-sep"></div>
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="bulletList" title="Bullet List (Ctrl+L)"></button>
+                    <button class="fmt-btn" data-format="orderedList" title="Ordered List (Ctrl+Shift+L)"></button>
+                    <button class="fmt-btn" data-format="checkbox" title="Checkbox List"></button>
+                    <button class="fmt-btn" data-format="blockquote" title="Blockquote"></button>
+                </div>
+                <div class="fmt-sep"></div>
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="link" title="Insert Link (Ctrl+K)"></button>
+                    <button class="fmt-btn" data-format="image" title="Insert Image"></button>
+                    <button class="fmt-btn" data-format="table" title="Insert Table"></button>
+                    <button class="fmt-btn" data-format="codeBlock" title="Code Block (Ctrl+Shift+E)"></button>
+                    <button class="fmt-btn" data-format="hr" title="Horizontal Rule"></button>
+                </div>
+                <div class="fmt-sep"></div>
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="undo" title="Undo (Ctrl+Z)"></button>
+                    <button class="fmt-btn" data-format="redo" title="Redo (Ctrl+Shift+Z)"></button>
+                </div>
+                <div class="fmt-sep"></div>
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="duplicateLine" title="Duplicate Line (Ctrl+Shift+D)"></button>
+                    <button class="fmt-btn" data-format="deleteLine" title="Delete Line (Ctrl+Shift+K)"></button>
+                    <button class="fmt-btn" data-format="moveUp" title="Move Line Up (Alt+&#x2191;)"></button>
+                    <button class="fmt-btn" data-format="moveDown" title="Move Line Down (Alt+&#x2193;)"></button>
+                </div>
+                <div class="fmt-sep"></div>
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="uppercase" title="UPPERCASE (Ctrl+Shift+U)"></button>
+                    <button class="fmt-btn" data-format="lowercase" title="lowercase (Ctrl+U)"></button>
+                    <button class="fmt-btn" data-format="titlecase" title="Title Case"></button>
+                    <button class="fmt-btn" data-format="sortLines" title="Sort Lines A-Z"></button>
+                    <button class="fmt-btn" data-format="trimWhitespace" title="Trim Trailing Whitespace"></button>
+                    <button class="fmt-btn" data-format="jumpToLine" title="Go to Line (Ctrl+G)"></button>
+                </div>
+            </div>
+
+            <div id="searchOverlay" class="search-overlay">
+                <div class="search-bar">
+                    <input type="text" id="searchInput" class="search-input" placeholder="Search in preview..." autocomplete="off" />
+                    <span id="searchCount" class="search-count"></span>
+                    <button id="searchPrev" class="search-nav-btn" title="Previous (Shift+Enter)">&#9650;</button>
+                    <button id="searchNext" class="search-nav-btn" title="Next (Enter)">&#9660;</button>
+                    <button id="searchClose" class="search-close-btn" title="Close (Esc)">&times;</button>
+                </div>
+            </div>
 
             <div id="content">
                 <div id="loadingIndicator" class="loading-indicator">Loading Markdown...</div>
@@ -270,6 +338,11 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             </div>
 
             <div class="status-info" id="statusInfo"></div>
+
+            <div id="lightboxOverlay" class="lightbox-overlay">
+                <button id="lightboxClose" class="lightbox-close">&times;</button>
+                <img id="lightboxImage" class="lightbox-image" />
+            </div>
 
             <noscript>
                 <div style="padding: 8px; margin-top: 10px; background: #fff3cd; border: 1px solid #ffeeba;">
