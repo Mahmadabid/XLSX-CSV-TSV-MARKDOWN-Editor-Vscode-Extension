@@ -19,8 +19,7 @@ body.sticky-toolbar-enabled {
 }
 
 body.edit-mode #content {
-    outline: 2px solid var(--accent-color);
-    outline-offset: -2px;
+    outline: none;
 }
 
 /* ===== Buttons ===== */
@@ -185,16 +184,25 @@ body:not(.sticky-toolbar-enabled) #content {
     height: 100%;
     display: flex;
     overflow: hidden;
+    --toc-width: 260px;
+    --split-left: 1fr;
+    --split-right: 1fr;
 }
 
 /* ===== Outline (TOC) ===== */
 .markdown-container.toc-open {
     display: grid;
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: var(--toc-width) auto 1fr;
+    grid-template-rows: 1fr;
+    grid-auto-flow: column;
 }
 
 .markdown-container.toc-open.split-view {
-    grid-template-columns: 260px 1fr 1fr;
+    grid-template-columns: var(--toc-width) auto var(--split-left) auto var(--split-right);
+}
+
+.markdown-container.toc-open.preview-edit {
+    grid-template-columns: var(--toc-width) auto 1fr;
 }
 
 .toc-panel {
@@ -288,56 +296,156 @@ body:not(.sticky-toolbar-enabled) #content {
 /* ===== Split View (Edit Mode) ===== */
 .markdown-container.split-view {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: var(--split-left) auto var(--split-right);
+    grid-template-rows: 1fr;
+    grid-auto-flow: column;
     gap: 0;
 }
 
-/* Preview on left side option */
-.markdown-container.split-view.preview-left {
-    grid-template-columns: 1fr 1fr;
+/* Ensure all grid children stay on the same row */
+.markdown-container.split-view > *,
+.markdown-container.toc-open > * {
+    grid-row: 1;
+    min-height: 0;
 }
 
+/* Preview on left side option - only swaps editor and preview, outline stays left */
 .markdown-container.split-view.preview-left .editor-wrapper {
     order: 2;
-    border-right: none;
-    border-left: 1px solid var(--border-color);
 }
 
 .markdown-container.split-view.preview-left .markdown-preview {
+    order: -1;
+}
+
+.markdown-container.split-view.preview-left .resize-handle-split {
     order: 1;
-    border-left: none;
-    border-right: none;
+}
+
+.markdown-container.toc-open.split-view .resize-handle-toc {
+    grid-column: 2;
 }
 
 .markdown-container.toc-open.split-view .editor-wrapper {
-    grid-column: 2;
+    grid-column: 3;
+}
+
+.markdown-container.toc-open.split-view .resize-handle-split {
+    grid-column: 4;
 }
 
 .markdown-container.toc-open.split-view .markdown-preview {
-    grid-column: 3;
+    grid-column: 5;
 }
 
 .markdown-container.toc-open.split-view.preview-left .markdown-preview {
-    grid-column: 2;
+    grid-column: 3;
+    order: unset;
+}
+
+.markdown-container.toc-open.split-view.preview-left .resize-handle-split {
+    grid-column: 4;
+    order: unset;
 }
 
 .markdown-container.toc-open.split-view.preview-left .editor-wrapper {
-    grid-column: 3;
+    grid-column: 5;
+    order: unset;
 }
 
-.markdown-container.toc-open:not(.split-view) .markdown-preview {
-    grid-column: 2;
+.markdown-container.toc-open:not(.split-view):not(.preview-edit) .markdown-preview {
+    grid-column: 3;
 }
 
 .markdown-container.split-view .editor-wrapper {
     display: flex;
-    border-right: 1px solid var(--border-color);
     overflow: hidden;
+    min-width: 0;
 }
 
 .markdown-container.split-view .markdown-preview {
     overflow-y: auto;
-    border-left: none;
+    min-width: 0;
+}
+
+/* ===== Preview Edit Mode (WYSIWYG) ===== */
+.markdown-container.preview-edit .editor-wrapper {
+    display: none;
+}
+
+.markdown-container.preview-edit .markdown-preview {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.markdown-container.preview-edit .resize-handle-split {
+    display: none;
+}
+
+body.preview-edit-mode .markdown-preview {
+    cursor: text;
+    outline: 2px solid var(--accent-color);
+    outline-offset: -2px;
+}
+
+body.preview-edit-mode .markdown-preview:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: -2px;
+}
+
+/* Hide heading anchor links in preview-edit mode to reduce clutter */
+body.preview-edit-mode .markdown-preview .heading-anchor {
+    display: none;
+}
+
+/* ===== Resize Handles ===== */
+.resize-handle {
+    width: 5px;
+    cursor: col-resize;
+    background: var(--border-color);
+    position: relative;
+    flex-shrink: 0;
+    z-index: 10;
+    transition: background 0.15s ease;
+}
+
+.resize-handle:hover,
+body.resizing .resize-handle {
+    background: var(--accent-color);
+}
+
+.resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    right: -3px;
+}
+
+.resize-handle-toc {
+    display: none;
+}
+
+.markdown-container.toc-open .resize-handle-toc {
+    display: block;
+}
+
+.resize-handle-split {
+    display: none;
+}
+
+.markdown-container.split-view .resize-handle-split {
+    display: block;
+}
+
+body.resizing {
+    user-select: none;
+    cursor: col-resize !important;
+}
+
+body.resizing * {
+    cursor: col-resize !important;
 }
 
 /* ===== Editor Wrapper ===== */
@@ -345,6 +453,8 @@ body:not(.sticky-toolbar-enabled) #content {
     display: none;
     position: relative;
     background: var(--bg-color);
+    height: 100%;
+    min-height: 0;
 }
 
 .markdown-container.split-view .editor-wrapper {

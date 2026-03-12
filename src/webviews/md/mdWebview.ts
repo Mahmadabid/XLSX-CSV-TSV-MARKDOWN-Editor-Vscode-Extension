@@ -28,6 +28,9 @@ import { Utils } from '../shared/utils';
 import { Icons } from '../shared/icons';
 import { vscode, debounce } from '../shared/common';
 import { InfoTooltip } from '../shared/infoTooltip';
+import TurndownService from 'turndown';
+// @ts-ignore
+import { gfm } from 'turndown-plugin-gfm';
 
 // ===== Throttle Utility =====
 function throttleRAF(fn: () => void): () => void {
@@ -46,11 +49,23 @@ function throttleRAF(fn: () => void): () => void {
 // ===== State =====
 let isPreviewView = true;
 let isEditMode = false;
+let isPreviewEditMode = false;
 let isSaving = false;
 let shouldExitEditMode = false;
 let originalContent = '';
 let currentContent = '';
 let toolbarManager: ToolbarManager | null = null;
+
+// Turndown (HTML -> Markdown)
+const turndownService = new TurndownService({
+    headingStyle: 'atx',
+    hr: '---',
+    bulletListMarker: '-',
+    codeBlockStyle: 'fenced',
+    emDelimiter: '*',
+    strongDelimiter: '**',
+});
+turndownService.use(gfm);
 
 // Settings
 let currentSettings = {
@@ -116,7 +131,7 @@ function wrapCodeLines(html: string): string {
 }
 
 function setButtonsEnabled(enabled: boolean) {
-    const ids = ['toggleViewButton', 'toggleEditModeButton', 'saveEditsButton',
+    const ids = ['toggleViewButton', 'toggleEditModeButton', 'previewEditButton', 'saveEditsButton',
         'cancelEditsButton', 'toggleBackgroundButton', 'openSettingsButton', 'disableMdEditorButton'];
     ids.forEach((id) => {
         const el = $(id) as HTMLButtonElement;
@@ -299,6 +314,7 @@ function renderMarkdown(content: string) {
         preview.innerHTML = md.renderer.render(tokens, md.options, env);
         updateToc(tokens);
         refreshDataLineCache();
+        updateCachedLineHeight();
         requestAnimationFrame(() => {
             updateScrollSpy();
             updateProgressBar();
@@ -316,9 +332,12 @@ function updateToc(tokens: any[]) {
 // ===== Edit Mode (Split View) =====
 function setEditMode(enabled: boolean) {
     isEditMode = enabled;
+    isPreviewEditMode = false;
     document.body.classList.toggle('edit-mode', enabled);
+    document.body.classList.remove('preview-edit-mode');
 
     const editBtn = $('toggleEditModeButton');
+    const previewEditBtn = $('previewEditButton');
     const saveBtn = $('saveEditsButton');
     const cancelBtn = $('cancelEditsButton');
     const container = $('markdownContainer');
@@ -328,20 +347,26 @@ function setEditMode(enabled: boolean) {
     const saveTarget = (saveBtn?.closest('.tooltip') as HTMLElement | null) || saveBtn;
     const cancelTarget = (cancelBtn?.closest('.tooltip') as HTMLElement | null) || cancelBtn;
     const editTarget = (editBtn?.closest('.tooltip') as HTMLElement | null) || editBtn;
+    const previewEditTarget = (previewEditBtn?.closest('.tooltip') as HTMLElement | null) || previewEditBtn;
+
+    if (editTarget) editTarget.classList.toggle('hidden', enabled);
+    if (previewEditTarget) previewEditTarget.classList.toggle('hidden', enabled);
 
     if (saveTarget) saveTarget.classList.toggle('hidden', !enabled);
     if (cancelTarget) cancelTarget.classList.toggle('hidden', !enabled);
-    if (editTarget) editTarget.classList.toggle('hidden', enabled);
 
     // Toggle formatting toolbar
     const fmtToolbar = $('formattingToolbar');
     if (fmtToolbar) fmtToolbar.classList.toggle('hidden', !enabled);
 
+    // Ensure preview is not contenteditable
+    if (preview) preview.contentEditable = 'false';
+
     if (enabled) {
-        // Enter split-view edit mode
         originalContent = currentContent;
+
         container?.classList.add('split-view');
-        
+        container?.classList.remove('preview-edit');
         // Apply preview position (left or right)
         if (currentSettings.previewPosition === 'left') {
             container?.classList.add('preview-left');
@@ -351,23 +376,89 @@ function setEditMode(enabled: boolean) {
         
         if (editor) editor.value = currentContent;
         
-        // IMPORTANT: Scroll both editor and preview to TOP
+        // Cache line height after entering edit mode
         requestAnimationFrame(() => {
+            updateCachedLineHeight();
             if (editor) {
                 editor.scrollTop = 0;
+                editor.scrollLeft = 0;
                 editor.focus();
                 editor.setSelectionRange(0, 0);
             }
             if (preview) preview.scrollTop = 0;
+            // Scroll the container so the editor (left side) is visible
+            if (container) container.scrollLeft = 0;
             
             setTimeout(() => {
-                if (editor) editor.scrollTop = 0;
+                if (editor) {
+                    editor.scrollTop = 0;
+                    editor.scrollLeft = 0;
+                }
                 if (preview) preview.scrollTop = 0;
+                if (container) container.scrollLeft = 0;
             }, 50);
         });
     } else {
         // Exit edit mode
         container?.classList.remove('split-view');
+        container?.classList.remove('preview-edit');
+        container?.classList.remove('preview-left');
+        renderMarkdown(currentContent);
+    }
+
+    updateStatusInfo();
+}
+
+// ===== Preview Edit Mode (WYSIWYG) =====
+function setPreviewEditMode(enabled: boolean) {
+    isPreviewEditMode = enabled;
+    isEditMode = enabled;
+    document.body.classList.toggle('edit-mode', enabled);
+    document.body.classList.toggle('preview-edit-mode', enabled);
+
+    const editBtn = $('toggleEditModeButton');
+    const previewEditBtn = $('previewEditButton');
+    const saveBtn = $('saveEditsButton');
+    const cancelBtn = $('cancelEditsButton');
+    const container = $('markdownContainer');
+    const preview = $('markdownPreview');
+
+    const saveTarget = (saveBtn?.closest('.tooltip') as HTMLElement | null) || saveBtn;
+    const cancelTarget = (cancelBtn?.closest('.tooltip') as HTMLElement | null) || cancelBtn;
+    const editTarget = (editBtn?.closest('.tooltip') as HTMLElement | null) || editBtn;
+    const previewEditTarget = (previewEditBtn?.closest('.tooltip') as HTMLElement | null) || previewEditBtn;
+
+    if (editTarget) editTarget.classList.toggle('hidden', enabled);
+    if (previewEditTarget) previewEditTarget.classList.toggle('hidden', enabled);
+
+    if (saveTarget) saveTarget.classList.toggle('hidden', !enabled);
+    if (cancelTarget) cancelTarget.classList.toggle('hidden', !enabled);
+
+    // Show formatting toolbar in preview edit mode
+    const fmtToolbar = $('formattingToolbar');
+    if (fmtToolbar) fmtToolbar.classList.toggle('hidden', !enabled);
+
+    if (enabled) {
+        originalContent = currentContent;
+
+        container?.classList.remove('split-view');
+        container?.classList.add('preview-edit');
+        container?.classList.remove('preview-left');
+
+        // Render the markdown then make preview editable
+        renderMarkdown(currentContent);
+
+        if (preview) {
+            preview.contentEditable = 'true';
+            preview.focus();
+        }
+    } else {
+        // Exit preview edit mode
+        if (preview) {
+            preview.contentEditable = 'false';
+        }
+        container?.classList.remove('split-view');
+        container?.classList.remove('preview-edit');
         container?.classList.remove('preview-left');
         renderMarkdown(currentContent);
     }
@@ -381,9 +472,17 @@ function performSave(exitAfterSave = false) {
     shouldExitEditMode = exitAfterSave;
     setButtonsEnabled(false);
 
-    const editor = $('markdownEditor') as HTMLTextAreaElement;
-    if (editor) {
-        currentContent = editor.value;
+    if (isPreviewEditMode) {
+        // Convert preview HTML back to markdown
+        const preview = $('markdownPreview');
+        if (preview) {
+            currentContent = turndownService.turndown(preview.innerHTML);
+        }
+    } else {
+        const editor = $('markdownEditor') as HTMLTextAreaElement;
+        if (editor) {
+            currentContent = editor.value;
+        }
     }
 
     vscode.postMessage({ command: 'saveMarkdown', text: currentContent });
@@ -395,8 +494,14 @@ function cancelEdit() {
     if (editor) {
         editor.value = originalContent;
     }
+    const preview = $('markdownPreview');
+    if (preview) preview.contentEditable = 'false';
     renderMarkdown(originalContent);
-    setEditMode(false);
+    if (isPreviewEditMode) {
+        setPreviewEditMode(false);
+    } else {
+        setEditMode(false);
+    }
 }
 
 // ===== Live Preview =====
@@ -416,26 +521,37 @@ function onEditorInput() {
     updateStatusInfo();
 }
 
-// ===== Sync Scroll (improved accuracy using line-based mapping) =====
+// ===== Sync Scroll (proportional with line-based interpolation) =====
 let activeScrollSource: string | null = null; // 'editor' or 'preview' or null
 let scrollTimeout: any = null;
 let cachedDataLineElements: HTMLElement[] = [];
+let cachedLineMap: Array<{line: number, top: number}> = [];
+let cachedEditorLineHeight = 21;
 
 function refreshDataLineCache() {
     const preview = $('markdownPreview');
-    if (!preview) { cachedDataLineElements = []; return; }
+    if (!preview) { cachedDataLineElements = []; cachedLineMap = []; return; }
     cachedDataLineElements = Array.from(preview.querySelectorAll('[data-line]')) as HTMLElement[];
+    // Pre-compute positions to avoid layout reads during scroll
+    cachedLineMap = cachedDataLineElements.map(el => ({
+        line: parseInt(el.getAttribute('data-line') || '0'),
+        top: el.offsetTop
+    }));
 }
 
 function getEditorLineHeight(): number {
+    return cachedEditorLineHeight;
+}
+
+function updateCachedLineHeight() {
     const editor = $('markdownEditor') as HTMLTextAreaElement | null;
-    if (!editor) return 21;
+    if (!editor) return;
     const computed = parseFloat(getComputedStyle(editor).lineHeight);
-    return isNaN(computed) ? 21 : computed;
+    cachedEditorLineHeight = isNaN(computed) ? 21 : computed;
 }
 
 function syncEditorToPreview() {
-    if (!currentSettings.syncScroll) return;
+    if (!currentSettings.syncScroll || isPreviewEditMode) return;
     if (activeScrollSource === 'preview') return;
 
     activeScrollSource = 'editor';
@@ -445,28 +561,39 @@ function syncEditorToPreview() {
     const preview = $('markdownPreview');
     if (!editor || !preview) return;
 
-    const lineHeight = getEditorLineHeight();
-    const scrollTop = editor.scrollTop;
-    const lineNo = Math.floor(scrollTop / lineHeight);
-    const elements = cachedDataLineElements;
-    let target: HTMLElement | null = null;
+    const editorMax = editor.scrollHeight - editor.clientHeight;
+    const previewMax = preview.scrollHeight - preview.clientHeight;
 
-    for (const el of elements) {
-        const l = parseInt(el.getAttribute('data-line') || '0');
-        if (l >= lineNo) { target = el; break; }
+    if (editorMax > 0 && previewMax > 0) {
+        const map = cachedLineMap;
+        if (map.length >= 2) {
+            // Line-based interpolation using cached positions
+            const lineHeight = cachedEditorLineHeight;
+            const editorLine = editor.scrollTop / lineHeight;
+            let before = map[0];
+            let after = map[map.length - 1];
+
+            for (let i = 0; i < map.length; i++) {
+                if (map[i].line <= editorLine) before = map[i];
+                if (map[i].line >= editorLine) { after = map[i]; break; }
+            }
+
+            if (after.line > before.line) {
+                const frac = (editorLine - before.line) / (after.line - before.line);
+                preview.scrollTop = before.top + frac * (after.top - before.top);
+            } else {
+                preview.scrollTop = (editor.scrollTop / editorMax) * previewMax;
+            }
+        } else {
+            preview.scrollTop = (editor.scrollTop / editorMax) * previewMax;
+        }
     }
 
-    if (target) {
-        preview.scrollTop = target.offsetTop;
-    } else if (elements.length > 0 && lineNo > parseInt(elements[elements.length - 1].getAttribute('data-line') || '0')) {
-        preview.scrollTop = preview.scrollHeight;
-    }
-
-    scrollTimeout = setTimeout(() => { activeScrollSource = null; }, 100);
+    scrollTimeout = setTimeout(() => { activeScrollSource = null; }, 200);
 }
 
 function syncPreviewToEditor() {
-    if (!currentSettings.syncScroll) return;
+    if (!currentSettings.syncScroll || isPreviewEditMode) return;
     if (activeScrollSource === 'editor') return;
 
     activeScrollSource = 'preview';
@@ -476,21 +603,35 @@ function syncPreviewToEditor() {
     const preview = $('markdownPreview');
     if (!editor || !preview) return;
 
-    const scrollTop = preview.scrollTop;
-    const elements = cachedDataLineElements;
-    let target: HTMLElement | null = null;
+    const editorMax = editor.scrollHeight - editor.clientHeight;
+    const previewMax = preview.scrollHeight - preview.clientHeight;
 
-    for (const el of elements) {
-        if (el.offsetTop >= scrollTop) { target = el; break; }
+    if (editorMax > 0 && previewMax > 0) {
+        const map = cachedLineMap;
+        if (map.length >= 2) {
+            const scrollTop = preview.scrollTop;
+            let before = map[0];
+            let after = map[map.length - 1];
+
+            for (let i = 0; i < map.length; i++) {
+                if (map[i].top <= scrollTop) before = map[i];
+                if (map[i].top >= scrollTop) { after = map[i]; break; }
+            }
+
+            const lineHeight = cachedEditorLineHeight;
+            if (after.top > before.top) {
+                const frac = (scrollTop - before.top) / (after.top - before.top);
+                const targetLine = before.line + frac * (after.line - before.line);
+                editor.scrollTop = targetLine * lineHeight;
+            } else {
+                editor.scrollTop = (preview.scrollTop / previewMax) * editorMax;
+            }
+        } else {
+            editor.scrollTop = (preview.scrollTop / previewMax) * editorMax;
+        }
     }
 
-    if (target) {
-        const lineNo = parseInt(target.getAttribute('data-line') || '0');
-        const lineHeight = getEditorLineHeight();
-        editor.scrollTop = lineNo * lineHeight;
-    }
-
-    scrollTimeout = setTimeout(() => { activeScrollSource = null; }, 100);
+    scrollTimeout = setTimeout(() => { activeScrollSource = null; }, 200);
 }
 
 const throttledSyncEditorToPreview = throttleRAF(syncEditorToPreview);
@@ -822,8 +963,8 @@ function applySettings(settings: any, persist = false) {
     // Sticky toolbar
     document.body.classList.toggle('sticky-toolbar-enabled', currentSettings.stickyToolbar);
 
-    // Preview position (left or right)
-    if (container && isEditMode) {
+    // Preview position (left or right) - only affects split-view, not outline
+    if (container && isEditMode && !isPreviewEditMode) {
         if (currentSettings.previewPosition === 'left') {
             container.classList.add('preview-left');
         } else {
@@ -969,7 +1110,11 @@ window.addEventListener('message', (event) => {
                 showToast('Saved');
                 originalContent = currentContent;
                 if (shouldExitEditMode) {
-                    setEditMode(false);
+                    if (isPreviewEditMode) {
+                        setPreviewEditMode(false);
+                    } else {
+                        setEditMode(false);
+                    }
                 }
                 shouldExitEditMode = false;
             } else {
@@ -1001,6 +1146,13 @@ function wireButtons() {
             label: 'Split Edit',
             tooltip: 'Edit Markdown side-by-side',
             onClick: () => setEditMode(true)
+        },
+        {
+            id: 'previewEditButton',
+            icon: Icons.ReviewOnly,
+            label: 'Preview Edit',
+            tooltip: 'Edit directly in preview (WYSIWYG)',
+            onClick: () => setPreviewEditMode(true)
         },
         {
             id: 'saveEditsButton',
@@ -1528,6 +1680,12 @@ function trimTrailingWhitespace(editor: HTMLTextAreaElement) {
 
 // Apply formatting from external call (toolbar buttons)
 function applyFormat(action: string) {
+    // WYSIWYG preview-edit mode: use execCommand
+    if (isPreviewEditMode) {
+        applyWysiwygFormat(action);
+        return;
+    }
+
     const editor = $('markdownEditor') as HTMLTextAreaElement;
     if (!editor) return;
     pushUndoState(editor);
@@ -1563,6 +1721,180 @@ function applyFormat(action: string) {
         case 'sortLinesDesc': sortSelectedLines(editor, true); break;
         case 'trimWhitespace': trimTrailingWhitespace(editor); break;
     }
+}
+
+// ===== WYSIWYG Formatting (for Preview Edit mode) =====
+function applyWysiwygFormat(action: string) {
+    const preview = $('markdownPreview');
+    if (!preview) return;
+    preview.focus();
+
+    switch (action) {
+        case 'bold': document.execCommand('bold'); break;
+        case 'italic': document.execCommand('italic'); break;
+        case 'strikethrough': document.execCommand('strikethrough'); break;
+        case 'inlineCode': {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+                const range = sel.getRangeAt(0);
+                const code = document.createElement('code');
+                code.className = 'inline-code';
+                range.surroundContents(code);
+            }
+            break;
+        }
+        case 'heading1': document.execCommand('formatBlock', false, 'H1'); break;
+        case 'heading2': document.execCommand('formatBlock', false, 'H2'); break;
+        case 'heading3': document.execCommand('formatBlock', false, 'H3'); break;
+        case 'bulletList': document.execCommand('insertUnorderedList'); break;
+        case 'orderedList': document.execCommand('insertOrderedList'); break;
+        case 'blockquote': document.execCommand('formatBlock', false, 'BLOCKQUOTE'); break;
+        case 'link': {
+            const url = prompt('Enter URL:', 'https://');
+            if (url) document.execCommand('createLink', false, url);
+            break;
+        }
+        case 'image': {
+            const imgUrl = prompt('Enter image URL:', 'https://');
+            if (imgUrl) document.execCommand('insertImage', false, imgUrl);
+            break;
+        }
+        case 'hr': document.execCommand('insertHorizontalRule'); break;
+        case 'undo': document.execCommand('undo'); break;
+        case 'redo': document.execCommand('redo'); break;
+        case 'table': {
+            const html = '<table class="md-table"><thead><tr><th>Header 1</th><th>Header 2</th><th>Header 3</th></tr></thead><tbody><tr><td>Cell 1</td><td>Cell 2</td><td>Cell 3</td></tr></tbody></table>';
+            document.execCommand('insertHTML', false, html);
+            break;
+        }
+        case 'codeBlock': {
+            const html = '<pre><code>code</code></pre>';
+            document.execCommand('insertHTML', false, html);
+            break;
+        }
+        case 'checkbox': {
+            const html = '<ul><li class="task-item"><input type="checkbox" /> Task item</li></ul>';
+            document.execCommand('insertHTML', false, html);
+            break;
+        }
+        case 'uppercase': {
+            const sel = window.getSelection();
+            if (sel && sel.toString()) {
+                document.execCommand('insertText', false, sel.toString().toUpperCase());
+            }
+            break;
+        }
+        case 'lowercase': {
+            const sel = window.getSelection();
+            if (sel && sel.toString()) {
+                document.execCommand('insertText', false, sel.toString().toLowerCase());
+            }
+            break;
+        }
+        case 'titlecase': {
+            const sel = window.getSelection();
+            if (sel && sel.toString()) {
+                const titled = sel.toString().replace(/\b\w/g, c => c.toUpperCase());
+                document.execCommand('insertText', false, titled);
+            }
+            break;
+        }
+    }
+}
+
+// ===== Resizable Panels =====
+function initResizeHandles() {
+    const container = $('markdownContainer');
+    if (!container) return;
+
+    // Create resize handle for TOC panel
+    const tocHandle = document.createElement('div');
+    tocHandle.className = 'resize-handle resize-handle-toc';
+    tocHandle.id = 'resizeHandleToc';
+
+    // Create resize handle for editor/preview split
+    const splitHandle = document.createElement('div');
+    splitHandle.className = 'resize-handle resize-handle-split';
+    splitHandle.id = 'resizeHandleSplit';
+
+    // Insert handles into container
+    const tocPanel = $('tocPanel');
+    const editorWrapper = container.querySelector('.editor-wrapper');
+    if (tocPanel) tocPanel.after(tocHandle);
+    if (editorWrapper) editorWrapper.after(splitHandle);
+
+    // Wire drag for TOC resize
+    wireResizeHandle(tocHandle, 'toc');
+    // Wire drag for split resize
+    wireResizeHandle(splitHandle, 'split');
+}
+
+function wireResizeHandle(handle: HTMLElement, type: 'toc' | 'split') {
+    let startX = 0;
+    let startLeftWidth = 0;
+    let startRightWidth = 0;
+
+    function onMouseDown(e: MouseEvent) {
+        e.preventDefault();
+        startX = e.clientX;
+
+        if (type === 'toc') {
+            const tocPanel = $('tocPanel');
+            if (tocPanel) startLeftWidth = tocPanel.getBoundingClientRect().width;
+        } else {
+            // For split handle: measure the visual left and right panels
+            // The handle is between whatever is visually on its left and right
+            const handleRect = handle.getBoundingClientRect();
+            const container = $('markdownContainer');
+            if (!container) return;
+            
+            // Find the sibling panels by their visual position
+            const editorWrapper = container.querySelector('.editor-wrapper') as HTMLElement;
+            const preview = $('markdownPreview');
+            if (!editorWrapper || !preview) return;
+            
+            const editorRect = editorWrapper.getBoundingClientRect();
+            const previewRect = preview.getBoundingClientRect();
+            
+            // Determine which is visually left vs right of the handle
+            if (editorRect.left < handleRect.left) {
+                startLeftWidth = editorRect.width;
+                startRightWidth = previewRect.width;
+            } else {
+                startLeftWidth = previewRect.width;
+                startRightWidth = editorRect.width;
+            }
+        }
+
+        document.body.classList.add('resizing');
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    }
+
+    function onMouseMove(e: MouseEvent) {
+        const dx = e.clientX - startX;
+        const container = $('markdownContainer');
+        if (!container) return;
+
+        if (type === 'toc') {
+            const newWidth = Math.max(120, Math.min(500, startLeftWidth + dx));
+            container.style.setProperty('--toc-width', newWidth + 'px');
+        } else {
+            const totalWidth = startLeftWidth + startRightWidth;
+            const newLeft = Math.max(200, Math.min(totalWidth - 200, startLeftWidth + dx));
+            const newRight = totalWidth - newLeft;
+            container.style.setProperty('--split-left', newLeft + 'px');
+            container.style.setProperty('--split-right', newRight + 'px');
+        }
+    }
+
+    function onMouseUp() {
+        document.body.classList.remove('resizing');
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    handle.addEventListener('mousedown', onMouseDown);
 }
 
 // ===== Editor Events =====
@@ -1765,6 +2097,53 @@ function wirePreviewInteractions() {
     if (wired) return;
     (preview as any)._wired = true;
 
+    // WYSIWYG keyboard shortcuts when preview is contenteditable
+    preview.addEventListener('keydown', (e) => {
+        if (!isPreviewEditMode) return;
+        const isMod = e.ctrlKey || e.metaKey;
+
+        if (isMod && e.key.toLowerCase() === 's') {
+            e.preventDefault();
+            performSave(false);
+            return;
+        }
+
+        // Undo/Redo - must explicitly handle since VS Code webview intercepts these
+        if (isMod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            document.execCommand('undo');
+            return;
+        }
+        if (isMod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+            e.preventDefault();
+            document.execCommand('redo');
+            return;
+        }
+
+        if (isMod) {
+            let handled = true;
+            if (e.key === 'b') { applyWysiwygFormat('bold'); }
+            else if (e.key === 'i') { applyWysiwygFormat('italic'); }
+            else if (e.key === 'k') { applyWysiwygFormat('link'); }
+            else if (e.key === 'e' && !e.shiftKey) { applyWysiwygFormat('inlineCode'); }
+            else if (e.key === 'e' && e.shiftKey) { applyWysiwygFormat('codeBlock'); }
+            else if (e.key === 'x' && e.shiftKey) { applyWysiwygFormat('strikethrough'); }
+            else if (e.key === 'l' && !e.shiftKey) { applyWysiwygFormat('bulletList'); }
+            else if (e.key === 'l' && e.shiftKey) { applyWysiwygFormat('orderedList'); }
+            else if (e.key === '1') { applyWysiwygFormat('heading1'); }
+            else if (e.key === '2') { applyWysiwygFormat('heading2'); }
+            else if (e.key === '3') { applyWysiwygFormat('heading3'); }
+            else if (e.key === 'u' && e.shiftKey) { applyWysiwygFormat('uppercase'); }
+            else if (e.key === 'u' && !e.shiftKey) { applyWysiwygFormat('lowercase'); }
+            else { handled = false; }
+
+            if (handled) {
+                e.preventDefault();
+                return;
+            }
+        }
+    });
+
     preview.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         const copyBtn = target.closest('.code-copy') as HTMLElement | null;
@@ -1957,6 +2336,7 @@ wireTocPanel();
 initLightbox();
 initSearchOverlay();
 initScrollSpy();
+initResizeHandles();
 updateHeaderHeight();
 
 // Ensure settings are applied once toolbar is ready

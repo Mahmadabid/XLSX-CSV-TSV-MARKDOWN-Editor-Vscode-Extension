@@ -2,7 +2,7 @@
   "name": "xlsx-viewer",
   "displayName": "XLSX, CSV, TSV & Markdown Editor",
   "description": "View and edit XLSX files with colors, fonts and styles from Excel files (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "publisher": "muhammad-ahmad",
   "engines": {
     "vscode": "^1.60.0"
@@ -225,6 +225,7 @@
   "devDependencies": {
     "@types/mocha": "^8.2.2",
     "@types/node": "14.x",
+    "@types/turndown": "^5.0.6",
     "@types/vscode": "^1.60.0",
     "@typescript-eslint/eslint-plugin": "^8.30.1",
     "@typescript-eslint/parser": "^8.30.1",
@@ -251,7 +252,9 @@
     "markdown-it-mark": "^4.0.0",
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
-    "markdown-it-task-lists": "^2.1.1"
+    "markdown-it-task-lists": "^2.1.1",
+    "turndown": "^7.2.2",
+    "turndown-plugin-gfm": "^1.0.2"
   },
   "license": "MIT",
   "icon": "icon.png"

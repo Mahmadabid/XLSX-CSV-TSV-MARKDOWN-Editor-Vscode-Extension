@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.4 - Markdown Edit & Layout Bug Fixes
+- Added **Preview Edit** mode.
+- Split‑view edit no longer opens with the editor pane scrolled all the way to the right.
+- "Preview on Left" setting respects split‑view layout and no longer collapses the panels vertically.
+- Heading anchor links are hidden while in preview‑edit mode to prevent visual clutter.
+
 ## v1.7.3 - Advanced Markdown Editing & UI Fixes
 - **Outline Toggle Button Fix**: The outline toggle button now shows a visible accent-colored background when active, making it clearly distinguishable from inactive state.
 - **Formatting Toolbar**: A full formatting toolbar appears in edit mode with grouped buttons for text formatting, headings, lists, inserts, undo/redo, line operations, and text transforms.
