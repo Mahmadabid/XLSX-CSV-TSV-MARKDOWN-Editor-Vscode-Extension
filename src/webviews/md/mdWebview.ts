@@ -86,6 +86,11 @@ const previewOnlyTableActions = new Set(['tableAddRowBelow', 'tableRemoveRow', '
 const tableControlActions = ['tableAddRowBelow', 'tableRemoveRow', 'tableAddColumnRight', 'tableRemoveColumn'];
 let lastTableCellContext: HTMLTableCellElement | null = null;
 let lastHoveredTable: HTMLTableElement | null = null;
+let forcedTableActionTable: HTMLTableElement | null = null;
+const maxPreviewHistoryEntries = 200;
+let previewUndoStack: string[] = [];
+let previewRedoStack: string[] = [];
+let previewHistoryTimer: number | null = null;
 
 // ===== Utilities =====
 const $ = Utils.$;
@@ -154,6 +159,132 @@ function setButtonsEnabled(enabled: boolean) {
         const el = $(id) as HTMLButtonElement;
         if (el) el.disabled = !enabled;
     });
+}
+
+function getPreviewSnapshot(): string {
+    const preview = $('markdownPreview');
+    return preview ? preview.innerHTML : '';
+}
+
+function trimPreviewHistory() {
+    if (previewUndoStack.length > maxPreviewHistoryEntries) {
+        previewUndoStack = previewUndoStack.slice(previewUndoStack.length - maxPreviewHistoryEntries);
+    }
+    if (previewRedoStack.length > maxPreviewHistoryEntries) {
+        previewRedoStack = previewRedoStack.slice(previewRedoStack.length - maxPreviewHistoryEntries);
+    }
+}
+
+function pushPreviewUndoSnapshot(snapshot: string, clearRedo = true) {
+    const last = previewUndoStack[previewUndoStack.length - 1];
+    if (last === snapshot) {
+        return;
+    }
+
+    previewUndoStack.push(snapshot);
+    if (clearRedo) {
+        previewRedoStack = [];
+    }
+    trimPreviewHistory();
+}
+
+function capturePreviewHistory() {
+    if (!isPreviewEditMode) {
+        return;
+    }
+    pushPreviewUndoSnapshot(getPreviewSnapshot(), true);
+}
+
+function schedulePreviewHistoryCapture() {
+    if (!isPreviewEditMode) {
+        return;
+    }
+
+    if (previewHistoryTimer !== null) {
+        window.clearTimeout(previewHistoryTimer);
+    }
+
+    previewHistoryTimer = window.setTimeout(() => {
+        previewHistoryTimer = null;
+        capturePreviewHistory();
+    }, 200);
+}
+
+function initializePreviewHistory() {
+    previewUndoStack = [];
+    previewRedoStack = [];
+    const initial = getPreviewSnapshot();
+    previewUndoStack.push(initial);
+    trimPreviewHistory();
+}
+
+function restorePreviewSnapshot(snapshot: string) {
+    const preview = $('markdownPreview');
+    if (!preview) {
+        return;
+    }
+
+    preview.innerHTML = snapshot;
+    preview.contentEditable = 'true';
+    enhancePreviewTablesForEditing();
+    refreshSyncMetrics();
+    requestAnimationFrame(() => {
+        updateScrollSpy();
+        updateProgressBar();
+        reapplySearch();
+        requestLocalImageResolution();
+    });
+}
+
+function performPreviewUndo() {
+    if (!isPreviewEditMode || previewUndoStack.length <= 1) {
+        return;
+    }
+
+    const current = previewUndoStack.pop();
+    if (!current) {
+        return;
+    }
+
+    previewRedoStack.push(current);
+    trimPreviewHistory();
+
+    const previous = previewUndoStack[previewUndoStack.length - 1];
+    if (previous !== undefined) {
+        restorePreviewSnapshot(previous);
+    }
+}
+
+function performPreviewRedo() {
+    if (!isPreviewEditMode || previewRedoStack.length === 0) {
+        return;
+    }
+
+    const next = previewRedoStack.pop();
+    if (!next) {
+        return;
+    }
+
+    pushPreviewUndoSnapshot(next, false);
+    restorePreviewSnapshot(next);
+}
+
+function capturePreviewMutation(beforeSnapshot: string) {
+    if (!isPreviewEditMode) {
+        return;
+    }
+
+    const afterSnapshot = getPreviewSnapshot();
+    if (afterSnapshot === beforeSnapshot) {
+        return;
+    }
+
+    const last = previewUndoStack[previewUndoStack.length - 1];
+    if (last !== beforeSnapshot) {
+        previewUndoStack.push(beforeSnapshot);
+    }
+
+    pushPreviewUndoSnapshot(afterSnapshot, true);
 }
 
 // ===== Markdown-it Setup =====
@@ -568,12 +699,19 @@ function setPreviewEditMode(enabled: boolean) {
         if (preview) {
             preview.contentEditable = 'true';
             enhancePreviewTablesForEditing();
+            initializePreviewHistory();
             preview.focus();
         }
     } else {
         // Exit preview edit mode
         if (preview) {
             preview.contentEditable = 'false';
+        }
+        previewUndoStack = [];
+        previewRedoStack = [];
+        if (previewHistoryTimer !== null) {
+            window.clearTimeout(previewHistoryTimer);
+            previewHistoryTimer = null;
         }
         container?.classList.remove('split-view');
         container?.classList.remove('preview-edit');
@@ -1536,6 +1674,18 @@ function wireButtons() {
 document.addEventListener('keydown', (e) => {
     const isCmdOrCtrl = e.ctrlKey || e.metaKey;
 
+    if (isPreviewEditMode && isCmdOrCtrl && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        performPreviewUndo();
+        return;
+    }
+
+    if (isPreviewEditMode && isCmdOrCtrl && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        performPreviewRedo();
+        return;
+    }
+
     if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (isEditMode) {
@@ -2264,6 +2414,22 @@ function getActiveTableSelectionContext(): TableSelectionContext | null {
     };
 }
 
+function buildContextFromCell(cell: HTMLTableCellElement): TableSelectionContext | null {
+    const row = cell.closest('tr') as HTMLTableRowElement | null;
+    const table = cell.closest('table') as HTMLTableElement | null;
+    if (!row || !table) {
+        return null;
+    }
+
+    return {
+        table,
+        row,
+        cell,
+        rowIndex: row.rowIndex,
+        colIndex: cell.cellIndex
+    };
+}
+
 function updateLastTableCellContextFromSelection() {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) {
@@ -2338,7 +2504,36 @@ function buildContextFromTableEnd(table: HTMLTableElement): TableSelectionContex
     };
 }
 
+function getForcedTableSelectionContext(): TableSelectionContext | null {
+    if (!forcedTableActionTable || !document.contains(forcedTableActionTable)) {
+        return null;
+    }
+
+    const table = forcedTableActionTable;
+    const active = getActiveTableSelectionContext();
+    if (active && active.table === table) {
+        return active;
+    }
+
+    if (lastTableCellContext) {
+        const lastContextTable = lastTableCellContext.closest('table') as HTMLTableElement | null;
+        if (lastContextTable === table) {
+            const fromLastCell = buildContextFromCell(lastTableCellContext);
+            if (fromLastCell) {
+                return fromLastCell;
+            }
+        }
+    }
+
+    return buildContextFromTableEnd(table);
+}
+
 function resolveInsertContext(): TableSelectionContext | null {
+    const forced = getForcedTableSelectionContext();
+    if (forced) {
+        return forced;
+    }
+
     const active = getActiveTableSelectionContext();
     if (active) {
         return active;
@@ -2398,7 +2593,7 @@ function addTableRowBelow() {
 }
 
 function removeCurrentTableRow() {
-    const context = getActiveTableSelectionContext();
+    const context = getForcedTableSelectionContext() || getActiveTableSelectionContext();
     if (!context) {
         showToast('Place the caret inside a table cell first');
         return;
@@ -2448,7 +2643,7 @@ function addTableColumnRight() {
 }
 
 function removeCurrentTableColumn() {
-    const context = getActiveTableSelectionContext();
+    const context = getForcedTableSelectionContext() || getActiveTableSelectionContext();
     if (!context) {
         showToast('Place the caret inside a table cell first');
         return;
@@ -2479,6 +2674,18 @@ function applyWysiwygFormat(action: string) {
     const preview = $('markdownPreview');
     if (!preview) return;
     preview.focus();
+
+    if (action === 'undo') {
+        performPreviewUndo();
+        return;
+    }
+    if (action === 'redo') {
+        performPreviewRedo();
+        return;
+    }
+
+    const needsManualHistoryCapture = action === 'table' || tableControlActions.includes(action);
+    const beforeSnapshot = needsManualHistoryCapture ? getPreviewSnapshot() : '';
 
     switch (action) {
         case 'bold': document.execCommand('bold'); break;
@@ -2511,8 +2718,6 @@ function applyWysiwygFormat(action: string) {
             break;
         }
         case 'hr': document.execCommand('insertHorizontalRule'); break;
-        case 'undo': document.execCommand('undo'); break;
-        case 'redo': document.execCommand('redo'); break;
         case 'table': {
             const html = '<table class="md-table"><thead><tr><th>Header 1</th><th>Header 2</th><th>Header 3</th></tr></thead><tbody><tr><td>Cell 1</td><td>Cell 2</td><td>Cell 3</td></tr></tbody></table>';
             document.execCommand('insertHTML', false, html);
@@ -2555,6 +2760,10 @@ function applyWysiwygFormat(action: string) {
             }
             break;
         }
+    }
+
+    if (needsManualHistoryCapture) {
+        capturePreviewMutation(beforeSnapshot);
     }
 }
 
@@ -2870,12 +3079,12 @@ function wirePreviewInteractions() {
         // Undo/Redo - must explicitly handle since VS Code webview intercepts these
         if (isMod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
             e.preventDefault();
-            document.execCommand('undo');
+            performPreviewUndo();
             return;
         }
         if (isMod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
             e.preventDefault();
-            document.execCommand('redo');
+            performPreviewRedo();
             return;
         }
 
@@ -2915,7 +3124,12 @@ function wirePreviewInteractions() {
             }
             const action = tableTool.getAttribute('data-table-action') || '';
             if (tableControlActions.includes(action)) {
-                applyWysiwygFormat(action);
+                forcedTableActionTable = hostTable;
+                try {
+                    applyWysiwygFormat(action);
+                } finally {
+                    forcedTableActionTable = null;
+                }
             }
             return;
         }
@@ -2979,6 +3193,10 @@ function wirePreviewInteractions() {
 
     preview.addEventListener('keyup', () => {
         updateLastTableCellContextFromSelection();
+    });
+
+    preview.addEventListener('input', () => {
+        schedulePreviewHistoryCapture();
     });
 
     preview.addEventListener('mouseover', (e) => {

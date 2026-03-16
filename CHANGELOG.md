@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.8 - Markdown Preview Edit Undo/Redo Fixes
+- Fixed Preview Edit undo/redo so `Ctrl+Z` and `Ctrl+Y` now work reliably for table row/column add/remove actions.
+- Prevented undo/redo shortcuts in Preview Edit from falling through to VS Code and undoing unrelated file editor actions.
+- Added dedicated Preview Edit history tracking for contenteditable changes and table structure mutations.
+- Fixed an issue where the Add Row, Column action could modify the wrong table when multiple tables are present.
+
 ## v1.7.7 - Markdown Outline & Heading Cleanup
 - Fixed a regression where old heading copy-link artifacts could pollute the Outline and rendered heading text.
 - Markdown save now strips stale internal `[ # ](#... "Copy link")` heading fragments left behind by earlier saves.

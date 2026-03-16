@@ -1304,16 +1304,11 @@ body.sticky-toolbar-enabled .formatting-toolbar {
     left: 0;
     height: 3px;
     width: 0%;
-    background: linear-gradient(90deg, var(--accent-color), var(--accent-hover));
+    background: linear-gradient(90deg, var(--progress-bar-start), var(--progress-bar-end));
     z-index: 100001;
     transition: width 0.15s ease-out;
     border-radius: 0 2px 2px 0;
-    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
-}
-
-body.dark-mode .reading-progress-bar {
-    background: linear-gradient(90deg, var(--accent-color), var(--accent-hover));
-    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 10px var(--progress-bar-glow);
 }
 
 /* ===== Heading Anchor Links ===== */

@@ -91,6 +91,11 @@
     --copy-flash-bg: rgba(36, 161, 72, 0.2);
     --link-color: #0071e3;
     --focus-outline: rgba(0, 113, 227, 0.2);
+
+    /* Reading progress bar */
+    --progress-bar-start: color-mix(in srgb, var(--accent-color) 88%, var(--text-color) 12%);
+    --progress-bar-end: var(--accent-hover);
+    --progress-bar-glow: color-mix(in srgb, var(--accent-color) 42%, transparent);
     
     /* Button Shadows */
     --button-shadow: 0 1px 3px rgba(0, 113, 227, 0.2);
@@ -199,6 +204,11 @@ body.dark-mode {
 
     --focus-outline: rgba(41, 151, 255, 0.3);
 
+    /* Reading progress bar */
+    --progress-bar-start: color-mix(in srgb, var(--accent-color) 90%, #ffffff 10%);
+    --progress-bar-end: var(--accent-hover);
+    --progress-bar-glow: color-mix(in srgb, var(--accent-color) 52%, transparent);
+
     /* Interactive states */
     --hover-bg: rgba(255, 255, 255, 0.08);
     --active-bg: rgba(255, 255, 255, 0.12);
@@ -296,6 +306,11 @@ body.vscode-theme {
 
     /* Focus */
     --focus-outline: color-mix(in srgb, var(--accent-color) 20%, transparent);
+
+    /* Reading progress bar */
+    --progress-bar-start: var(--vscode-progressBar-background, var(--accent-color));
+    --progress-bar-end: color-mix(in srgb, var(--vscode-progressBar-background, var(--accent-color)) 76%, var(--vscode-focusBorder, var(--accent-color)) 24%);
+    --progress-bar-glow: color-mix(in srgb, var(--vscode-progressBar-background, var(--accent-color)) 45%, transparent);
 
     /* Glass Effects for VS Code Theme */
     --glass-bg: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff)) 85%, transparent);
