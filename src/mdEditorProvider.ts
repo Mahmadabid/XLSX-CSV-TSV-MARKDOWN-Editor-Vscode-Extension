@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 
 export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
     constructor(private readonly context: vscode.ExtensionContext) { }
@@ -19,13 +20,17 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
     ): Promise<void> {
         try {
             const filePath = document.uri.fsPath;
+            const documentDirUri = vscode.Uri.file(path.dirname(filePath));
+            const workspaceFolders = vscode.workspace.workspaceFolders?.map(f => f.uri) ?? [];
 
             // Set up webview
             webviewPanel.webview.options = {
                 enableScripts: true,
                 localResourceRoots: [
                     vscode.Uri.joinPath(this.context.extensionUri, 'resources'),
-                    vscode.Uri.joinPath(this.context.extensionUri, 'dist')
+                    vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
+                    documentDirUri,
+                    ...workspaceFolders
                 ]
             };
             webviewPanel.webview.html = this.getWebviewContent(webviewPanel);
@@ -42,7 +47,10 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             webviewPanel.webview.postMessage({
                                 command: 'initMarkdown',
                                 content,
-                                fileName: vscode.workspace.asRelativePath(document.uri)
+                                fileName: vscode.workspace.asRelativePath(document.uri),
+                                documentUri: document.uri.toString(),
+                                documentDirUri: documentDirUri.toString(),
+                                workspaceFolderUri: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString() || null
                             });
 
                             // Calculate if MD is enabled as default
@@ -78,6 +86,36 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             });
                         } catch (err) {
                             vscode.window.showErrorMessage(`Error reading Markdown file: ${err}`);
+                        }
+                        break;
+
+                    case 'resolveImageUris':
+                        try {
+                            const requestedSources = Array.isArray(message.sources) ? message.sources : [];
+                            const resolved: Record<string, string> = {};
+
+                            for (const source of requestedSources) {
+                                if (typeof source !== 'string') {
+                                    continue;
+                                }
+
+                                const trimmed = source.trim();
+                                if (!trimmed) {
+                                    continue;
+                                }
+
+                                const resolvedUri = this.resolveMarkdownImageUri(trimmed, document.uri, webviewPanel.webview);
+                                if (resolvedUri) {
+                                    resolved[trimmed] = resolvedUri;
+                                }
+                            }
+
+                            webviewPanel.webview.postMessage({
+                                command: 'resolvedImageUris',
+                                resolved
+                            });
+                        } catch (err) {
+                            console.error('Failed resolving markdown image URIs:', err);
                         }
                         break;
 
@@ -352,5 +390,44 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             <script src="${scriptUri}"></script>
         </body>
         </html>`;
+    }
+
+    private resolveMarkdownImageUri(rawSource: string, documentUri: vscode.Uri, webview: vscode.Webview): string | null {
+        if (!rawSource || /^https?:\/\//i.test(rawSource) || /^data:/i.test(rawSource) || /^#/.test(rawSource)) {
+            return null;
+        }
+
+        // Keep query/hash on final URL after converting the base file URI.
+        const match = rawSource.match(/^([^?#]*)([?#].*)?$/);
+        const sourcePath = (match?.[1] || '').trim();
+        const suffix = match?.[2] || '';
+        if (!sourcePath) {
+            return null;
+        }
+
+        const normalized = sourcePath.replace(/\\/g, '/');
+
+        try {
+            if (/^file:/i.test(normalized)) {
+                return webview.asWebviewUri(vscode.Uri.parse(normalized)).toString() + suffix;
+            }
+
+            const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri)?.uri;
+
+            if (/^\//.test(normalized) && workspaceFolder) {
+                const rel = normalized.replace(/^\/+/, '');
+                const absolute = path.join(workspaceFolder.fsPath, rel);
+                return webview.asWebviewUri(vscode.Uri.file(absolute)).toString() + suffix;
+            }
+
+            if (path.isAbsolute(normalized)) {
+                return webview.asWebviewUri(vscode.Uri.file(normalized)).toString() + suffix;
+            }
+
+            const absolute = path.resolve(path.dirname(documentUri.fsPath), normalized);
+            return webview.asWebviewUri(vscode.Uri.file(absolute)).toString() + suffix;
+        } catch {
+            return null;
+        }
     }
 }

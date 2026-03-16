@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.7.5 - Local image support in Markdown preview
+- Fixed an issue where local image paths (relative/absolute/file URIs) in Markdown did not load in the webview preview.
+
 ## v1.7.4 - Markdown Edit & Layout Bug Fixes
 - Added **Preview Edit** mode.
 - Split‑view edit no longer opens with the editor pane scrolled all the way to the right.

@@ -55,6 +55,7 @@ let shouldExitEditMode = false;
 let originalContent = '';
 let currentContent = '';
 let toolbarManager: ToolbarManager | null = null;
+const resolvedImageUriCache = new Map<string, string>();
 
 // Turndown (HTML -> Markdown)
 const turndownService = new TurndownService({
@@ -100,6 +101,18 @@ function escapeHtmlAttr(value: string) {
         .replace(/"/g, '&quot;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
+}
+
+function isRemoteOrInlineUri(value: string): boolean {
+    return /^(https?:|data:|mailto:|#)/i.test(value);
+}
+
+function shouldResolveLocalImage(value: string): boolean {
+    const src = (value || '').trim();
+    if (!src) {
+        return false;
+    }
+    return !isRemoteOrInlineUri(src);
 }
 
 function wrapCodeLines(html: string): string {
@@ -225,8 +238,68 @@ const defaultImageRender = md.renderer.rules.image || function(tokens: any, idx:
 md.renderer.rules.image = function(tokens: any, idx: number, options: any, env: any, self: any) {
     tokens[idx].attrJoin('class', 'md-image zoomable');
     tokens[idx].attrSet('loading', 'lazy');
+    const src = (tokens[idx].attrGet('src') || '').trim();
+    if (shouldResolveLocalImage(src)) {
+        const resolved = resolvedImageUriCache.get(src);
+        if (resolved) {
+            tokens[idx].attrSet('src', resolved);
+        } else {
+            tokens[idx].attrSet('data-md-src', src);
+        }
+    }
     return defaultImageRender(tokens, idx, options, env, self);
 };
+
+function requestLocalImageResolution() {
+    const preview = $('markdownPreview');
+    if (!preview) return;
+
+    const pending = new Set<string>();
+    preview.querySelectorAll('img[data-md-src]').forEach((node) => {
+        const src = (node.getAttribute('data-md-src') || '').trim();
+        if (!src || resolvedImageUriCache.has(src)) {
+            return;
+        }
+        pending.add(src);
+    });
+
+    if (pending.size === 0) {
+        return;
+    }
+
+    vscode.postMessage({
+        command: 'resolveImageUris',
+        sources: Array.from(pending)
+    });
+}
+
+function applyResolvedImageUris(resolved: Record<string, string>) {
+    if (!resolved || typeof resolved !== 'object') {
+        return;
+    }
+
+    Object.entries(resolved).forEach(([source, uri]) => {
+        if (!source || !uri) {
+            return;
+        }
+        resolvedImageUriCache.set(source, uri);
+    });
+
+    const preview = $('markdownPreview');
+    if (!preview) {
+        return;
+    }
+
+    preview.querySelectorAll('img[data-md-src]').forEach((node) => {
+        const source = (node.getAttribute('data-md-src') || '').trim();
+        const uri = resolvedImageUriCache.get(source);
+        if (!uri) {
+            return;
+        }
+        node.setAttribute('src', uri);
+        node.removeAttribute('data-md-src');
+    });
+}
 
 // Fence (code blocks) needs special handling as it's a self-closing block token in terms of rendering
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -319,6 +392,7 @@ function renderMarkdown(content: string) {
             updateScrollSpy();
             updateProgressBar();
             reapplySearch();
+            requestLocalImageResolution();
         });
     }
 }
@@ -1094,6 +1168,7 @@ window.addEventListener('message', (event) => {
 
             currentContent = m.content || '';
             originalContent = currentContent;
+            resolvedImageUriCache.clear();
             renderMarkdown(currentContent);
             updateStatusInfo();
             break;
@@ -1121,6 +1196,10 @@ window.addEventListener('message', (event) => {
                 showToast('Error saving');
                 shouldExitEditMode = false;
             }
+            break;
+
+        case 'resolvedImageUris':
+            applyResolvedImageUris(m.resolved || {});
             break;
     }
 });
