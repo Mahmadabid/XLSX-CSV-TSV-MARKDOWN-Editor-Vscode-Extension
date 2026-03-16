@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.7 - Markdown Outline & Heading Cleanup
+- Fixed a regression where old heading copy-link artifacts could pollute the Outline and rendered heading text.
+- Markdown save now strips stale internal `[ # ](#... "Copy link")` heading fragments left behind by earlier saves.
+- Improved split-view sync scroll mapping so editor and preview stay aligned more reliably after resize and wrapped content changes.
+- Fixed the outline panel showing unnecessary information for headings that have copy links.
+
 ## v1.7.6 - Markdown Preview Edit & Code Block Fixes
 - Fixed a Preview Edit save bug where headings could gain extra `#` characters because heading anchor UI leaked into markdown conversion.
 - Tightened the code block line-number gutter to remove the leftover blank space before line numbers.

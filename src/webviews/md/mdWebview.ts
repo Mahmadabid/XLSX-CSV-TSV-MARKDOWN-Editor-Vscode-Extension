@@ -216,6 +216,7 @@ md.renderer.rules.paragraph_open = injectLineNumbers;
 md.renderer.rules.heading_open = injectLineNumbers;
 md.renderer.rules.bullet_list_open = injectLineNumbers;
 md.renderer.rules.ordered_list_open = injectLineNumbers;
+md.renderer.rules.list_item_open = injectLineNumbers;
 md.renderer.rules.blockquote_open = injectLineNumbers;
 md.renderer.rules.hr = injectLineNumbers;
 
@@ -300,9 +301,12 @@ function applyResolvedImageUris(resolved: Record<string, string>) {
         if (!uri) {
             return;
         }
+        node.addEventListener('load', refreshDataLineCache, { once: true });
         node.setAttribute('src', uri);
         node.removeAttribute('data-md-src');
     });
+
+    refreshDataLineCache();
 }
 
 // Fence (code blocks) needs special handling as it's a self-closing block token in terms of rendering
@@ -343,7 +347,7 @@ function addHeadingIds(tokens: any[]) {
         const token = tokens[i];
         if (token.type === 'heading_open') {
             const inline = tokens[i + 1];
-            const text = inline && inline.type === 'inline' ? inline.content : '';
+            const text = inline && inline.type === 'inline' ? normalizeHeadingText(inline.content) : '';
             const baseSlug = slugify(text);
             if (!baseSlug) continue;
 
@@ -356,13 +360,42 @@ function addHeadingIds(tokens: any[]) {
     }
 }
 
+function stripHeadingCopyLinkArtifacts(text: string): string {
+    if (!text) {
+        return '';
+    }
+
+    return text
+        .replace(/\s*\[#\]\(#[^)\s]+(?:\s+"Copy link")?\)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeHeadingText(text: string): string {
+    const stripped = stripHeadingCopyLinkArtifacts(text);
+    return md.utils.unescapeAll(stripped);
+}
+
+function sanitizeMarkdownCopyLinkArtifacts(markdown: string): string {
+    if (!markdown) {
+        return '';
+    }
+
+    return markdown.split('\n').map((line) => {
+        if (!/^\s{0,3}#{1,6}\s+/.test(line)) {
+            return line;
+        }
+        return stripHeadingCopyLinkArtifacts(line);
+    }).join('\n');
+}
+
 function buildToc(tokens: any[]) {
     const items: Array<{ id: string; level: number; text: string }> = [];
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         if (token.type === 'heading_open') {
             const inline = tokens[i + 1];
-            const text = inline && inline.type === 'inline' ? inline.content : '';
+            const text = inline && inline.type === 'inline' ? normalizeHeadingText(inline.content) : '';
             const id = token.attrGet('id');
             const level = parseInt((token.tag || 'h2').replace('h', ''), 10);
             if (id && text) {
@@ -386,12 +419,18 @@ function renderMarkdown(content: string) {
     const preview = $('markdownPreview');
     if (preview) {
         const env: any = {};
-        const tokens = md.parse(content || '', env);
+        const normalizedContent = sanitizeMarkdownCopyLinkArtifacts(content || '');
+        const tokens = md.parse(normalizedContent, env);
         addHeadingIds(tokens);
         preview.innerHTML = md.renderer.render(tokens, md.options, env);
+        preview.querySelectorAll('img').forEach((node) => {
+            if (!(node instanceof HTMLImageElement)) return;
+            if (!node.complete) {
+                node.addEventListener('load', refreshDataLineCache, { once: true });
+            }
+        });
         updateToc(tokens);
-        refreshDataLineCache();
-        updateCachedLineHeight();
+        refreshSyncMetrics();
         requestAnimationFrame(() => {
             updateScrollSpy();
             updateProgressBar();
@@ -573,6 +612,12 @@ function performSave(exitAfterSave = false) {
         }
     }
 
+    currentContent = sanitizeMarkdownCopyLinkArtifacts(currentContent);
+    const editor = $('markdownEditor') as HTMLTextAreaElement | null;
+    if (editor && editor.value !== currentContent) {
+        editor.value = currentContent;
+    }
+
     vscode.postMessage({ command: 'saveMarkdown', text: currentContent });
 }
 
@@ -613,21 +658,176 @@ function onEditorInput() {
 let activeScrollSource: string | null = null; // 'editor' or 'preview' or null
 let scrollTimeout: any = null;
 let cachedDataLineElements: HTMLElement[] = [];
-let cachedLineMap: Array<{line: number, top: number}> = [];
+let cachedPreviewLineMap: Array<{line: number, top: number}> = [];
+let cachedEditorLineMap: Array<{line: number, top: number}> = [];
 let cachedEditorLineHeight = 21;
+let editorLineMeasureHost: HTMLDivElement | null = null;
+
+function normalizeLineMap(entries: Array<{line: number, top: number}>): Array<{line: number, top: number}> {
+    const sorted = entries
+        .filter(entry => Number.isFinite(entry.line) && Number.isFinite(entry.top))
+        .sort((a, b) => a.line - b.line || a.top - b.top);
+
+    const deduped: Array<{line: number, top: number}> = [];
+    for (const entry of sorted) {
+        const last = deduped[deduped.length - 1];
+        if (!last || last.line !== entry.line) {
+            deduped.push(entry);
+        }
+    }
+
+    return deduped;
+}
+
+function findAnchorsForTop(map: Array<{line: number, top: number}>, top: number) {
+    let before = map[0];
+    let after = map[map.length - 1];
+
+    for (let i = 0; i < map.length; i++) {
+        if (map[i].top <= top) {
+            before = map[i];
+        }
+        if (map[i].top >= top) {
+            after = map[i];
+            break;
+        }
+    }
+
+    return { before, after };
+}
+
+function findAnchorsForLine(map: Array<{line: number, top: number}>, line: number) {
+    let before = map[0];
+    let after = map[map.length - 1];
+
+    for (let i = 0; i < map.length; i++) {
+        if (map[i].line <= line) {
+            before = map[i];
+        }
+        if (map[i].line >= line) {
+            after = map[i];
+            break;
+        }
+    }
+
+    return { before, after };
+}
+
+function interpolateLineFromTop(map: Array<{line: number, top: number}>, top: number): number {
+    if (map.length === 0) {
+        return 0;
+    }
+    if (map.length === 1) {
+        return map[0].line;
+    }
+
+    const { before, after } = findAnchorsForTop(map, top);
+    if (after.top > before.top) {
+        const frac = (top - before.top) / (after.top - before.top);
+        return before.line + frac * (after.line - before.line);
+    }
+
+    return before.line;
+}
+
+function interpolateTopFromLine(map: Array<{line: number, top: number}>, line: number): number {
+    if (map.length === 0) {
+        return 0;
+    }
+    if (map.length === 1) {
+        return map[0].top;
+    }
+
+    const { before, after } = findAnchorsForLine(map, line);
+    if (after.line > before.line) {
+        const frac = (line - before.line) / (after.line - before.line);
+        return before.top + frac * (after.top - before.top);
+    }
+
+    return before.top;
+}
+
+function ensureEditorLineMeasureHost(editor: HTMLTextAreaElement): HTMLDivElement {
+    if (!editorLineMeasureHost) {
+        editorLineMeasureHost = document.createElement('div');
+        editorLineMeasureHost.id = 'editorLineMeasureHost';
+        document.body.appendChild(editorLineMeasureHost);
+    }
+
+    const style = getComputedStyle(editor);
+    editorLineMeasureHost.style.position = 'absolute';
+    editorLineMeasureHost.style.visibility = 'hidden';
+    editorLineMeasureHost.style.pointerEvents = 'none';
+    editorLineMeasureHost.style.left = '-100000px';
+    editorLineMeasureHost.style.top = '0';
+    editorLineMeasureHost.style.zIndex = '-1';
+    editorLineMeasureHost.style.boxSizing = 'border-box';
+    editorLineMeasureHost.style.overflow = 'hidden';
+    editorLineMeasureHost.style.width = `${editor.clientWidth}px`;
+    editorLineMeasureHost.style.padding = style.padding;
+    editorLineMeasureHost.style.border = '0';
+    editorLineMeasureHost.style.fontFamily = style.fontFamily;
+    editorLineMeasureHost.style.fontSize = style.fontSize;
+    editorLineMeasureHost.style.fontWeight = style.fontWeight;
+    editorLineMeasureHost.style.fontStyle = style.fontStyle;
+    editorLineMeasureHost.style.letterSpacing = style.letterSpacing;
+    editorLineMeasureHost.style.lineHeight = style.lineHeight;
+    editorLineMeasureHost.style.tabSize = style.tabSize;
+    editorLineMeasureHost.style.whiteSpace = currentSettings.wordWrap ? 'pre-wrap' : 'pre';
+    editorLineMeasureHost.style.wordWrap = currentSettings.wordWrap ? 'break-word' : 'normal';
+    editorLineMeasureHost.style.overflowWrap = currentSettings.wordWrap ? 'break-word' : 'normal';
+
+    return editorLineMeasureHost;
+}
+
+function refreshEditorLineCache() {
+    const editor = $('markdownEditor') as HTMLTextAreaElement | null;
+    if (!editor || editor.clientWidth <= 0) {
+        cachedEditorLineMap = [];
+        return;
+    }
+
+    const measureHost = ensureEditorLineMeasureHost(editor);
+    measureHost.replaceChildren();
+
+    const fragment = document.createDocumentFragment();
+    const lines = editor.value.split('\n');
+
+    lines.forEach((line, index) => {
+        const row = document.createElement('div');
+        row.textContent = line.length > 0 ? line : '\u200b';
+        row.setAttribute('data-editor-line', String(index));
+        fragment.appendChild(row);
+    });
+
+    measureHost.appendChild(fragment);
+    const rows = Array.from(measureHost.querySelectorAll('[data-editor-line]')) as HTMLElement[];
+    cachedEditorLineMap = rows.map((row, index) => ({
+        line: index,
+        top: row.offsetTop
+    }));
+}
+
+function refreshSyncMetrics() {
+    refreshDataLineCache();
+    refreshEditorLineCache();
+    updateCachedLineHeight();
+}
 
 function refreshDataLineCache() {
     const preview = $('markdownPreview');
-    if (!preview) { cachedDataLineElements = []; cachedLineMap = []; return; }
+    if (!preview) {
+        cachedDataLineElements = [];
+        cachedPreviewLineMap = [];
+        return;
+    }
     cachedDataLineElements = Array.from(preview.querySelectorAll('[data-line]')) as HTMLElement[];
-    // Compute positions relative to the preview scroll container using getBoundingClientRect
-    // so values are correct to compare against preview.scrollTop
     const previewTop = preview.getBoundingClientRect().top;
     const scrollOffset = preview.scrollTop;
-    cachedLineMap = cachedDataLineElements.map(el => ({
+    cachedPreviewLineMap = normalizeLineMap(cachedDataLineElements.map(el => ({
         line: parseInt(el.getAttribute('data-line') || '0'),
         top: el.getBoundingClientRect().top - previewTop + scrollOffset
-    }));
+    })));
 }
 
 function getEditorLineHeight(): number {
@@ -656,25 +856,9 @@ function syncEditorToPreview() {
     const previewMax = preview.scrollHeight - preview.clientHeight;
 
     if (editorMax > 0 && previewMax > 0) {
-        const map = cachedLineMap;
-        if (map.length >= 2) {
-            // Line-based interpolation using cached positions
-            const lineHeight = cachedEditorLineHeight;
-            const editorLine = editor.scrollTop / lineHeight;
-            let before = map[0];
-            let after = map[map.length - 1];
-
-            for (let i = 0; i < map.length; i++) {
-                if (map[i].line <= editorLine) before = map[i];
-                if (map[i].line >= editorLine) { after = map[i]; break; }
-            }
-
-            if (after.line > before.line) {
-                const frac = (editorLine - before.line) / (after.line - before.line);
-                preview.scrollTop = before.top + frac * (after.top - before.top);
-            } else {
-                preview.scrollTop = (editor.scrollTop / editorMax) * previewMax;
-            }
+        if (cachedEditorLineMap.length >= 2 && cachedPreviewLineMap.length >= 2) {
+            const sourceLine = interpolateLineFromTop(cachedEditorLineMap, editor.scrollTop);
+            preview.scrollTop = Math.max(0, Math.min(previewMax, interpolateTopFromLine(cachedPreviewLineMap, sourceLine)));
         } else {
             preview.scrollTop = (editor.scrollTop / editorMax) * previewMax;
         }
@@ -698,25 +882,9 @@ function syncPreviewToEditor() {
     const previewMax = preview.scrollHeight - preview.clientHeight;
 
     if (editorMax > 0 && previewMax > 0) {
-        const map = cachedLineMap;
-        if (map.length >= 2) {
-            const scrollTop = preview.scrollTop;
-            let before = map[0];
-            let after = map[map.length - 1];
-
-            for (let i = 0; i < map.length; i++) {
-                if (map[i].top <= scrollTop) before = map[i];
-                if (map[i].top >= scrollTop) { after = map[i]; break; }
-            }
-
-            const lineHeight = cachedEditorLineHeight;
-            if (after.top > before.top) {
-                const frac = (scrollTop - before.top) / (after.top - before.top);
-                const targetLine = before.line + frac * (after.line - before.line);
-                editor.scrollTop = targetLine * lineHeight;
-            } else {
-                editor.scrollTop = (preview.scrollTop / previewMax) * editorMax;
-            }
+        if (cachedEditorLineMap.length >= 2 && cachedPreviewLineMap.length >= 2) {
+            const sourceLine = interpolateLineFromTop(cachedPreviewLineMap, preview.scrollTop);
+            editor.scrollTop = Math.max(0, Math.min(editorMax, interpolateTopFromLine(cachedEditorLineMap, sourceLine)));
         } else {
             editor.scrollTop = (preview.scrollTop / previewMax) * editorMax;
         }
@@ -1050,6 +1218,8 @@ function applySettings(settings: any, persist = false) {
     if (editor) {
         editor.style.whiteSpace = currentSettings.wordWrap ? 'pre-wrap' : 'pre';
     }
+
+    refreshSyncMetrics();
 
     // Sticky toolbar
     document.body.classList.toggle('sticky-toolbar-enabled', currentSettings.stickyToolbar);
@@ -2478,6 +2648,7 @@ function wireResizeHandle(handle: HTMLElement, type: 'toc' | 'split') {
         document.body.classList.remove('resizing');
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        refreshSyncMetrics();
     }
 
     handle.addEventListener('mousedown', onMouseDown);
@@ -2496,6 +2667,8 @@ function wireEditor() {
     if (preview) {
         preview.addEventListener('scroll', throttledSyncPreviewToEditor, { passive: true });
     }
+
+    window.addEventListener('resize', refreshSyncMetrics);
 
     // Save initial undo state
     pushUndoState(editor);
