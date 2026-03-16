@@ -488,6 +488,8 @@ body.resizing * {
     padding: 32px;
     overflow-y: auto;
     max-width: 100%;
+    color: var(--text-color);
+    background: var(--bg-color);
 }
 
 .markdown-preview.hidden {
@@ -529,7 +531,7 @@ body.resizing * {
 }
 
 .markdown-preview a {
-    color: var(--accent-color);
+    color: var(--link-color);
     text-decoration: none;
 }
 
@@ -576,11 +578,11 @@ body.resizing * {
 .markdown-preview .code-lang {
     font-size: 11px;
     font-family: var(--font-mono);
-    color: var(--text-muted);
+    color: var(--text-secondary);
 }
 
 .markdown-preview .code-lang.muted {
-    opacity: 0.7;
+    opacity: 0.9;
 }
 
 .markdown-preview .code-block-header {
@@ -621,6 +623,10 @@ body.resizing * {
     font-size: 85%;
     line-height: 1.45;
     margin: 0;
+}
+
+body.show-line-numbers .markdown-preview pre {
+    padding-left: 4px;
 }
 
 .markdown-preview pre code {
@@ -754,6 +760,12 @@ body.resizing * {
     border: 1px solid var(--border-color);
 }
 
+body.preview-edit-mode .markdown-preview table.md-table th,
+body.preview-edit-mode .markdown-preview table.md-table td {
+    height: 36px;
+    vertical-align: top;
+}
+
 .markdown-preview table.md-table th {
     background: var(--header-bg);
     font-weight: 600;
@@ -761,6 +773,81 @@ body.resizing * {
 
 .markdown-preview table.md-table tr:nth-child(2n) {
     background: var(--header-bg);
+}
+
+/* Hover controls under editable tables (preview-edit mode only) */
+body.preview-edit-mode .markdown-preview .table-edit-wrap {
+    position: relative;
+    display: inline-block;
+    margin: 16px 0;
+    max-width: 100%;
+}
+
+body.preview-edit-mode .markdown-preview .table-edit-wrap table.md-table {
+    margin: 0;
+}
+
+body.preview-edit-mode .markdown-preview .table-hover-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--toolbar-bg, var(--panel-bg));
+    box-shadow: var(--shadow-sm);
+    opacity: 0;
+    transform: translateY(-3px);
+    pointer-events: none;
+    transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+body.preview-edit-mode .markdown-preview .table-edit-wrap:hover .table-hover-tools,
+body.preview-edit-mode .markdown-preview .table-edit-wrap:focus-within .table-hover-tools,
+body.preview-edit-mode .markdown-preview .table-hover-tools:hover {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+body.preview-edit-mode .markdown-preview .table-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    height: 26px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 0 9px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+body.preview-edit-mode .markdown-preview .table-tool-btn:hover {
+    background: var(--hover-bg);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+body.preview-edit-mode .markdown-preview .table-tool-btn:active {
+    background: var(--active-bg);
+}
+
+body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveRow"],
+body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveColumn"] {
+    min-width: 70px;
+}
+
+body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveRow"]:hover,
+body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveColumn"]:hover {
+    color: var(--error-color);
+    border-color: color-mix(in srgb, var(--error-color) 35%, var(--border-color));
 }
 
 /* Images */
@@ -1217,7 +1304,7 @@ body.sticky-toolbar-enabled .formatting-toolbar {
     left: 0;
     height: 3px;
     width: 0%;
-    background: linear-gradient(90deg, var(--accent-color), #a855f7, #ec4899);
+    background: linear-gradient(90deg, var(--accent-color), var(--accent-hover));
     z-index: 100001;
     transition: width 0.15s ease-out;
     border-radius: 0 2px 2px 0;
@@ -1225,7 +1312,7 @@ body.sticky-toolbar-enabled .formatting-toolbar {
 }
 
 body.dark-mode .reading-progress-bar {
-    background: linear-gradient(90deg, var(--accent-color), #c084fc, #f472b6);
+    background: linear-gradient(90deg, var(--accent-color), var(--accent-hover));
     box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.5);
 }
 
@@ -1448,24 +1535,24 @@ body:not(.sticky-toolbar-enabled) .search-overlay {
 
 /* Search Highlights */
 .search-highlight {
-    background: rgba(255, 213, 0, 0.35);
+    background: color-mix(in srgb, var(--warning-color) 35%, transparent);
     border-radius: 2px;
     padding: 1px 0;
-    box-shadow: 0 0 0 1px rgba(255, 213, 0, 0.5);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning-color) 55%, transparent);
 }
 
 .search-highlight.current {
-    background: rgba(255, 165, 0, 0.6);
+    background: color-mix(in srgb, var(--warning-color) 60%, transparent);
     box-shadow: 0 0 0 2px var(--accent-color);
 }
 
 body.dark-mode .search-highlight {
-    background: rgba(255, 213, 0, 0.25);
-    box-shadow: 0 0 0 1px rgba(255, 213, 0, 0.4);
+    background: color-mix(in srgb, var(--warning-color) 25%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning-color) 40%, transparent);
 }
 
 body.dark-mode .search-highlight.current {
-    background: rgba(255, 165, 0, 0.45);
+    background: color-mix(in srgb, var(--warning-color) 45%, transparent);
     box-shadow: 0 0 0 2px var(--accent-color);
 }
 
@@ -1491,21 +1578,24 @@ body.focus-mode .markdown-preview > *:focus-within {
 .markdown-preview .code-line {
     display: block;
     min-height: 1.45em;
+    padding: 3px 0;
 }
 
 body.show-line-numbers .markdown-preview .code-line::before {
     counter-increment: line;
     content: counter(line);
     display: inline-block;
-    width: 3em;
-    margin-right: 1.2em;
-    padding-right: 0.8em;
-    text-align: right;
-    color: var(--text-muted);
-    opacity: 0.3;
+    width: 2.1em;
+    margin-right: 0.45em;
+    padding-left: 5px;
+    padding-right: 0px;
+    text-align: left;
+    color: var(--text-secondary);
+    opacity: 0.72;
     border-right: 1px solid var(--border-color);
     user-select: none;
     font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
 }
 
 body:not(.show-line-numbers) .markdown-preview .code-line::before {

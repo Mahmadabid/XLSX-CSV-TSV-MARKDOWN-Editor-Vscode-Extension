@@ -82,6 +82,10 @@ let currentSettings = {
 let isFocusMode = false;
 let searchMatches: Element[] = [];
 let searchCurrentIndex = -1;
+const previewOnlyTableActions = new Set(['tableAddRowBelow', 'tableRemoveRow', 'tableAddColumnRight', 'tableRemoveColumn']);
+const tableControlActions = ['tableAddRowBelow', 'tableRemoveRow', 'tableAddColumnRight', 'tableRemoveColumn'];
+let lastTableCellContext: HTMLTableCellElement | null = null;
+let lastHoveredTable: HTMLTableElement | null = null;
 
 // ===== Utilities =====
 const $ = Utils.$;
@@ -140,7 +144,7 @@ function wrapCodeLines(html: string): string {
             return nameMatch ? `</${nameMatch[1]}>` : '';
         }).join('');
         return `<span class="code-line">${reopenTags}${line}${closeTags}</span>`;
-    }).join('\n');
+    }).join('');
 }
 
 function setButtonsEnabled(enabled: boolean) {
@@ -524,6 +528,7 @@ function setPreviewEditMode(enabled: boolean) {
 
         if (preview) {
             preview.contentEditable = 'true';
+            enhancePreviewTablesForEditing();
             preview.focus();
         }
     } else {
@@ -550,7 +555,16 @@ function performSave(exitAfterSave = false) {
         // Convert preview HTML back to markdown
         const preview = $('markdownPreview');
         if (preview) {
-            currentContent = turndownService.turndown(preview.innerHTML);
+            const clone = preview.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('.table-hover-tools').forEach(node => node.remove());
+            clone.querySelectorAll('.heading-anchor').forEach(node => node.remove());
+            clone.querySelectorAll('td, th').forEach((cellNode) => {
+                const cell = cellNode as HTMLTableCellElement;
+                if ((cell.textContent || '').replace(/\u00a0/g, '').trim() === '') {
+                    cell.innerHTML = '';
+                }
+            });
+            currentContent = turndownService.turndown(clone.innerHTML);
         }
     } else {
         const editor = $('markdownEditor') as HTMLTextAreaElement;
@@ -606,10 +620,13 @@ function refreshDataLineCache() {
     const preview = $('markdownPreview');
     if (!preview) { cachedDataLineElements = []; cachedLineMap = []; return; }
     cachedDataLineElements = Array.from(preview.querySelectorAll('[data-line]')) as HTMLElement[];
-    // Pre-compute positions to avoid layout reads during scroll
+    // Compute positions relative to the preview scroll container using getBoundingClientRect
+    // so values are correct to compare against preview.scrollTop
+    const previewTop = preview.getBoundingClientRect().top;
+    const scrollOffset = preview.scrollTop;
     cachedLineMap = cachedDataLineElements.map(el => ({
         line: parseInt(el.getAttribute('data-line') || '0'),
-        top: el.offsetTop
+        top: el.getBoundingClientRect().top - previewTop + scrollOffset
     }));
 }
 
@@ -1765,6 +1782,11 @@ function applyFormat(action: string) {
         return;
     }
 
+    if (previewOnlyTableActions.has(action)) {
+        showToast('Table structure actions are available in WYSIWYG mode');
+        return;
+    }
+
     const editor = $('markdownEditor') as HTMLTextAreaElement;
     if (!editor) return;
     pushUndoState(editor);
@@ -1803,6 +1825,486 @@ function applyFormat(action: string) {
 }
 
 // ===== WYSIWYG Formatting (for Preview Edit mode) =====
+type TableSelectionContext = {
+    table: HTMLTableElement;
+    row: HTMLTableRowElement;
+    cell: HTMLTableCellElement;
+    rowIndex: number;
+    colIndex: number;
+};
+
+function parsePatternToken(value: string): { prefix: string; number: number; width: number; suffix: string } | null {
+    const trimmed = (value || '').trim();
+    const match = trimmed.match(/^(.*?)(-?\d+)([^\d]*)$/);
+    if (!match) {
+        return null;
+    }
+
+    const parsed = Number(match[2]);
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+
+    return {
+        prefix: match[1],
+        number: parsed,
+        width: match[2].replace('-', '').length,
+        suffix: match[3]
+    };
+}
+
+function nextSequenceValue(a: string, b: string): string | null {
+    const trimmedA = (a || '').trim();
+    const trimmedB = (b || '').trim();
+    if (!trimmedB) {
+        return null;
+    }
+
+    const numericA = Number(trimmedA);
+    const numericB = Number(trimmedB);
+    if (Number.isFinite(numericA) && Number.isFinite(numericB)) {
+        const step = numericB - numericA;
+        const next = numericB + (Number.isFinite(step) ? step : 1);
+        const decimals = Math.max((trimmedA.split('.')[1] || '').length, (trimmedB.split('.')[1] || '').length);
+        return decimals > 0 ? next.toFixed(decimals) : String(next);
+    }
+
+    if (trimmedA.length === 1 && trimmedB.length === 1 && /[a-zA-Z]/.test(trimmedA) && /[a-zA-Z]/.test(trimmedB)) {
+        const codeA = trimmedA.charCodeAt(0);
+        const codeB = trimmedB.charCodeAt(0);
+        const nextCode = codeB + (codeB - codeA || 1);
+        if ((nextCode >= 65 && nextCode <= 90) || (nextCode >= 97 && nextCode <= 122)) {
+            return String.fromCharCode(nextCode);
+        }
+    }
+
+    const patternA = parsePatternToken(trimmedA);
+    const patternB = parsePatternToken(trimmedB);
+    if (patternA && patternB && patternA.prefix === patternB.prefix && patternA.suffix === patternB.suffix) {
+        const step = patternB.number - patternA.number || 1;
+        const nextNum = patternB.number + step;
+        const isNegative = nextNum < 0;
+        const abs = Math.abs(nextNum).toString().padStart(patternB.width, '0');
+        return `${patternB.prefix}${isNegative ? '-' : ''}${abs}${patternB.suffix}`;
+    }
+
+    return null;
+}
+
+function inferNextFromSeries(first?: string, second?: string): string {
+    const a = (first || '').trim();
+    const b = (second || '').trim();
+
+    if (!a && !b) {
+        return '';
+    }
+
+    if (!a && b) {
+        const token = parsePatternToken(b);
+        if (token) {
+            const nextNum = token.number + 1;
+            const isNegative = nextNum < 0;
+            const abs = Math.abs(nextNum).toString().padStart(token.width, '0');
+            return `${token.prefix}${isNegative ? '-' : ''}${abs}${token.suffix}`;
+        }
+        return b;
+    }
+
+    if (a && b) {
+        const inferred = nextSequenceValue(a, b);
+        if (inferred !== null) {
+            return inferred;
+        }
+    }
+
+    const token = parsePatternToken(b || a);
+    if (token) {
+        const nextNum = token.number + 1;
+        const isNegative = nextNum < 0;
+        const abs = Math.abs(nextNum).toString().padStart(token.width, '0');
+        return `${token.prefix}${isNegative ? '-' : ''}${abs}${token.suffix}`;
+    }
+
+    return b || a;
+}
+
+function inferNextRowCellValue(section: HTMLTableSectionElement, sourceRowIndex: number, colIndex: number): string {
+    const current = section.rows[sourceRowIndex]?.cells[colIndex]?.textContent || '';
+    const prev = section.rows[sourceRowIndex - 1]?.cells[colIndex]?.textContent || '';
+    return inferNextFromSeries(prev, current);
+}
+
+function inferNextColumnCellValue(row: HTMLTableRowElement, sourceColIndex: number): string {
+    const current = row.cells[sourceColIndex]?.textContent || '';
+    const prev = row.cells[sourceColIndex - 1]?.textContent || '';
+    return inferNextFromSeries(prev, current);
+}
+
+function createTableHoverControls(): HTMLElement {
+    const controls = document.createElement('div');
+    controls.className = 'table-hover-tools';
+    controls.setAttribute('contenteditable', 'false');
+
+    controls.innerHTML = [
+        '<button class="table-tool-btn" data-table-action="tableAddRowBelow" title="Add row below">+ Row</button>',
+        '<button class="table-tool-btn" data-table-action="tableRemoveRow" title="Remove row">- Row</button>',
+        '<button class="table-tool-btn" data-table-action="tableAddColumnRight" title="Add column right">+ Column</button>',
+        '<button class="table-tool-btn" data-table-action="tableRemoveColumn" title="Remove column">- Column</button>'
+    ].join('');
+
+    return controls;
+}
+
+function enhancePreviewTablesForEditing() {
+    const preview = $('markdownPreview');
+    if (!preview || !isPreviewEditMode) {
+        return;
+    }
+
+    preview.querySelectorAll('table.md-table').forEach((tableNode) => {
+        const table = tableNode as HTMLTableElement;
+        if (table.closest('.table-edit-wrap')) {
+            return;
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-edit-wrap';
+
+        const parent = table.parentElement;
+        if (!parent) {
+            return;
+        }
+
+        parent.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+        wrapper.appendChild(createTableHoverControls());
+    });
+}
+
+function createEmptyTableCell(tagName: 'th' | 'td'): HTMLTableCellElement {
+    const cell = document.createElement(tagName);
+    cell.innerHTML = '<br data-empty-cell-placeholder="true">';
+    return cell;
+}
+
+function cloneFormattingSkeleton(node: Node): Node | null {
+    if (node.nodeType === Node.TEXT_NODE) {
+        return null;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+        return null;
+    }
+
+    const sourceEl = node as HTMLElement;
+    const clone = sourceEl.cloneNode(false) as HTMLElement;
+    Array.from(sourceEl.childNodes).forEach((child) => {
+        const childClone = cloneFormattingSkeleton(child);
+        if (childClone) {
+            clone.appendChild(childClone);
+        }
+    });
+    return clone;
+}
+
+function findDeepestEditableContainer(root: HTMLElement): HTMLElement {
+    let current = root;
+    while (current.lastElementChild instanceof HTMLElement) {
+        current = current.lastElementChild;
+    }
+    return current;
+}
+
+function applyEmptyFormattedContent(target: HTMLTableCellElement, source: HTMLTableCellElement | null) {
+    target.innerHTML = '';
+
+    if (source) {
+        Array.from(source.childNodes).forEach((child) => {
+            const cloned = cloneFormattingSkeleton(child);
+            if (cloned) {
+                target.appendChild(cloned);
+            }
+        });
+    }
+
+    const container = findDeepestEditableContainer(target);
+    const placeholder = document.createElement('br');
+    placeholder.setAttribute('data-empty-cell-placeholder', 'true');
+    container.appendChild(placeholder);
+}
+
+function placeCaretInCell(cell: HTMLTableCellElement | null) {
+    if (!cell) {
+        return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection) {
+        return;
+    }
+
+    const range = document.createRange();
+    const placeholder = cell.querySelector('[data-empty-cell-placeholder]');
+    if (placeholder && placeholder.parentNode) {
+        range.setStartBefore(placeholder);
+        range.collapse(true);
+    } else {
+        range.selectNodeContents(cell);
+        range.collapse(true);
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+    cell.focus();
+}
+
+function getActiveTableSelectionContext(): TableSelectionContext | null {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+        return null;
+    }
+
+    let anchor = selection.anchorNode as Node | null;
+    if (!anchor) {
+        return null;
+    }
+
+    if (anchor.nodeType === Node.TEXT_NODE) {
+        anchor = anchor.parentElement;
+    }
+
+    const anchorElement = anchor as HTMLElement;
+    const activeCell = anchorElement.closest('td,th') as HTMLTableCellElement | null;
+    const cell = activeCell || lastTableCellContext;
+    if (!cell) {
+        return null;
+    }
+
+    const row = cell.closest('tr') as HTMLTableRowElement | null;
+    const table = cell.closest('table') as HTMLTableElement | null;
+    if (!row || !table) {
+        return null;
+    }
+
+    return {
+        table,
+        row,
+        cell,
+        rowIndex: row.rowIndex,
+        colIndex: cell.cellIndex
+    };
+}
+
+function updateLastTableCellContextFromSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+        return;
+    }
+
+    let anchor = selection.anchorNode as Node | null;
+    if (!anchor) {
+        return;
+    }
+    if (anchor.nodeType === Node.TEXT_NODE) {
+        anchor = anchor.parentElement;
+    }
+
+    const cell = (anchor as HTMLElement).closest('td,th') as HTMLTableCellElement | null;
+    if (cell) {
+        lastTableCellContext = cell;
+        lastHoveredTable = (cell.closest('table') as HTMLTableElement | null) || lastHoveredTable;
+    }
+}
+
+function copyCellPresentation(source: HTMLTableCellElement | null, target: HTMLTableCellElement) {
+    if (!source) {
+        return;
+    }
+    target.className = source.className;
+    const style = source.getAttribute('style');
+    if (style) {
+        target.setAttribute('style', style);
+    }
+    const align = source.getAttribute('align');
+    if (align) {
+        target.setAttribute('align', align);
+    }
+
+    applyEmptyFormattedContent(target, source);
+}
+
+function getFallbackTable(): HTMLTableElement | null {
+    if (lastHoveredTable && document.contains(lastHoveredTable)) {
+        return lastHoveredTable;
+    }
+
+    const selectedTable = (lastTableCellContext?.closest('table') as HTMLTableElement | null) || null;
+    if (selectedTable && document.contains(selectedTable)) {
+        return selectedTable;
+    }
+
+    const preview = $('markdownPreview');
+    if (!preview) {
+        return null;
+    }
+
+    const tables = preview.querySelectorAll('table.md-table');
+    return tables.length ? (tables[tables.length - 1] as HTMLTableElement) : null;
+}
+
+function buildContextFromTableEnd(table: HTMLTableElement): TableSelectionContext | null {
+    const bodyRows = table.tBodies[0]?.rows;
+    const row = (bodyRows && bodyRows.length ? bodyRows[bodyRows.length - 1] : table.rows[table.rows.length - 1]) as HTMLTableRowElement | undefined;
+    if (!row || !row.cells.length) {
+        return null;
+    }
+    const colIndex = row.cells.length - 1;
+    const cell = row.cells[colIndex] as HTMLTableCellElement;
+    return {
+        table,
+        row,
+        cell,
+        rowIndex: row.rowIndex,
+        colIndex
+    };
+}
+
+function resolveInsertContext(): TableSelectionContext | null {
+    const active = getActiveTableSelectionContext();
+    if (active) {
+        return active;
+    }
+
+    const fallbackTable = getFallbackTable();
+    if (!fallbackTable) {
+        return null;
+    }
+    return buildContextFromTableEnd(fallbackTable);
+}
+
+function getTableColumnCount(table: HTMLTableElement): number {
+    let maxColumns = 0;
+    Array.from(table.rows).forEach((row) => {
+        maxColumns = Math.max(maxColumns, row.cells.length);
+    });
+    return maxColumns;
+}
+
+function addTableRowBelow() {
+    const context = resolveInsertContext();
+    if (!context) {
+        showToast('No table found to add a row');
+        return;
+    }
+
+    const section = context.row.parentElement as HTMLTableSectionElement | null;
+    if (!section) {
+        return;
+    }
+
+    const isHeaderSection = section.tagName === 'THEAD';
+    let targetSection: HTMLTableSectionElement = section;
+    if (isHeaderSection) {
+        targetSection = context.table.tBodies[0] || context.table.createTBody();
+    }
+
+    const templateColumns = context.row.cells.length || getTableColumnCount(context.table) || 1;
+    const newRow = document.createElement('tr');
+    for (let i = 0; i < templateColumns; i++) {
+        const tagName: 'th' | 'td' = isHeaderSection ? 'td' : (context.row.cells[i]?.tagName.toLowerCase() === 'th' ? 'th' : 'td');
+        const newCell = createEmptyTableCell(tagName);
+        newCell.textContent = '';
+        copyCellPresentation(context.row.cells[i] as HTMLTableCellElement | null, newCell);
+        newRow.appendChild(newCell);
+    }
+
+    if (isHeaderSection) {
+        targetSection.insertBefore(newRow, targetSection.rows[0] || null);
+    } else {
+        context.row.insertAdjacentElement('afterend', newRow);
+    }
+
+    const targetCol = Math.min(context.colIndex, Math.max(newRow.cells.length - 1, 0));
+    placeCaretInCell(newRow.cells[targetCol] as HTMLTableCellElement);
+}
+
+function removeCurrentTableRow() {
+    const context = getActiveTableSelectionContext();
+    if (!context) {
+        showToast('Place the caret inside a table cell first');
+        return;
+    }
+
+    const section = context.row.parentElement as HTMLTableSectionElement | null;
+    if (!section) {
+        return;
+    }
+
+    if (section.rows.length <= 1) {
+        Array.from(context.row.cells).forEach(cell => {
+            cell.textContent = '';
+        });
+        placeCaretInCell(context.row.cells[Math.min(context.colIndex, context.row.cells.length - 1)] as HTMLTableCellElement);
+        showToast('Cannot remove the last row in this section');
+        return;
+    }
+
+    const fallbackRow = (context.row.nextElementSibling || context.row.previousElementSibling) as HTMLTableRowElement | null;
+    context.row.remove();
+    if (fallbackRow) {
+        const targetCol = Math.min(context.colIndex, Math.max(fallbackRow.cells.length - 1, 0));
+        placeCaretInCell(fallbackRow.cells[targetCol] as HTMLTableCellElement);
+    }
+}
+
+function addTableColumnRight() {
+    const context = resolveInsertContext();
+    if (!context) {
+        showToast('No table found to add a column');
+        return;
+    }
+
+    const insertAt = context.colIndex + 1;
+    Array.from(context.table.rows).forEach((row) => {
+        const isHeaderRow = row.parentElement?.tagName === 'THEAD';
+        const newCell = createEmptyTableCell(isHeaderRow ? 'th' : 'td');
+        const styleSource = row.cells[Math.min(context.colIndex, Math.max(row.cells.length - 1, 0))] as HTMLTableCellElement | null;
+        copyCellPresentation(styleSource, newCell);
+        newCell.textContent = '';
+        row.insertBefore(newCell, row.cells[insertAt] || null);
+    });
+
+    const focusRow = context.table.rows[context.rowIndex];
+    placeCaretInCell((focusRow?.cells[insertAt] || null) as HTMLTableCellElement | null);
+}
+
+function removeCurrentTableColumn() {
+    const context = getActiveTableSelectionContext();
+    if (!context) {
+        showToast('Place the caret inside a table cell first');
+        return;
+    }
+
+    const maxColumns = getTableColumnCount(context.table);
+    if (maxColumns <= 1) {
+        showToast('Cannot remove the last column');
+        return;
+    }
+
+    Array.from(context.table.rows).forEach((row) => {
+        if (!row.cells.length) {
+            return;
+        }
+        const removeAt = Math.min(context.colIndex, row.cells.length - 1);
+        row.deleteCell(removeAt);
+    });
+
+    const focusRow = context.table.rows[Math.min(context.rowIndex, Math.max(context.table.rows.length - 1, 0))];
+    if (focusRow && focusRow.cells.length) {
+        const targetCol = Math.max(0, Math.min(context.colIndex, focusRow.cells.length - 1));
+        placeCaretInCell(focusRow.cells[targetCol] as HTMLTableCellElement);
+    }
+}
+
 function applyWysiwygFormat(action: string) {
     const preview = $('markdownPreview');
     if (!preview) return;
@@ -1844,8 +2346,13 @@ function applyWysiwygFormat(action: string) {
         case 'table': {
             const html = '<table class="md-table"><thead><tr><th>Header 1</th><th>Header 2</th><th>Header 3</th></tr></thead><tbody><tr><td>Cell 1</td><td>Cell 2</td><td>Cell 3</td></tr></tbody></table>';
             document.execCommand('insertHTML', false, html);
+            requestAnimationFrame(() => enhancePreviewTablesForEditing());
             break;
         }
+        case 'tableAddRowBelow': addTableRowBelow(); break;
+        case 'tableRemoveRow': removeCurrentTableRow(); break;
+        case 'tableAddColumnRight': addTableColumnRight(); break;
+        case 'tableRemoveColumn': removeCurrentTableColumn(); break;
         case 'codeBlock': {
             const html = '<pre><code>code</code></pre>';
             document.execCommand('insertHTML', false, html);
@@ -2225,6 +2732,21 @@ function wirePreviewInteractions() {
 
     preview.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
+        const tableTool = target.closest('[data-table-action]') as HTMLElement | null;
+        if (tableTool) {
+            e.preventDefault();
+            e.stopPropagation();
+            const hostTable = tableTool.closest('.table-edit-wrap')?.querySelector('table.md-table') as HTMLTableElement | null;
+            if (hostTable) {
+                lastHoveredTable = hostTable;
+            }
+            const action = tableTool.getAttribute('data-table-action') || '';
+            if (tableControlActions.includes(action)) {
+                applyWysiwygFormat(action);
+            }
+            return;
+        }
+
         const copyBtn = target.closest('.code-copy') as HTMLElement | null;
         if (copyBtn) {
             e.preventDefault();
@@ -2267,6 +2789,30 @@ function wirePreviewInteractions() {
                 e.stopPropagation();
                 vscode.postMessage({ command: 'openExternal', url: href });
             }
+        }
+    });
+
+    preview.addEventListener('mousedown', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('[data-table-action]')) {
+            // Keep current caret in table cell so actions know where to apply.
+            e.preventDefault();
+        }
+    });
+
+    preview.addEventListener('mouseup', () => {
+        updateLastTableCellContextFromSelection();
+    });
+
+    preview.addEventListener('keyup', () => {
+        updateLastTableCellContextFromSelection();
+    });
+
+    preview.addEventListener('mouseover', (e) => {
+        const target = e.target as HTMLElement;
+        const table = target.closest('table.md-table') as HTMLTableElement | null;
+        if (table) {
+            lastHoveredTable = table;
         }
     });
 }
@@ -2368,6 +2914,10 @@ const formatIconMap: Record<string, string> = {
     link: Icons.Link,
     image: Icons.Image,
     table: Icons.TableInsert,
+    tableAddRowBelow: '<span class="fmt-text-icon">+R</span>',
+    tableRemoveRow: '<span class="fmt-text-icon">-R</span>',
+    tableAddColumnRight: '<span class="fmt-text-icon">+C</span>',
+    tableRemoveColumn: '<span class="fmt-text-icon">-C</span>',
     codeBlock: Icons.CodeBlock,
     hr: Icons.HorizontalRule,
     undo: Icons.Undo,

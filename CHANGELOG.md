@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.6 - Markdown Preview Edit & Code Block Fixes
+- Fixed a Preview Edit save bug where headings could gain extra `#` characters because heading anchor UI leaked into markdown conversion.
+- Tightened the code block line-number gutter to remove the leftover blank space before line numbers.
+- Improved code block readability and table insertion behavior in Markdown preview edit mode.
+
 ## v1.7.5 - Local image support in Markdown preview
 - Fixed an issue where local image paths (relative/absolute/file URIs) in Markdown did not load in the webview preview.
 

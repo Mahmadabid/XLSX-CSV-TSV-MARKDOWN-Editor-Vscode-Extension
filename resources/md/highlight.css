@@ -42,7 +42,8 @@
 .hljs-comment,
 .hljs-code,
 .hljs-formula {
-  color: #6a737d;
+  color: #4f5b66;
+  font-style: italic;
 }
 .hljs-name,
 .hljs-quote,
@@ -121,7 +122,8 @@ body.dark-mode .hljs-symbol {
 body.dark-mode .hljs-comment,
 body.dark-mode .hljs-code,
 body.dark-mode .hljs-formula {
-  color: #8b949e;
+  color: #a6b0bb;
+  font-style: italic;
 }
 body.dark-mode .hljs-name,
 body.dark-mode .hljs-quote,
@@ -164,4 +166,42 @@ pre code.hljs {
 }
 code.hljs {
   padding: 3px 5px;
+}
+
+/* VS Code theme-aware code colors */
+body.vscode-theme .hljs {
+  color: var(--vscode-editor-foreground, #1d1d1f);
+  background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background, #ffffff));
+}
+
+body.vscode-theme .hljs-keyword,
+body.vscode-theme .hljs-meta .hljs-keyword,
+body.vscode-theme .hljs-template-tag,
+body.vscode-theme .hljs-template-variable,
+body.vscode-theme .hljs-type,
+body.vscode-theme .hljs-variable.language_ {
+  color: var(--vscode-symbolIcon-keywordForeground, var(--vscode-editorInfo-foreground, #007aff));
+}
+
+body.vscode-theme .hljs-title,
+body.vscode-theme .hljs-title.class_,
+body.vscode-theme .hljs-title.function_ {
+  color: var(--vscode-symbolIcon-functionForeground, var(--vscode-textPreformat-foreground, var(--vscode-editor-foreground, #1d1d1f)));
+}
+
+body.vscode-theme .hljs-string,
+body.vscode-theme .hljs-meta .hljs-string {
+  color: var(--vscode-symbolIcon-stringForeground, var(--vscode-textPreformat-foreground, var(--vscode-editor-foreground, #1d1d1f)));
+}
+
+body.vscode-theme .hljs-comment,
+body.vscode-theme .hljs-code,
+body.vscode-theme .hljs-formula {
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground, #6b7280));
+  font-style: italic;
+}
+
+body.vscode-theme .hljs-subst,
+body.vscode-theme .hljs {
+  color: var(--vscode-editor-foreground, #1d1d1f);
 }

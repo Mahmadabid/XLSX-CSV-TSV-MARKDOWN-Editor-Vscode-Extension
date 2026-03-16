@@ -322,6 +322,10 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     <button class="fmt-btn" data-format="link" title="Insert Link (Ctrl+K)"></button>
                     <button class="fmt-btn" data-format="image" title="Insert Image"></button>
                     <button class="fmt-btn" data-format="table" title="Insert Table"></button>
+                    <button class="fmt-btn" data-format="tableAddRowBelow" title="Add Row Below (WYSIWYG table)"></button>
+                    <button class="fmt-btn" data-format="tableRemoveRow" title="Remove Current Row (WYSIWYG table)"></button>
+                    <button class="fmt-btn" data-format="tableAddColumnRight" title="Add Column Right (WYSIWYG table)"></button>
+                    <button class="fmt-btn" data-format="tableRemoveColumn" title="Remove Current Column (WYSIWYG table)"></button>
                     <button class="fmt-btn" data-format="codeBlock" title="Code Block (Ctrl+Shift+E)"></button>
                     <button class="fmt-btn" data-format="hr" title="Horizontal Rule"></button>
                 </div>

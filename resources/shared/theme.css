@@ -16,6 +16,7 @@
     
     /* Surface colors - Glassmorphism ready */
     --header-bg: #f5f5f7;
+    --toolbar-bg: #f5f5f7;
     --row-hover-bg: rgba(0, 113, 227, 0.05);
     --panel-bg: rgba(255, 255, 255, 0.8);
     --overlay-bg: rgba(255, 255, 255, 0.95);
@@ -118,6 +119,7 @@ body.dark-mode {
     
     /* Surface colors */
     --header-bg: #1d1d1f;
+    --toolbar-bg: #1d1d1f;
     --row-hover-bg: rgba(41, 151, 255, 0.1);
     --panel-bg: rgba(29, 29, 31, 0.8);
     --overlay-bg: rgba(22, 22, 23, 0.95);
@@ -221,9 +223,16 @@ body.vscode-theme {
 
     /* Surface colors */
     --header-bg: var(--vscode-editorWidget-background, #f5f5f7);
+    --toolbar-bg: var(--vscode-editorWidget-background, var(--vscode-editor-background, #f5f5f7));
     --row-hover-bg: var(--vscode-list-hoverBackground, rgba(0, 132, 255, 0.076));
     --panel-bg: var(--vscode-editorWidget-background, rgba(245, 245, 247, 0.9));
     --overlay-bg: var(--vscode-notifications-background, rgba(255, 255, 255, 0.95));
+
+    /* Code surfaces */
+    --code-bg: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background, #f5f5f7));
+    --code-text: var(--vscode-textPreformat-foreground, var(--vscode-editor-foreground, #1d1d1f));
+    --pre-bg: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background, #f5f5f7));
+    --pre-border: var(--vscode-panel-border, #d2d2d7);
 
     /* Accent */
     --accent-color: var(--vscode-focusBorder, #007aff);
