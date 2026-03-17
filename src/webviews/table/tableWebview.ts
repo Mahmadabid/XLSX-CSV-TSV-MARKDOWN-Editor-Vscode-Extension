@@ -552,11 +552,19 @@ import { InfoTooltip } from '../shared/infoTooltip';
         const toggleTableEditBtn = $('toggleTableEditButton');
         const toggleExpandBtn = $('toggleExpandButton');
 
-        if (toggleViewBtn) toggleViewBtn.classList.toggle('hidden', isEditMode);
-        if (toggleTableEditBtn) toggleTableEditBtn.classList.toggle('hidden', isEditMode);
-        if (toggleExpandBtn) toggleExpandBtn.classList.toggle('hidden', isEditMode);
-        if (saveBtn) saveBtn.classList.toggle('hidden', !isEditMode);
-        if (cancelBtn) cancelBtn.classList.toggle('hidden', !isEditMode);
+        if (toolbarManager) {
+            toolbarManager.setButtonVisibility('toggleViewButton', !isEditMode);
+            toolbarManager.setButtonVisibility('toggleTableEditButton', !isEditMode);
+            toolbarManager.setButtonVisibility('toggleExpandButton', !isEditMode);
+            toolbarManager.setButtonVisibility('saveTableEditsButton', isEditMode);
+            toolbarManager.setButtonVisibility('cancelTableEditsButton', isEditMode);
+        } else {
+            if (toggleViewBtn) toggleViewBtn.classList.toggle('hidden', isEditMode);
+            if (toggleTableEditBtn) toggleTableEditBtn.classList.toggle('hidden', isEditMode);
+            if (toggleExpandBtn) toggleExpandBtn.classList.toggle('hidden', isEditMode);
+            if (saveBtn) saveBtn.classList.toggle('hidden', !isEditMode);
+            if (cancelBtn) cancelBtn.classList.toggle('hidden', !isEditMode);
+        }
 
         if (isEditMode) {
             clearSelection();
@@ -1038,9 +1046,15 @@ import { InfoTooltip } from '../shared/infoTooltip';
         });
 
         table.addEventListener('mousedown', (e) => {
-            if (isEditMode) return;
             const target = (e.target as HTMLElement).closest('td, th') as HTMLElement;
             if (!target) return;
+
+            const isHeaderInteraction =
+                target.classList.contains('col-header') ||
+                target.classList.contains('row-header');
+
+            if (isEditMode && !isHeaderInteraction) return;
+
             e.preventDefault();
 
             if (target.classList.contains('col-header')) {
@@ -1111,13 +1125,23 @@ import { InfoTooltip } from '../shared/infoTooltip';
             if (isEditMode && isCmdOrCtrl) {
                 if (e.key.toLowerCase() === 'z') {
                     e.preventDefault();
-                    if (e.shiftKey) redo();
-                    else undo();
+                    const active = document.activeElement as HTMLElement | null;
+                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
+                    if (isEditingCell) {
+                        if (e.shiftKey) document.execCommand('redo');
+                        else document.execCommand('undo');
+                    } else {
+                        if (e.shiftKey) redo();
+                        else undo();
+                    }
                     return;
                 }
                 if (e.key.toLowerCase() === 'y') {
                     e.preventDefault();
-                    redo();
+                    const active = document.activeElement as HTMLElement | null;
+                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
+                    if (isEditingCell) document.execCommand('redo');
+                    else redo();
                     return;
                 }
             }
@@ -1306,7 +1330,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
             },
             {
                 id: 'saveTableEditsButton',
-                icon: '',
+                icon: Icons.Save,
                 label: 'Save',
                 tooltip: 'Save table edits',
                 hidden: true,
@@ -1314,7 +1338,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
             },
             {
                 id: 'cancelTableEditsButton',
-                icon: '',
+                icon: Icons.Cancel,
                 label: 'Cancel',
                 tooltip: 'Cancel table edits',
                 hidden: true,

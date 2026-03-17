@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.7.9 - XLSX Edit Mode & Formatting Fixes
+- Fixed XLSX table edit mode so background color targets the active cell instead of leaking to multiple previously-selected cells.
+- Fixed XLSX table edit mode cell selection behavior for reliable single-cell targeting.
+- Fixed rich-text visibility in XLSX edit mode so bold/italic formatting remains visible while editing.
+- Improved rich-text save/load consistency for XLSX table edits.
+- Fixed table edit mode for csv and tsv.
+
 ## v1.7.8 - Markdown Preview Edit Undo/Redo Fixes
 - Fixed Preview Edit undo/redo so `Ctrl+Z` and `Ctrl+Y` now work reliably for table row/column add/remove actions.
 - Prevented undo/redo shortcuts in Preview Edit from falling through to VS Code and undoing unrelated file editor actions.

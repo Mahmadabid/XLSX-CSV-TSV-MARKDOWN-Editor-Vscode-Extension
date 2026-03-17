@@ -13,6 +13,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
 (function () {
     // ===== Virtual Scrolling Configuration =====
     const { ROW_HEIGHT, BUFFER_ROWS, CHUNK_SIZE } = VirtualScrollConfig;
+    const textColorIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M8.5 16h7"/><path d="M12 4l4 12"/><path d="M12 4L8 16"/></svg>';
+    const bgColorIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l8 8-6 6-8-8z"/><path d="M2 20h20"/></svg>';
 
     // Data injected from the extension via postMessage
     let worksheetsMeta: any[] = [];
@@ -61,6 +63,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
     const AUTO_SCROLL_STEP = 20; // px per frame
 
     let handlersAttached = false;
+    let selectionGlobalListenersAttached = false;
     let toolbarManager: ToolbarManager | null = null;
 
     // Settings (persisted by extension)
@@ -82,6 +85,26 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
     // Table edit mode (text-only)
     let isEditMode = false;
+    let lastEditRange: Range | null = null;
+    let lastFocusedEditableCell: HTMLElement | null = null;
+    type StructuralOpType = 'insertRowAbove' | 'insertRowBelow' | 'deleteRow' | 'insertColumnLeft' | 'insertColumnRight' | 'deleteColumn';
+    interface StructuralOp {
+        type: StructuralOpType;
+        index: number; // 1-based row or column index
+    }
+    interface CellStyleEdit {
+        row: number;
+        col: number;
+        bgColor?: string;
+        textColor?: string;
+    }
+    let pendingStructuralOps: StructuralOp[] = [];
+    const pendingCellStyleEdits = new Map<string, CellStyleEdit>();
+    let headerContextMenuEl: HTMLElement | null = null;
+    let colorPaletteEl: HTMLElement | null = null;
+    let activeColorTarget: 'text' | 'background' | null = null;
+    let selectedTextColor = '#202124';
+    let selectedBgColor = '#ffffff';
 
     // Save state (CSV-parity)
     let isSaving = false;
@@ -105,6 +128,678 @@ import { InfoTooltip } from '../shared/infoTooltip';
         const cancelBtn = document.getElementById('cancelTableEditsButton') as HTMLButtonElement;
         if (saveBtn) saveBtn.disabled = !enabled;
         if (cancelBtn) cancelBtn.disabled = !enabled;
+    }
+
+    async function ensureAllRowsLoadedForStructureEdits() {
+        if (rowCache.size >= totalRows && totalRows > 0) return true;
+
+        setLoadingText('Preparing full sheet for structure changes...');
+        showLoading();
+
+        try {
+            const allRows = await requestAllRows();
+            if (!allRows || allRows.length === 0) {
+                showToast('Unable to load rows for structure edit');
+                return false;
+            }
+
+            rowCache.clear();
+            for (let i = 0; i < allRows.length; i++) {
+                rowCache.set(i, allRows[i] || { cells: [], rowNumber: i + 1, height: allRowHeights[i] || ROW_HEIGHT });
+            }
+
+            if (allRows.length > totalRows) {
+                totalRows = allRows.length;
+            }
+
+            return true;
+        } finally {
+            hideLoading();
+            setLoadingText('Rendering worksheet...');
+        }
+    }
+
+    function getMutableRowsSnapshot(): any[] {
+        const rows: any[] = [];
+        for (let i = 0; i < totalRows; i++) {
+            rows.push(rowCache.get(i) || { cells: [], rowNumber: i + 1, height: allRowHeights[i] || ROW_HEIGHT });
+        }
+        return rows;
+    }
+
+    function normalizeRowsAfterStructureChange(rows: any[]) {
+        rows.forEach((row, rowIndex) => {
+            row.rowNumber = rowIndex + 1;
+            if (!Array.isArray(row.cells)) row.cells = [];
+            row.cells.forEach((cell: any) => {
+                cell.rowNumber = rowIndex + 1;
+            });
+        });
+
+        rowCache.clear();
+        rows.forEach((row, idx) => {
+            rowCache.set(idx, row);
+        });
+    }
+
+    function rerenderCurrentSheetFromLocalState() {
+        const container = document.getElementById('tableContainer');
+        if (!container) return;
+
+        currentVisibleStart = 0;
+        currentVisibleEnd = 0;
+        isRendering = false;
+
+        container.innerHTML = createTableShell();
+        initializeSelection();
+        initializeResize();
+        initializeHyperlinkHover();
+        initializeVirtualScrolling();
+    }
+
+    async function applyStructureOperation(op: StructuralOp) {
+        if (!isEditMode) return;
+
+        const loaded = await ensureAllRowsLoadedForStructureEdits();
+        if (!loaded) return;
+
+        const rows = getMutableRowsSnapshot();
+        const target = op.index;
+        const prevSelectedRows = Array.from(selectedRowIndices.values()).sort((a, b) => a - b);
+        const prevSelectedCols = Array.from(selectedColumnIndices.values()).sort((a, b) => a - b);
+
+        if (op.type === 'insertRowAbove' || op.type === 'insertRowBelow' || op.type === 'deleteRow') {
+            if (op.type === 'deleteRow' && totalRows <= 1) {
+                showToast('Cannot delete the last row');
+                return;
+            }
+
+            const insertAt = op.type === 'insertRowAbove' ? target - 1 : target;
+            if (op.type === 'insertRowAbove' || op.type === 'insertRowBelow') {
+                rows.splice(Math.max(0, insertAt), 0, { cells: [], rowNumber: 0, height: ROW_HEIGHT });
+                allRowHeights.splice(Math.max(0, insertAt), 0, ROW_HEIGHT);
+                totalRows += 1;
+            } else {
+                rows.splice(Math.max(0, target - 1), 1);
+                allRowHeights.splice(Math.max(0, target - 1), 1);
+                totalRows = Math.max(1, totalRows - 1);
+            }
+        } else {
+            if (op.type === 'deleteColumn' && columnCount <= 1) {
+                showToast('Cannot delete the last column');
+                return;
+            }
+
+            const atCol = op.type === 'insertColumnLeft' ? target : (op.type === 'insertColumnRight' ? target + 1 : target);
+
+            rows.forEach((row: any) => {
+                if (!Array.isArray(row.cells)) row.cells = [];
+
+                if (op.type === 'deleteColumn') {
+                    row.cells = row.cells
+                        .filter((cell: any) => cell.colNumber !== atCol)
+                        .map((cell: any) => {
+                            if (cell.colNumber > atCol) cell.colNumber -= 1;
+                            return cell;
+                        });
+                } else {
+                    row.cells = row.cells.map((cell: any) => {
+                        if (cell.colNumber >= atCol) cell.colNumber += 1;
+                        return cell;
+                    });
+                }
+            });
+
+            if (op.type === 'deleteColumn') {
+                columnWidths.splice(Math.max(0, atCol - 1), 1);
+                columnCount = Math.max(1, columnCount - 1);
+            } else {
+                columnWidths.splice(Math.max(0, atCol - 1), 0, 80);
+                columnCount += 1;
+            }
+        }
+
+        pendingStructuralOps.push(op);
+        normalizeRowsAfterStructureChange(rows);
+        mergedCells = [];
+
+        selectedCells.clear();
+        activeCell = null;
+
+        if (op.type === 'insertRowAbove' || op.type === 'insertRowBelow' || op.type === 'deleteRow') {
+            selectedRowIndices.clear();
+            const pivot = op.type === 'insertRowAbove' ? target - 1 : (op.type === 'insertRowBelow' ? target : target - 1);
+            prevSelectedRows.forEach(r => {
+                let next = r;
+                if (op.type === 'insertRowAbove' && r >= pivot) next = r + 1;
+                if (op.type === 'insertRowBelow' && r > pivot) next = r + 1;
+                if (op.type === 'deleteRow') {
+                    if (r === pivot) {
+                        next = Math.min(pivot, totalRows - 1);
+                    } else if (r > pivot) {
+                        next = r - 1;
+                    }
+                }
+                next = Math.max(0, Math.min(totalRows - 1, next));
+                selectedRowIndices.add(next);
+            });
+            selectedRows.clear();
+            selectedRowIndices.forEach(v => selectedRows.add(v));
+        } else {
+            selectedColumnIndices.clear();
+            const pivot = op.type === 'insertColumnLeft' ? target - 1 : (op.type === 'insertColumnRight' ? target : target - 1);
+            prevSelectedCols.forEach(c => {
+                let next = c;
+                if (op.type === 'insertColumnLeft' && c >= pivot) next = c + 1;
+                if (op.type === 'insertColumnRight' && c > pivot) next = c + 1;
+                if (op.type === 'deleteColumn') {
+                    if (c === pivot) {
+                        next = Math.min(pivot, columnCount - 1);
+                    } else if (c > pivot) {
+                        next = c - 1;
+                    }
+                }
+                next = Math.max(0, Math.min(columnCount - 1, next));
+                selectedColumnIndices.add(next);
+            });
+            selectedColumns.clear();
+            selectedColumnIndices.forEach(v => selectedColumns.add(v));
+        }
+
+        hideHeaderContextMenu();
+        rerenderCurrentSheetFromLocalState();
+    }
+
+    function ensureHeaderContextMenu() {
+        if (headerContextMenuEl) return headerContextMenuEl;
+
+        const menu = document.createElement('div');
+        menu.id = 'headerContextMenu';
+        menu.className = 'header-context-menu hidden';
+        document.body.appendChild(menu);
+        headerContextMenuEl = menu;
+        return menu;
+    }
+
+    function hideHeaderContextMenu() {
+        if (!headerContextMenuEl) return;
+        headerContextMenuEl.classList.add('hidden');
+        headerContextMenuEl.innerHTML = '';
+    }
+
+    function showHeaderContextMenu(e: MouseEvent, targetType: 'row' | 'column', targetIndexZeroBased: number) {
+        if (!isEditMode) return;
+
+        const menu = ensureHeaderContextMenu();
+        menu.innerHTML = '';
+
+        const targetIndexOneBased = targetIndexZeroBased + 1;
+        const items: Array<{ label: string; op: StructuralOpType }> = targetType === 'row'
+            ? [
+                { label: 'Insert row above', op: 'insertRowAbove' },
+                { label: 'Insert row below', op: 'insertRowBelow' },
+                { label: 'Delete row', op: 'deleteRow' }
+            ]
+            : [
+                { label: 'Insert column left', op: 'insertColumnLeft' },
+                { label: 'Insert column right', op: 'insertColumnRight' },
+                { label: 'Delete column', op: 'deleteColumn' }
+            ];
+
+        items.forEach(item => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'header-context-item';
+            btn.textContent = item.label;
+            btn.addEventListener('click', () => {
+                applyStructureOperation({ type: item.op, index: targetIndexOneBased });
+            });
+            menu.appendChild(btn);
+        });
+
+        menu.classList.remove('hidden');
+
+        const rect = menu.getBoundingClientRect();
+        const left = Math.min(Math.max(8, e.clientX), window.innerWidth - rect.width - 8);
+        const top = Math.min(Math.max(8, e.clientY), window.innerHeight - rect.height - 8);
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+    }
+
+    function captureEditSelectionRange() {
+        if (!isEditMode) return;
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+
+        const range = selection.getRangeAt(0);
+        const node = range.commonAncestorContainer;
+        const element = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) as HTMLElement | null;
+        if (!element) return;
+
+        const editableCell = element.closest('td[contenteditable="true"]');
+        if (!editableCell) return;
+
+        lastEditRange = range.cloneRange();
+    }
+
+    function restoreEditSelectionRange() {
+        if (!lastEditRange) return false;
+
+        const node = lastEditRange.commonAncestorContainer;
+        const element = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) as HTMLElement | null;
+        if (!element) return false;
+
+        const editableCell = element.closest('td[contenteditable="true"]') as HTMLElement | null;
+        if (!editableCell || !document.contains(editableCell)) return false;
+
+        editableCell.focus();
+        const selection = window.getSelection();
+        if (!selection) return false;
+        selection.removeAllRanges();
+        selection.addRange(lastEditRange);
+        return true;
+    }
+
+    function applyInlineStyleToSelection(styleName: 'color' | 'backgroundColor', value: string) {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+        const range = selection.getRangeAt(0);
+        if (range.collapsed) return;
+
+        const wrapper = document.createElement('span');
+        wrapper.style[styleName] = value;
+
+        try {
+            const extracted = range.extractContents();
+            wrapper.appendChild(extracted);
+            range.insertNode(wrapper);
+
+            const newRange = document.createRange();
+            newRange.selectNodeContents(wrapper);
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+            lastEditRange = newRange.cloneRange();
+        } catch {
+            // Ignore range failures and keep editor functional.
+        }
+    }
+
+    function applyEditFormatting(command: string, value?: string) {
+        if (!isEditMode) return;
+
+        const selection = window.getSelection();
+        const hasLiveSelection = !!selection && selection.rangeCount > 0 && !selection.isCollapsed;
+
+        if (!hasLiveSelection && !restoreEditSelectionRange()) {
+            showToast('Select text to format');
+            return;
+        }
+
+        document.execCommand('styleWithCSS', false, 'true');
+        const ok = value !== undefined
+            ? document.execCommand(command, false, value)
+            : document.execCommand(command, false);
+
+        if (!ok && value !== undefined) {
+            if (command === 'hiliteColor') {
+                const fallbackOk = document.execCommand('backColor', false, value);
+                if (!fallbackOk) applyInlineStyleToSelection('backgroundColor', value);
+            } else if (command === 'foreColor') {
+                // Fallback for engines that only support lower-case command alias.
+                const fallbackOk = document.execCommand('forecolor', false, value);
+                if (!fallbackOk) applyInlineStyleToSelection('color', value);
+            }
+        }
+
+        captureEditSelectionRange();
+    }
+
+    function getEditTargetCells(): HTMLElement[] {
+        if (isEditMode) {
+            if (activeCell && document.contains(activeCell) && activeCell.tagName === 'TD' && activeCell.getAttribute('contenteditable') === 'true') {
+                return [activeCell];
+            }
+
+            const focused = document.activeElement as HTMLElement | null;
+            if (focused && focused.tagName === 'TD' && focused.getAttribute('contenteditable') === 'true') {
+                return [focused];
+            }
+
+            if (lastFocusedEditableCell && document.contains(lastFocusedEditableCell)) {
+                return [lastFocusedEditableCell];
+            }
+
+            const activeInDom = document.querySelector('td.active-cell[contenteditable="true"]') as HTMLElement | null;
+            if (activeInDom) {
+                return [activeInDom];
+            }
+
+            // In edit mode, color operations must never fan out to multi-cell selections.
+            return [];
+        }
+
+        const targets = Array.from(selectedCells)
+            .filter(cell => document.contains(cell) && cell.tagName === 'TD')
+            .map(cell => {
+                const row = cell.getAttribute('data-row');
+                const col = cell.getAttribute('data-col');
+                return document.querySelector('td[data-row="' + row + '"][data-col="' + col + '"]') as HTMLElement | null;
+            })
+            .filter(Boolean) as HTMLElement[];
+
+        if (targets.length > 0) return targets;
+
+        const focused = document.activeElement as HTMLElement | null;
+        if (focused && focused.tagName === 'TD' && focused.getAttribute('contenteditable') === 'true') {
+            return [focused];
+        }
+
+        if (lastEditRange) {
+            const node = lastEditRange.commonAncestorContainer;
+            const el = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) as HTMLElement | null;
+            const td = el ? el.closest('td[contenteditable="true"]') as HTMLElement | null : null;
+            if (td) return [td];
+        }
+
+        if (lastFocusedEditableCell && document.contains(lastFocusedEditableCell)) {
+            return [lastFocusedEditableCell];
+        }
+
+        return [];
+    }
+
+    function recordCellStyleEdit(cell: HTMLElement, style: Partial<CellStyleEdit>) {
+        const row = parseInt(cell.getAttribute('data-rownum') || '0', 10);
+        const col = parseInt(cell.getAttribute('data-colnum') || '0', 10);
+        if (!row || !col) return;
+
+        const key = row + ':' + col;
+        const existing = pendingCellStyleEdits.get(key) || { row, col };
+        const merged: CellStyleEdit = { ...existing, ...style, row, col };
+        pendingCellStyleEdits.set(key, merged);
+    }
+
+    function applyCellBackgroundColor(color: string) {
+        const cells = getEditTargetCells();
+        if (cells.length === 0) {
+            showToast('Select a cell to apply background');
+            return;
+        }
+
+        if (isEditMode) {
+            clearSelection();
+            selectCell(cells[0]);
+        }
+
+        cells.forEach(cell => {
+            cell.style.backgroundColor = color;
+            cell.removeAttribute('data-default-bg');
+            cell.removeAttribute('data-white-bg');
+            cell.removeAttribute('data-black-bg');
+            recordCellStyleEdit(cell, { bgColor: color });
+        });
+    }
+
+    function applyTextColor(color: string) {
+        const selection = window.getSelection();
+        const hasTextSelection = !!selection && selection.rangeCount > 0 && !selection.isCollapsed;
+
+        if (hasTextSelection || restoreEditSelectionRange()) {
+            const currentSelection = window.getSelection();
+            if (currentSelection && currentSelection.rangeCount > 0 && !currentSelection.isCollapsed) {
+                const range = currentSelection.getRangeAt(0);
+                const startNode = range.startContainer;
+                const endNode = range.endContainer;
+                const startEl = (startNode.nodeType === Node.ELEMENT_NODE ? startNode : startNode.parentElement) as HTMLElement | null;
+                const endEl = (endNode.nodeType === Node.ELEMENT_NODE ? endNode : endNode.parentElement) as HTMLElement | null;
+                const startCell = startEl ? startEl.closest('td[contenteditable="true"]') : null;
+                const endCell = endEl ? endEl.closest('td[contenteditable="true"]') : null;
+
+                // In edit mode, text color formatting should not span across multiple cells.
+                if (!isEditMode || (startCell && endCell && startCell === endCell)) {
+                    applyEditFormatting('foreColor', color);
+                    return;
+                }
+            }
+        }
+
+        const cells = getEditTargetCells();
+        if (cells.length === 0) {
+            showToast('Select text or a cell to apply text color');
+            return;
+        }
+
+        if (isEditMode) {
+            clearSelection();
+            selectCell(cells[0]);
+        }
+
+        cells.forEach(cell => {
+            cell.style.color = color;
+            cell.removeAttribute('data-default-color');
+            recordCellStyleEdit(cell, { textColor: color });
+        });
+    }
+
+    function normalizeColorToHex(color: string): string | undefined {
+        const value = (color || '').trim();
+        const hexMatch = value.match(/^#([0-9a-fA-F]{6})$/);
+        if (hexMatch) return ('#' + hexMatch[1]).toLowerCase();
+
+        const rgbMatch = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+        if (!rgbMatch) return undefined;
+        const r = Math.max(0, Math.min(255, parseInt(rgbMatch[1], 10)));
+        const g = Math.max(0, Math.min(255, parseInt(rgbMatch[2], 10)));
+        const b = Math.max(0, Math.min(255, parseInt(rgbMatch[3], 10)));
+        return '#' + [r, g, b].map(n => n.toString(16).padStart(2, '0')).join('');
+    }
+
+    function collectRichRunsFromNode(node: Node, inherited: { bold?: boolean; italic?: boolean; color?: string }, output: Array<{ text: string; bold?: boolean; italic?: boolean; color?: string }>) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            const txt = node.textContent || '';
+            if (!txt) return;
+            output.push({ text: txt, ...inherited });
+            return;
+        }
+
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const el = node as HTMLElement;
+        const tag = el.tagName.toLowerCase();
+
+        const next = { ...inherited };
+        if (tag === 'b' || tag === 'strong') next.bold = true;
+        if (tag === 'i' || tag === 'em') next.italic = true;
+
+        const style = window.getComputedStyle(el);
+        const fw = style.fontWeight || '';
+        if (fw === 'bold' || parseInt(fw, 10) >= 600) next.bold = true;
+        if (style.fontStyle === 'italic') next.italic = true;
+        const explicitColor = el.style && el.style.color ? el.style.color : '';
+        if (explicitColor) {
+            const hexColor = normalizeColorToHex(explicitColor);
+            if (hexColor) next.color = hexColor;
+        }
+
+        for (const child of Array.from(el.childNodes)) {
+            collectRichRunsFromNode(child, next, output);
+        }
+    }
+
+    function collapseRuns(runs: Array<{ text: string; bold?: boolean; italic?: boolean; color?: string }>) {
+        const merged: Array<{ text: string; bold?: boolean; italic?: boolean; color?: string }> = [];
+        runs.forEach(run => {
+            if (!run.text) return;
+            const prev = merged[merged.length - 1];
+            if (prev && prev.bold === run.bold && prev.italic === run.italic && prev.color === run.color) {
+                prev.text += run.text;
+            } else {
+                merged.push({ ...run });
+            }
+        });
+        return merged;
+    }
+
+    function getCellRichRuns(cell: HTMLElement) {
+        const rawRuns: Array<{ text: string; bold?: boolean; italic?: boolean; color?: string }> = [];
+        for (const child of Array.from(cell.childNodes)) {
+            collectRichRunsFromNode(child, {}, rawRuns);
+        }
+        return collapseRuns(rawRuns).map(r => ({
+            text: r.text.replace(/\u00a0/g, ' '),
+            bold: !!r.bold,
+            italic: !!r.italic,
+            color: r.color
+        })).filter(r => r.text.length > 0);
+    }
+
+    function hasRunFormatting(runs: Array<{ text: string; bold?: boolean; italic?: boolean; color?: string }>): boolean {
+        return runs.some(r => !!r.bold || !!r.italic || !!r.color);
+    }
+
+    function ensureColorPalette() {
+        if (colorPaletteEl) return colorPaletteEl;
+
+        const palette = document.createElement('div');
+        palette.id = 'sheetsColorPalette';
+        palette.className = 'sheets-color-palette hidden';
+
+        const swatches = [
+            '#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff',
+            '#980000', '#ff0000', '#ff9900', '#ffff00', '#00ff00', '#00ffff', '#4a86e8', '#0000ff', '#9900ff', '#ff00ff',
+            '#e6b8af', '#f4cccc', '#fce5cd', '#fff2cc', '#d9ead3', '#d0e0e3', '#c9daf8', '#cfe2f3', '#d9d2e9', '#ead1dc'
+        ];
+
+        const title = document.createElement('div');
+        title.className = 'sheets-color-title';
+        title.textContent = 'Colors';
+        palette.appendChild(title);
+
+        const grid = document.createElement('div');
+        grid.className = 'sheets-color-grid';
+        swatches.forEach(color => {
+            const sw = document.createElement('button');
+            sw.type = 'button';
+            sw.className = 'sheets-color-swatch';
+            sw.style.backgroundColor = color;
+            sw.setAttribute('data-color', color);
+            sw.addEventListener('click', () => {
+                if (activeColorTarget === 'text') {
+                    selectedTextColor = color;
+                    applyTextColor(color);
+                    const btn = document.getElementById('formatTextColorButton');
+                    if (btn) btn.style.setProperty('--format-color-preview', color);
+                } else {
+                    selectedBgColor = color;
+                    applyCellBackgroundColor(color);
+                    const btn = document.getElementById('formatBackgroundColorButton');
+                    if (btn) btn.style.setProperty('--format-color-preview', color);
+                }
+                hideColorPalette();
+            });
+            grid.appendChild(sw);
+        });
+        palette.appendChild(grid);
+
+        const customWrap = document.createElement('div');
+        customWrap.className = 'sheets-color-custom';
+        const customInput = document.createElement('input');
+        customInput.type = 'color';
+        customInput.id = 'sheetsCustomColorInput';
+        customInput.value = selectedTextColor;
+        customInput.addEventListener('input', () => {
+            const color = customInput.value;
+            if (activeColorTarget === 'text') {
+                selectedTextColor = color;
+                applyTextColor(color);
+                const btn = document.getElementById('formatTextColorButton');
+                if (btn) btn.style.setProperty('--format-color-preview', color);
+            } else {
+                selectedBgColor = color;
+                applyCellBackgroundColor(color);
+                const btn = document.getElementById('formatBackgroundColorButton');
+                if (btn) btn.style.setProperty('--format-color-preview', color);
+            }
+        });
+        customWrap.appendChild(customInput);
+        palette.appendChild(customWrap);
+
+        document.body.appendChild(palette);
+        colorPaletteEl = palette;
+        return palette;
+    }
+
+    function hideColorPalette() {
+        if (!colorPaletteEl) return;
+        colorPaletteEl.classList.add('hidden');
+        activeColorTarget = null;
+    }
+
+    function showColorPalette(anchor: HTMLElement, target: 'text' | 'background') {
+        const palette = ensureColorPalette();
+        activeColorTarget = target;
+
+        const input = palette.querySelector('#sheetsCustomColorInput') as HTMLInputElement | null;
+        if (input) {
+            input.value = target === 'text' ? selectedTextColor : selectedBgColor;
+        }
+
+        palette.classList.remove('hidden');
+        const rect = anchor.getBoundingClientRect();
+        const paletteRect = palette.getBoundingClientRect();
+        const left = Math.min(Math.max(8, rect.left), window.innerWidth - paletteRect.width - 8);
+        const top = Math.min(rect.bottom + 6, window.innerHeight - paletteRect.height - 8);
+        palette.style.left = left + 'px';
+        palette.style.top = top + 'px';
+    }
+
+    function wireEditFormattingControls() {
+        const buttonIds = [
+            'formatBoldButton',
+            'formatItalicButton',
+            'formatTextColorButton',
+            'formatBackgroundColorButton'
+        ];
+
+        buttonIds.forEach(id => {
+            const button = document.getElementById(id);
+            if (!button) return;
+            button.addEventListener('mousedown', (e) => {
+                // Keep text selection in the editable cell while clicking toolbar controls.
+                e.preventDefault();
+                captureEditSelectionRange();
+            });
+        });
+
+        const textColorButton = document.getElementById('formatTextColorButton') as HTMLButtonElement | null;
+        if (textColorButton) {
+            textColorButton.classList.add('color-format-button');
+            textColorButton.style.setProperty('--format-color-preview', selectedTextColor);
+            textColorButton.addEventListener('click', () => {
+                captureEditSelectionRange();
+                showColorPalette(textColorButton, 'text');
+            });
+        }
+
+        const bgColorButton = document.getElementById('formatBackgroundColorButton') as HTMLButtonElement | null;
+        if (bgColorButton) {
+            bgColorButton.classList.add('color-format-button');
+            bgColorButton.style.setProperty('--format-color-preview', selectedBgColor);
+            bgColorButton.addEventListener('click', () => {
+                captureEditSelectionRange();
+                showColorPalette(bgColorButton, 'background');
+            });
+        }
+
+        document.addEventListener('selectionchange', () => {
+            captureEditSelectionRange();
+        });
+
+        document.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('#sheetsColorPalette') && !target.closest('#formatTextColorButton') && !target.closest('#formatBackgroundColorButton')) {
+                hideColorPalette();
+            }
+        });
     }
 
     function normalizeCellText(text: string | null | undefined): string {
@@ -1131,6 +1826,29 @@ import { InfoTooltip } from '../shared/infoTooltip';
         const table = tableContainer ? tableContainer.querySelector('table') : null;
         if (!table) return;
 
+        table.addEventListener('contextmenu', (e) => {
+            if (!isEditMode) return;
+
+            const target = e.target as HTMLElement;
+            const rowHeader = target.closest('th.row-header') as HTMLElement | null;
+            const colHeader = target.closest('th.col-header') as HTMLElement | null;
+            if (!rowHeader && !colHeader) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (rowHeader) {
+                const row = parseInt(rowHeader.dataset.row || '-1', 10);
+                if (row >= 0) showHeaderContextMenu(e, 'row', row);
+                return;
+            }
+
+            if (colHeader) {
+                const col = parseInt(colHeader.dataset.col || '-1', 10);
+                if (col >= 0) showHeaderContextMenu(e, 'column', col);
+            }
+        });
+
         table.addEventListener('selectstart', (e) => {
             if (isEditMode) return;
             e.preventDefault();
@@ -1138,7 +1856,6 @@ import { InfoTooltip } from '../shared/infoTooltip';
         });
 
         table.addEventListener('mousedown', (e) => {
-            if (isEditMode) return;
             const target = e.target as HTMLElement;
             if (target && target.classList && (target.classList.contains('col-resize-handle') || target.classList.contains('row-resize-handle'))) {
                 return;
@@ -1146,6 +1863,21 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
             const cellTarget = target.closest('td, th') as HTMLElement;
             if (!cellTarget) return;
+
+            const isHeaderInteraction =
+                cellTarget.classList.contains('col-header') ||
+                cellTarget.classList.contains('row-header') ||
+                cellTarget.classList.contains('corner-cell');
+
+            if (isEditMode && !isHeaderInteraction) {
+                if (cellTarget.tagName === 'TD') {
+                    if (selectedCells.size > 1 || !selectedCells.has(cellTarget)) {
+                        clearSelection();
+                        selectCell(cellTarget);
+                    }
+                }
+                return;
+            }
 
             e.preventDefault();
 
@@ -1302,6 +2034,9 @@ import { InfoTooltip } from '../shared/infoTooltip';
             });
         }
 
+        if (selectionGlobalListenersAttached) return;
+        selectionGlobalListenersAttached = true;
+
         document.addEventListener('mouseup', () => {
             isSelecting = false;
             selectionStart = null;
@@ -1320,6 +2055,45 @@ import { InfoTooltip } from '../shared/infoTooltip';
             }
 
             if (isEditMode) {
+                if (isCmdOrCtrl && (e.key.toLowerCase() === 'z')) {
+                    e.preventDefault();
+                    const active = document.activeElement as HTMLElement | null;
+                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
+                    if (isEditingCell) {
+                        if (e.shiftKey) document.execCommand('redo');
+                        else document.execCommand('undo');
+                    } else if (e.shiftKey) {
+                        document.execCommand('redo');
+                    } else {
+                        document.execCommand('undo');
+                    }
+                    return;
+                }
+
+                if (isCmdOrCtrl && e.key.toLowerCase() === 'y') {
+                    e.preventDefault();
+                    const active = document.activeElement as HTMLElement | null;
+                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
+                    if (isEditingCell) {
+                        document.execCommand('redo');
+                    } else {
+                        document.execCommand('redo');
+                    }
+                    return;
+                }
+
+                if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
+                    e.preventDefault();
+                    applyEditFormatting('bold');
+                    return;
+                }
+
+                if (isCmdOrCtrl && e.key.toLowerCase() === 'i') {
+                    e.preventDefault();
+                    applyEditFormatting('italic');
+                    return;
+                }
+
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     const active = document.activeElement as HTMLElement;
@@ -1349,7 +2123,9 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
             if (isCmdOrCtrl && e.key.toLowerCase() === 'a') {
                 e.preventDefault();
-                const allCells = table.querySelectorAll('td') as NodeListOf<HTMLElement>;
+                const currentTable = document.querySelector('#tableContainer table');
+                if (!currentTable) return;
+                const allCells = currentTable.querySelectorAll('td') as NodeListOf<HTMLElement>;
                 clearSelection();
                 allCells.forEach(cell => {
                     cell.classList.add('selected');
@@ -1364,8 +2140,15 @@ import { InfoTooltip } from '../shared/infoTooltip';
         });
 
         document.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            if (headerContextMenuEl && !headerContextMenuEl.classList.contains('hidden')) {
+                if (!target.closest('#headerContextMenu') && !target.closest('th.row-header') && !target.closest('th.col-header')) {
+                    hideHeaderContextMenu();
+                }
+            }
+
             if (isEditMode) return;
-            if (!(e.target as HTMLElement).closest('table') && !(e.target as HTMLElement).closest('.toolbar')) {
+            if (!target.closest('table') && !target.closest('.toolbar')) {
                 clearSelection();
             }
         });
@@ -1585,26 +2368,53 @@ import { InfoTooltip } from '../shared/infoTooltip';
         const togglePlainViewButton = document.getElementById('togglePlainViewButton');
         const openSettingsButton = document.getElementById('openSettingsButton');
         const toggleBackgroundButton = document.getElementById('toggleBackgroundButton');
+        const helpButton = document.getElementById('helpButton');
 
         const toggleTableEditButton = document.getElementById('toggleTableEditButton');
         const saveTableEditsButton = document.getElementById('saveTableEditsButton');
         const cancelTableEditsButton = document.getElementById('cancelTableEditsButton');
+        const formatBoldButton = document.getElementById('formatBoldButton');
+        const formatItalicButton = document.getElementById('formatItalicButton');
+        const formatTextColorButton = document.getElementById('formatTextColorButton');
+        const formatBackgroundColorButton = document.getElementById('formatBackgroundColorButton');
 
-        if (toggleTableEditButton) toggleTableEditButton.classList.toggle('hidden', isEditMode);
-        if (saveTableEditsButton) saveTableEditsButton.classList.toggle('hidden', !isEditMode);
-        if (cancelTableEditsButton) cancelTableEditsButton.classList.toggle('hidden', !isEditMode);
+        if (toolbarManager) {
+            toolbarManager.setButtonVisibility('toggleTableEditButton', !isEditMode);
+            toolbarManager.setButtonVisibility('saveTableEditsButton', isEditMode);
+            toolbarManager.setButtonVisibility('cancelTableEditsButton', isEditMode);
+            toolbarManager.setButtonVisibility('formatBoldButton', isEditMode);
+            toolbarManager.setButtonVisibility('formatItalicButton', isEditMode);
+            toolbarManager.setButtonVisibility('formatTextColorButton', isEditMode);
+            toolbarManager.setButtonVisibility('formatBackgroundColorButton', isEditMode);
+        } else {
+            if (toggleTableEditButton) toggleTableEditButton.classList.toggle('hidden', isEditMode);
+            if (saveTableEditsButton) saveTableEditsButton.classList.toggle('hidden', !isEditMode);
+            if (cancelTableEditsButton) cancelTableEditsButton.classList.toggle('hidden', !isEditMode);
+            if (formatBoldButton) formatBoldButton.classList.toggle('hidden', !isEditMode);
+            if (formatItalicButton) formatItalicButton.classList.toggle('hidden', !isEditMode);
+            if (formatTextColorButton) formatTextColorButton.classList.toggle('hidden', !isEditMode);
+            if (formatBackgroundColorButton) formatBackgroundColorButton.classList.toggle('hidden', !isEditMode);
+        }
 
         if (sheetSelector) sheetSelector.classList.toggle('hidden', isEditMode);
         if (toggleExpandButton) toggleExpandButton.classList.toggle('hidden', isEditMode);
         if (togglePlainViewButton) togglePlainViewButton.classList.toggle('hidden', isEditMode);
         if (openSettingsButton) openSettingsButton.classList.toggle('hidden', isEditMode);
         if (toggleBackgroundButton) toggleBackgroundButton.classList.toggle('hidden', isEditMode);
+        if (helpButton) helpButton.classList.toggle('hidden', isEditMode);
 
         if (!isEditMode) {
             hideLinkTooltip();
+            hideHeaderContextMenu();
+            hideColorPalette();
             clearSelection();
+            lastEditRange = null;
+            pendingStructuralOps = [];
+            pendingCellStyleEdits.clear();
             return;
         }
+
+        clearSelection();
 
         // Enable contenteditable for table cells
         const table = document.querySelector('#tableContainer table');
@@ -1613,10 +2423,20 @@ import { InfoTooltip } from '../shared/infoTooltip';
             td.setAttribute('contenteditable', 'true');
             td.setAttribute('spellcheck', 'false');
             td.classList.add('editable-cell');
-            const currentText = normalizeCellText(td.textContent || '');
-            td.textContent = currentText;
-            td.dataset.originalText = currentText;
+            const htmlTd = td as HTMLElement;
+            const currentText = normalizeCellText(htmlTd.textContent || '');
+            htmlTd.dataset.originalText = currentText;
+            htmlTd.dataset.originalHtml = htmlTd.innerHTML;
+            td.addEventListener('focus', () => {
+                lastFocusedEditableCell = td as HTMLElement;
+                if (selectedCells.size !== 1 || !selectedCells.has(td as HTMLElement)) {
+                    clearSelection();
+                    selectCell(td as HTMLElement);
+                }
+            });
         });
+
+        captureOriginalCellValues();
     }
 
     function captureOriginalCellValues() {
@@ -1625,8 +2445,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
         table.querySelectorAll('td[contenteditable="true"]').forEach(td => {
             const htmlTd = td as HTMLElement;
             const currentText = normalizeCellText(htmlTd.textContent || '');
-            htmlTd.textContent = currentText;
             htmlTd.dataset.originalText = currentText;
+            htmlTd.dataset.originalHtml = htmlTd.innerHTML;
         });
     }
 
@@ -1648,6 +2468,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
         }
 
         const edits: any[] = [];
+        const richEdits: any[] = [];
         table.querySelectorAll('td[contenteditable="true"]').forEach(td => {
             const htmlTd = td as HTMLElement;
             const row = parseInt(htmlTd.getAttribute('data-rownum') || '0', 10);
@@ -1656,6 +2477,15 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
             const original = (htmlTd.dataset.originalText || '').replace(/\u00a0/g, '');
             const current = (htmlTd.textContent || '').replace(/\u00a0/g, '');
+            const originalHtml = (htmlTd.dataset.originalHtml || '').trim();
+            const currentHtml = (htmlTd.innerHTML || '').trim();
+
+            const runs = getCellRichRuns(htmlTd);
+            const shouldSaveRuns = hasRunFormatting(runs) || currentHtml !== originalHtml;
+
+            if (shouldSaveRuns) {
+                richEdits.push({ row, col, runs });
+            }
 
             if (current !== original) {
                 edits.push({ row, col, value: current });
@@ -1664,7 +2494,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
         setLoadingText('Saving worksheet...');
         showLoading();
-        vscode.postMessage({ command: 'saveXlsxEdits', sheetIndex: currentWorksheet, edits });
+        const styleEdits = Array.from(pendingCellStyleEdits.values());
+        vscode.postMessage({ command: 'saveXlsxEdits', sheetIndex: currentWorksheet, edits, richEdits, styleEdits, operations: pendingStructuralOps });
     }
 
     function setExpandedMode(isExpanded: boolean) {
@@ -1757,7 +2588,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
             },
             {
                 id: 'saveTableEditsButton',
-                icon: '',
+                icon: Icons.Save,
                 label: 'Save',
                 tooltip: 'Save table edits',
                 hidden: true,
@@ -1765,7 +2596,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
             },
             {
                 id: 'cancelTableEditsButton',
-                icon: '',
+                icon: Icons.Cancel,
                 label: 'Cancel',
                 tooltip: 'Cancel table edits',
                 hidden: true,
@@ -1773,6 +2604,38 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     setEditMode(false);
                     renderWorksheet(currentWorksheet);
                 }
+            },
+            {
+                id: 'formatBoldButton',
+                icon: Icons.Bold,
+                cls: 'icon-only',
+                tooltip: 'Bold selected text (Ctrl/Cmd+B)',
+                hidden: true,
+                onClick: () => applyEditFormatting('bold')
+            },
+            {
+                id: 'formatItalicButton',
+                icon: Icons.Italic,
+                cls: 'icon-only',
+                tooltip: 'Italic selected text (Ctrl/Cmd+I)',
+                hidden: true,
+                onClick: () => applyEditFormatting('italic')
+            },
+            {
+                id: 'formatTextColorButton',
+                icon: textColorIcon,
+                cls: 'icon-only',
+                tooltip: 'Set selected text color',
+                hidden: true,
+                onClick: () => {}
+            },
+            {
+                id: 'formatBackgroundColorButton',
+                icon: bgColorIcon,
+                cls: 'icon-only',
+                tooltip: 'Set selected text background color',
+                hidden: true,
+                onClick: () => {}
             },
             {
                 id: 'toggleExpandButton',
@@ -1865,6 +2728,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
             if (labelSpan) labelSpan.textContent = isPlainView ? 'Styled' : 'Plain';
         }
 
+        wireEditFormattingControls();
+
         if (typeof ThemeManager !== 'undefined') {
             new ThemeManager('toggleBackgroundButton', {
                 onBeforeCycle: () => !isEditMode
@@ -1920,6 +2785,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
             setButtonsEnabled(true);
             if (message.ok) {
                 showToast('Saved');
+                pendingStructuralOps = [];
+                pendingCellStyleEdits.clear();
                 if (exitAfterSave) {
                     setEditMode(false);
                 } else {
@@ -1939,14 +2806,17 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
         // Handle initVirtualTable for virtual scrolling
         if (message.command === 'initVirtualTable') {
+            const previousWorksheet = currentWorksheet;
             worksheetsMeta = Array.isArray(message.worksheets) ? message.worksheets : [];
-            currentWorksheet = 0;
+            currentWorksheet = Math.min(Math.max(previousWorksheet, 0), Math.max(worksheetsMeta.length - 1, 0));
 
             const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : 60;
             document.documentElement.style.setProperty('--row-header-width', rowHeaderWidth + 'px');
 
             attachHandlersOnce();
             populateSheetSelector();
+            const selector = document.getElementById('sheetSelector') as HTMLSelectElement | null;
+            if (selector) selector.value = String(currentWorksheet);
             
             if (currentSettings) {
                 applySettings(currentSettings);
@@ -1954,12 +2824,13 @@ import { InfoTooltip } from '../shared/infoTooltip';
             const expandBtn = document.getElementById('toggleExpandButton');
             if (expandBtn) expandBtn.setAttribute('data-state', 'default');
             setExpandedMode(false);
-            renderWorksheet(0);
+            renderWorksheet(currentWorksheet);
             return;
         }
 
         // Legacy init handler (for backwards compatibility)
         if (message.command === 'init') {
+            const previousWorksheet = currentWorksheet;
             // Convert old format to new format
             const worksheets = Array.isArray(message.worksheets) ? message.worksheets : [];
             worksheetsMeta = worksheets.map((ws: any, index: number) => ({
@@ -1980,17 +2851,19 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     });
                 }
             });
-            currentWorksheet = 0;
+            currentWorksheet = Math.min(Math.max(previousWorksheet, 0), Math.max(worksheetsMeta.length - 1, 0));
 
             const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : 60;
             document.documentElement.style.setProperty('--row-header-width', rowHeaderWidth + 'px');
 
             attachHandlersOnce();
             populateSheetSelector();
+            const selector = document.getElementById('sheetSelector') as HTMLSelectElement | null;
+            if (selector) selector.value = String(currentWorksheet);
             const expandBtn = document.getElementById('toggleExpandButton');
             if (expandBtn) expandBtn.setAttribute('data-state', 'default');
             setExpandedMode(false);
-            renderWorksheet(0);
+            renderWorksheet(currentWorksheet);
         }
     });
 

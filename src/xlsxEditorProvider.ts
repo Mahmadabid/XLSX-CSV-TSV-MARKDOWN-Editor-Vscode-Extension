@@ -226,9 +226,12 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             if (message?.command === 'saveXlsxEdits') {
                 try {
                     const edits = Array.isArray(message.edits) ? message.edits : [];
+                    const richEdits = Array.isArray(message.richEdits) ? message.richEdits : [];
+                    const styleEdits = Array.isArray(message.styleEdits) ? message.styleEdits : [];
+                    const operations = Array.isArray(message.operations) ? message.operations : [];
                     const sheetIndex = typeof message.sheetIndex === 'number' ? message.sheetIndex : 0;
 
-                    if (!edits.length) {
+                    if (!edits.length && !operations.length && !styleEdits.length && !richEdits.length) {
                         try { webview.postMessage({ command: 'saveResult', ok: true }); } catch { }
                         return;
                     }
@@ -240,10 +243,75 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         throw new Error('Worksheet not found');
                     }
 
+                    for (const op of operations) {
+                        const type = typeof op?.type === 'string' ? op.type : '';
+                        const index = typeof op?.index === 'number' ? op.index : 0;
+                        if (!type || index <= 0) continue;
+
+                        switch (type) {
+                            case 'insertRowAbove':
+                                ws.spliceRows(index, 0, []);
+                                break;
+                            case 'insertRowBelow':
+                                ws.spliceRows(index + 1, 0, []);
+                                break;
+                            case 'deleteRow':
+                                if (ws.rowCount > 1) {
+                                    ws.spliceRows(index, 1);
+                                }
+                                break;
+                            case 'insertColumnLeft':
+                                ws.spliceColumns(index, 0, []);
+                                break;
+                            case 'insertColumnRight':
+                                ws.spliceColumns(index + 1, 0, []);
+                                break;
+                            case 'deleteColumn':
+                                if (ws.columnCount > 1) {
+                                    ws.spliceColumns(index, 1);
+                                }
+                                break;
+                        }
+                    }
+
+                    const richEditedKeys = new Set<string>();
+                    for (const rich of richEdits) {
+                        const row = typeof rich?.row === 'number' ? rich.row : 0;
+                        const col = typeof rich?.col === 'number' ? rich.col : 0;
+                        const runs = Array.isArray(rich?.runs) ? rich.runs : [];
+                        if (!row || !col || !runs.length) continue;
+
+                        const richText = runs
+                            .map((r: any) => {
+                                const text = typeof r?.text === 'string' ? r.text : '';
+                                if (!text) return null;
+
+                                const font: any = {};
+                                if (r.bold === true) font.bold = true;
+                                if (r.italic === true) font.italic = true;
+                                const color = typeof r?.color === 'string' ? r.color : '';
+                                const hex = color.match(/^#([0-9a-fA-F]{6})$/);
+                                if (hex) font.color = { argb: ('FF' + hex[1]).toUpperCase() };
+
+                                return Object.keys(font).length > 0 ? { text, font } : { text };
+                            })
+                            .filter((v: any) => !!v);
+
+                        if (!richText.length) continue;
+
+                        const cell = ws.getRow(row).getCell(col);
+                        cell.value = { richText } as any;
+                        richEditedKeys.add(row + ':' + col);
+                    }
+
                     for (const edit of edits) {
                         const row = typeof edit.row === 'number' ? edit.row : undefined;
                         const col = typeof edit.col === 'number' ? edit.col : undefined;
                         if (!row || !col) continue;
+
+                        if (richEditedKeys.has(row + ':' + col)) {
+                            continue;
+                        }
 
                         const newText = typeof edit.value === 'string' ? edit.value : '';
                         const cell = ws.getRow(row).getCell(col);
@@ -256,6 +324,49 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             } as Excel.CellHyperlinkValue;
                         } else {
                             cell.value = newText;
+                        }
+                    }
+
+                    const toARGB = (hexOrColor: string): string | undefined => {
+                        if (typeof hexOrColor !== 'string') return undefined;
+                        const value = hexOrColor.trim();
+                        const hexMatch = value.match(/^#([0-9a-fA-F]{6})$/);
+                        if (hexMatch) return ('FF' + hexMatch[1]).toUpperCase();
+
+                        const rgbMatch = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+                        if (rgbMatch) {
+                            const r = Math.max(0, Math.min(255, parseInt(rgbMatch[1], 10)));
+                            const g = Math.max(0, Math.min(255, parseInt(rgbMatch[2], 10)));
+                            const b = Math.max(0, Math.min(255, parseInt(rgbMatch[3], 10)));
+                            return ('FF' + [r, g, b].map(n => n.toString(16).padStart(2, '0')).join('')).toUpperCase();
+                        }
+
+                        return undefined;
+                    };
+
+                    for (const s of styleEdits) {
+                        const row = typeof s?.row === 'number' ? s.row : 0;
+                        const col = typeof s?.col === 'number' ? s.col : 0;
+                        if (!row || !col) continue;
+
+                        const cell = ws.getRow(row).getCell(col);
+
+                        const bgArgb = toARGB(typeof s?.bgColor === 'string' ? s.bgColor : '');
+                        if (bgArgb) {
+                            cell.fill = {
+                                type: 'pattern',
+                                pattern: 'solid',
+                                fgColor: { argb: bgArgb }
+                            } as Excel.FillPattern;
+                        }
+
+                        const textArgb = toARGB(typeof s?.textColor === 'string' ? s.textColor : '');
+                        if (textArgb) {
+                            const currentFont = cell.font || {};
+                            cell.font = {
+                                ...currentFont,
+                                color: { argb: textArgb }
+                            } as Partial<Excel.Font>;
                         }
                     }
 
@@ -605,7 +716,26 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             return cell.result?.toString() || '';
         } else if (cell.type === Excel.ValueType.RichText) {
             const richTextValue = cell.value as Excel.CellRichTextValue;
-            return richTextValue.richText.map((rt: any) => rt.text).join('');
+            return richTextValue.richText.map((rt: any) => {
+                let txt = (rt.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                if (rt.font) {
+                    if (rt.font.bold) txt = `<b>${txt}</b>`;
+                    if (rt.font.italic) txt = `<i>${txt}</i>`;
+                    if (rt.font.color && rt.font.color.argb) {
+                        const argb = rt.font.color.argb;
+                        let hex = argb;
+                        if (argb.length === 8) {
+                            hex = '#' + argb.substring(2);
+                        } else if (argb.length === 6) {
+                            hex = '#' + argb;
+                        }
+                        if (hex.startsWith('#')) {
+                            txt = `<span style="color: ${hex};">${txt}</span>`;
+                        }
+                    }
+                }
+                return txt;
+            }).join('');
         } else if (cell.type === Excel.ValueType.Date) {
             const dateValue = cell.value as Date;
             return dateValue.toLocaleDateString();

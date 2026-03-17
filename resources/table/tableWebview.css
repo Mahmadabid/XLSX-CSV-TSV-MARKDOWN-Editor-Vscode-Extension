@@ -375,6 +375,10 @@ body.edit-mode td {
     overflow: visible;
 }
 
+body.edit-mode .table-scroll {
+    height: calc(100vh - 56px);
+}
+
 body.edit-mode td[contenteditable="true"]:focus {
     outline: none;
     border: 2px solid var(--warning-color) !important;
