@@ -1,5 +1,10 @@
+import { getWebviewContent } from './xlsx/xlsxHtmlRenderer';
 import * as vscode from 'vscode';
 import * as Excel from 'exceljs';
+import * as fs from 'fs';
+import * as path from 'path';
+import { createHash } from 'crypto';
+import { VERSION_HISTORY_RETENTION_MS, getVersionHistoryDir } from './shared/versionHistory';
 import { convertARGBToRGBA, isShadeOfBlack, isShadeOfWhite } from './xlsx/xlsxUtilities';
 
 export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
@@ -29,12 +34,123 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
         };
 
         // Set the webview shell immediately; it will show its own loading overlay.
-        webview.html = this.getWebviewContent(webviewPanel);
+        webview.html = getWebviewContent(webviewPanel, this.context);
 
         let isWebviewReady = false;
         // Store parsed worksheet data for virtualization
         let worksheetsData: any[] = [];
         let rowHeaderWidth = 60;
+        const filePath = document.uri.fsPath;
+
+        type VersionHistoryEntry = {
+            id: string;
+            timestamp: number;
+            fileName: string;
+            byteSize: number;
+            hash: string;
+            snapshotFile: string;
+        };
+
+        let previewVersionId: string | null = null;
+        let previewVersionTimestamp: number | null = null;
+
+        const getHistoryDir = () => {
+            return getVersionHistoryDir(this.context.globalStorageUri.fsPath, filePath, 'xlsx');
+        };
+
+        const getHistoryIndexPath = () => path.join(getHistoryDir(), 'index.json');
+        const getSnapshotPath = (snapshotFile: string) => path.join(getHistoryDir(), snapshotFile);
+
+        const ensureHistoryDir = async () => {
+            await fs.promises.mkdir(getHistoryDir(), { recursive: true });
+        };
+
+        const loadHistory = async (): Promise<VersionHistoryEntry[]> => {
+            try {
+                const raw = await fs.promises.readFile(getHistoryIndexPath(), 'utf8');
+                const parsed = JSON.parse(raw);
+                if (!Array.isArray(parsed)) {
+                    return [];
+                }
+                return parsed as VersionHistoryEntry[];
+            } catch {
+                return [];
+            }
+        };
+
+        const saveHistory = async (entries: VersionHistoryEntry[]) => {
+            await ensureHistoryDir();
+            await fs.promises.writeFile(getHistoryIndexPath(), JSON.stringify(entries), 'utf8');
+        };
+
+        const pruneHistory = async (entries?: VersionHistoryEntry[]) => {
+            const now = Date.now();
+            const source = entries ?? await loadHistory();
+            const kept: VersionHistoryEntry[] = [];
+
+            for (const entry of source) {
+                if (!entry || typeof entry.snapshotFile !== 'string') {
+                    continue;
+                }
+
+                const expired = now - entry.timestamp > VERSION_HISTORY_RETENTION_MS;
+                const snapshotPath = getSnapshotPath(entry.snapshotFile);
+
+                if (expired) {
+                    try {
+                        await fs.promises.unlink(snapshotPath);
+                    } catch {
+                        // ignore
+                    }
+                    continue;
+                }
+
+                try {
+                    await fs.promises.access(snapshotPath, fs.constants.F_OK);
+                    kept.push(entry);
+                } catch {
+                    // ignore missing snapshot files
+                }
+            }
+
+            if (kept.length !== source.length) {
+                await saveHistory(kept);
+            }
+
+            return kept;
+        };
+
+        const persistVersionSnapshot = async () => {
+            try {
+                const history = await pruneHistory();
+                const snapshotBytes = await fs.promises.readFile(filePath);
+                const snapshotHash = createHash('sha1').update(snapshotBytes).digest('hex');
+                const last = history.length ? history[history.length - 1] : null;
+                if (last?.hash === snapshotHash) {
+                    return;
+                }
+
+                const now = Date.now();
+                const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
+                const snapshotFile = `${id}.xlsx`;
+
+                await ensureHistoryDir();
+                await fs.promises.writeFile(getSnapshotPath(snapshotFile), snapshotBytes);
+
+                history.push({
+                    id,
+                    timestamp: now,
+                    fileName: path.basename(filePath),
+                    byteSize: snapshotBytes.length,
+                    hash: snapshotHash,
+                    snapshotFile
+                });
+
+                await saveHistory(history);
+            } catch {
+                // ignore history snapshot errors
+            }
+        };
 
         const getPersistedSettings = () => {
             const cfg = vscode.workspace.getConfiguration('xlsxViewer');
@@ -58,6 +174,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
+                spaciousCells: cfg.get('xlsx.spaciousCells', false),
                 isDefaultEditor: isDefault
             };
         };
@@ -93,21 +210,24 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     columnCount: ws.data.maxCol,
                     columnWidths: ws.data.columnWidths,
                     mergedCells: ws.data.mergedCells,
-                    rowHeights: ws.data.rows.map((row: any) => row.height || 28)
+                    rowHeights: ws.data.rows.map((row: any) => row.height || 21)
                 }));
                 webview.postMessage({
                     command: 'initVirtualTable',
                     worksheets: worksheetsMeta,
-                    rowHeaderWidth
+                    rowHeaderWidth,
+                    previewMode: !!previewVersionId,
+                    versionId: previewVersionId,
+                    timestamp: previewVersionTimestamp
                 });
             } catch {
                 // ignore
             }
         };
 
-        const loadWorkbookPayload = async () => {
+        const loadWorkbookPayload = async (sourcePath: string = filePath) => {
             const workbook = new Excel.Workbook();
-            await workbook.xlsx.readFile(document.uri.fsPath);
+            await workbook.xlsx.readFile(sourcePath);
 
             worksheetsData = workbook.worksheets.map((worksheet, index) => {
                 const data = this.extractWorksheetData(worksheet);
@@ -126,12 +246,104 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
         webview.onDidReceiveMessage(async message => {
             if (message?.command === 'webviewReady') {
                 isWebviewReady = true;
+                await pruneHistory();
+                await persistVersionSnapshot();
                 trySendSettings();
                 trySendInit();
                 // Send current theme info to webview
                 try {
                     webview.postMessage({ type: 'setTheme', kind: vscode.window.activeColorTheme.kind });
                 } catch { }
+                return;
+            }
+
+            if (message?.command === 'showVersionHistory') {
+                try {
+                    const history = await pruneHistory();
+                    if (!history.length) {
+                        webview.postMessage({
+                            command: 'versionHistoryError',
+                            message: 'No saved versions available'
+                        });
+                        return;
+                    }
+
+                    const sorted = [...history].sort((a, b) => b.timestamp - a.timestamp);
+                    const picked = await vscode.window.showQuickPick(
+                        sorted.map(entry => ({
+                            label: new Date(entry.timestamp).toLocaleString(),
+                            description: `${entry.fileName} • ${(entry.byteSize / 1024).toFixed(1)} KB`,
+                            detail: `Saved ${Math.max(1, Math.round((Date.now() - entry.timestamp) / 60000))} min ago`,
+                            entry
+                        })),
+                        { placeHolder: `Version history (${sorted.length} versions)` }
+                    );
+
+                    if (!picked?.entry) {
+                        return;
+                    }
+
+                    await loadWorkbookPayload(getSnapshotPath(picked.entry.snapshotFile));
+                    previewVersionId = picked.entry.id;
+                    previewVersionTimestamp = picked.entry.timestamp;
+                    trySendInit();
+                } catch (err) {
+                    webview.postMessage({
+                        command: 'versionHistoryError',
+                        message: `Version history failed: ${String(err)}`
+                    });
+                }
+                return;
+            }
+
+            if (message?.command === 'cancelVersionPreview') {
+                if (previewVersionId) {
+                    previewVersionId = null;
+                    previewVersionTimestamp = null;
+                    await loadWorkbookPayload();
+                    trySendInit();
+                    webview.postMessage({ command: 'versionPreviewCancelledXlsx' });
+                }
+                return;
+            }
+
+            if (message?.command === 'restoreVersion') {
+                try {
+                    const versionId = typeof message.versionId === 'string' ? message.versionId : '';
+                    if (!versionId) {
+                        return;
+                    }
+
+                    const history = await pruneHistory();
+                    const entry = history.find(item => item.id === versionId);
+                    if (!entry) {
+                        webview.postMessage({
+                            command: 'versionHistoryError',
+                            message: 'Selected version is no longer available'
+                        });
+                        return;
+                    }
+
+                    const snapshotBuffer = await fs.promises.readFile(getSnapshotPath(entry.snapshotFile));
+                    await vscode.workspace.fs.writeFile(document.uri, snapshotBuffer);
+
+                    previewVersionId = null;
+                    previewVersionTimestamp = null;
+                    await loadWorkbookPayload();
+                    trySendInit();
+                    await persistVersionSnapshot();
+
+                    webview.postMessage({
+                        command: 'versionRestoredXlsx',
+                        versionId: entry.id,
+                        timestamp: entry.timestamp
+                    });
+                } catch (err) {
+                    webview.postMessage({
+                        command: 'versionHistoryError',
+                        message: `Restore failed: ${String(err)}`
+                    });
+                }
                 return;
             }
 
@@ -226,6 +438,11 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
             if (message?.command === 'saveXlsxEdits') {
                 try {
+                    if (previewVersionId) {
+                        webview.postMessage({ command: 'saveResult', ok: false, error: 'Preview mode is read-only' });
+                        return;
+                    }
+
                     const edits = Array.isArray(message.edits) ? message.edits : [];
                     const richEdits = Array.isArray(message.richEdits) ? message.richEdits : [];
                     const styleEdits = Array.isArray(message.styleEdits) ? message.styleEdits : [];
@@ -372,10 +589,18 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     }
 
                     await workbook.xlsx.writeFile(document.uri.fsPath);
+                    await persistVersionSnapshot();
+                    previewVersionId = null;
+                    previewVersionTimestamp = null;
 
-                    // Refresh the rendered payload after saving
-                    await loadWorkbookPayload();
-                    trySendInit();
+                    if (operations.length > 0) {
+                        // Refresh the rendered payload after structural operations
+                        await loadWorkbookPayload();
+                        trySendInit();
+                    } else {
+                        // For pure text/style edits, update worksheetsData internally but don't force a full webview re-render
+                        await loadWorkbookPayload(); 
+                    }
                     try { webview.postMessage({ command: 'saveResult', ok: true }); } catch { }
                 } catch (err) {
                     try { webview.postMessage({ command: 'saveResult', ok: false, error: String(err) }); } catch { }
@@ -928,65 +1153,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
         return label;
     }
 
-    private getWebviewContent(webviewPanel: vscode.WebviewPanel): string {
-        const webview = webviewPanel.webview;
 
-        const scriptUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'xlsx', 'xlsxWebview.js')
-        );
-        const themeStyleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'shared', 'theme.css')
-        );
-        const styleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'xlsx', 'xlsxWebview.css')
-        );
-        const imgUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'table', 'view.png')
-        );
-        const svgUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'xlsx', 'table.svg')
-        );
-        const cspSource = webview.cspSource;
-
-        return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline';">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XLSX Viewer</title>
-    <link href="${themeStyleUri}" rel="stylesheet" />
-    <link href="${styleUri}" rel="stylesheet" />
-    <script>
-        window.viewImgUri = "${imgUri}";
-        window.logoSvgUri = "${svgUri}";
-    </script>
-</head>
-<body>
-    <div class="header-background"></div>
-
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="spinner"></div>
-        <div class="loading-text">Rendering worksheet...</div>
-    </div>
-
-    <div class="toolbar" id="toolbar"></div>
-    <div id="content">
-        <div id="tableContainer"></div>
-    </div>
-    <div class="selection-info" id="selectionInfo"></div>
-    <div class="resize-indicator" id="resizeIndicator"></div>
-
-    <noscript>
-        <div style="padding: 8px; margin-top: 10px; background: #fff3cd; border: 1px solid #ffeeba;">
-            JavaScript is disabled in this webview, so the XLSX table cannot load.
-        </div>
-    </noscript>
-
-    <script src="${scriptUri}"></script>
-</body>
-</html>`;
-    }
 }
 
 

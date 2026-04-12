@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { VERSION_HISTORY_RETENTION_MS, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS, getVersionHistoryFile } from './shared/versionHistory';
 
 export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
     constructor(private readonly context: vscode.ExtensionContext) { }
@@ -22,6 +23,93 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             const filePath = document.uri.fsPath;
             const documentDirUri = vscode.Uri.file(path.dirname(filePath));
             const workspaceFolders = vscode.workspace.workspaceFolders?.map(f => f.uri) ?? [];
+            const workspaceFolderUri = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString() || null;
+
+            type VersionHistoryEntry = {
+                id: string;
+                timestamp: number;
+                charCount: number;
+                content: string;
+            };
+
+            let versionSnapshotDebounceTimer: NodeJS.Timeout | null = null;
+            let currentContent = '';
+
+            const getHistoryFilePath = () => {
+                return getVersionHistoryFile(this.context.globalStorageUri.fsPath, filePath, 'md');
+            };
+
+            const ensureHistoryDir = async () => {
+                await fs.promises.mkdir(path.dirname(getHistoryFilePath()), { recursive: true });
+            };
+
+            const loadHistory = async (): Promise<VersionHistoryEntry[]> => {
+                try {
+                    const raw = await fs.promises.readFile(getHistoryFilePath(), 'utf8');
+                    const parsed = JSON.parse(raw);
+                    if (!Array.isArray(parsed)) {
+                        return [];
+                    }
+                    return parsed as VersionHistoryEntry[];
+                } catch {
+                    return [];
+                }
+            };
+
+            const saveHistory = async (entries: VersionHistoryEntry[]) => {
+                await ensureHistoryDir();
+                await fs.promises.writeFile(getHistoryFilePath(), JSON.stringify(entries), 'utf8');
+            };
+
+            const pruneHistory = async (entries?: VersionHistoryEntry[]) => {
+                const now = Date.now();
+                const source = entries ?? await loadHistory();
+                const kept = source.filter(entry => now - entry.timestamp <= VERSION_HISTORY_RETENTION_MS);
+                if (kept.length !== source.length) {
+                    await saveHistory(kept);
+                }
+                return kept;
+            };
+
+            const persistVersionSnapshot = async (contentOverride?: string) => {
+                const content = typeof contentOverride === 'string'
+                    ? contentOverride
+                    : await fs.promises.readFile(filePath, 'utf8');
+                const history = await pruneHistory();
+                const last = history.length ? history[history.length - 1] : null;
+                if (last?.content === content) {
+                    return;
+                }
+
+                const now = Date.now();
+                history.push({
+                    id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+                    timestamp: now,
+                    charCount: content.length,
+                    content
+                });
+                await saveHistory(history);
+            };
+
+            const saveVersionSnapshot = (contentOverride?: string) => {
+                if (versionSnapshotDebounceTimer) {
+                    clearTimeout(versionSnapshotDebounceTimer);
+                }
+
+                versionSnapshotDebounceTimer = setTimeout(() => {
+                    versionSnapshotDebounceTimer = null;
+                    void persistVersionSnapshot(contentOverride);
+                }, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS);
+            };
+
+            const buildInitMarkdownPayload = (content: string) => ({
+                command: 'initMarkdown',
+                content,
+                fileName: vscode.workspace.asRelativePath(document.uri),
+                documentUri: document.uri.toString(),
+                documentDirUri: documentDirUri.toString(),
+                workspaceFolderUri
+            });
 
             // Set up webview
             webviewPanel.webview.options = {
@@ -42,16 +130,12 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         try {
                             // Read the markdown file
                             const content = await fs.promises.readFile(filePath, 'utf-8');
+                            currentContent = content;
+                            await pruneHistory();
+                            await persistVersionSnapshot(content);
 
                             // Send content to webview
-                            webviewPanel.webview.postMessage({
-                                command: 'initMarkdown',
-                                content,
-                                fileName: vscode.workspace.asRelativePath(document.uri),
-                                documentUri: document.uri.toString(),
-                                documentDirUri: documentDirUri.toString(),
-                                workspaceFolderUri: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString() || null
-                            });
+                            webviewPanel.webview.postMessage(buildInitMarkdownPayload(content));
 
                             // Calculate if MD is enabled as default
                             const globalCfg = vscode.workspace.getConfiguration('workbench');
@@ -149,9 +233,57 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         try {
                             const text = typeof message.text === 'string' ? message.text : '';
                             await vscode.workspace.fs.writeFile(document.uri, Buffer.from(text, 'utf8'));
+                            currentContent = text;
+                            saveVersionSnapshot(text);
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: true });
                         } catch (err) {
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: String(err) });
+                        }
+                        break;
+
+                    case 'showVersionHistory':
+                        try {
+                            const history = await pruneHistory();
+                            if (!history.length) {
+                                webviewPanel.webview.postMessage({
+                                    command: 'versionHistoryError',
+                                    message: 'No saved versions available'
+                                });
+                                break;
+                            }
+
+                            const sorted = [...history].sort((a, b) => b.timestamp - a.timestamp);
+                            const picked = await vscode.window.showQuickPick(
+                                sorted.map(entry => ({
+                                    label: new Date(entry.timestamp).toLocaleString(),
+                                    description: `${entry.charCount} chars`,
+                                    detail: `Saved ${Math.max(1, Math.round((Date.now() - entry.timestamp) / 60000))} min ago`,
+                                    entry
+                                })),
+                                {
+                                    placeHolder: `Version history (${sorted.length} versions)`
+                                }
+                            );
+
+                            if (!picked?.entry) {
+                                break;
+                            }
+
+                            await vscode.workspace.fs.writeFile(document.uri, Buffer.from(picked.entry.content, 'utf8'));
+                            currentContent = picked.entry.content;
+                            await persistVersionSnapshot(currentContent);
+
+                            webviewPanel.webview.postMessage(buildInitMarkdownPayload(currentContent));
+                            webviewPanel.webview.postMessage({
+                                command: 'versionRestoredMd',
+                                versionId: picked.entry.id,
+                                timestamp: picked.entry.timestamp
+                            });
+                        } catch (err) {
+                            webviewPanel.webview.postMessage({
+                                command: 'versionHistoryError',
+                                message: `Version history failed: ${String(err)}`
+                            });
                         }
                         break;
 
@@ -259,6 +391,10 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             webviewPanel.onDidDispose(() => {
                 configChangeDisposable.dispose();
                 themeChangeDisposable.dispose();
+                if (versionSnapshotDebounceTimer) {
+                    clearTimeout(versionSnapshotDebounceTimer);
+                    versionSnapshotDebounceTimer = null;
+                }
             });
 
         } catch (error) {

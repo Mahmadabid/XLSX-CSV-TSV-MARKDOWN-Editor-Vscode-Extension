@@ -154,7 +154,7 @@ function wrapCodeLines(html: string): string {
 
 function setButtonsEnabled(enabled: boolean) {
     const ids = ['toggleViewButton', 'toggleEditModeButton', 'previewEditButton', 'saveEditsButton',
-        'cancelEditsButton', 'toggleBackgroundButton', 'openSettingsButton', 'disableMdEditorButton'];
+        'cancelEditsButton', 'toggleBackgroundButton', 'openSettingsButton', 'disableMdEditorButton', 'versionHistoryButton'];
     ids.forEach((id) => {
         const el = $(id) as HTMLButtonElement;
         if (el) el.disabled = !enabled;
@@ -1360,7 +1360,29 @@ function applySettings(settings: any, persist = false) {
     refreshSyncMetrics();
 
     // Sticky toolbar
-    document.body.classList.toggle('sticky-toolbar-enabled', currentSettings.stickyToolbar);
+    if (toolbarManager) {
+        toolbarManager.applyStickyLayout(currentSettings.stickyToolbar, 'content', '#content');
+        
+        // Handle formatting toolbar specifically for MD so it scrolls with the content
+        const fmtToolbar = $('formattingToolbar');
+        const contentArea = $('content');
+        const mainToolbar = $('toolbar');
+        if (fmtToolbar && contentArea) {
+            if (currentSettings.stickyToolbar) {
+                if (mainToolbar && mainToolbar.parentNode) {
+                    mainToolbar.parentNode.insertBefore(fmtToolbar, mainToolbar.nextSibling);
+                } else {
+                    document.body.insertBefore(fmtToolbar, contentArea);
+                }
+            } else {
+                if (mainToolbar && mainToolbar.parentNode === contentArea) {
+                    contentArea.insertBefore(fmtToolbar, mainToolbar.nextSibling);
+                } else {
+                    contentArea.insertBefore(fmtToolbar, contentArea.firstChild);
+                }
+            }
+        }
+    }
 
     // Preview position (left or right) - only affects split-view, not outline
     if (container && isEditMode && !isPreviewEditMode) {
@@ -1475,10 +1497,8 @@ function initializeSettings() {
 
 // ===== Header Height =====
 function updateHeaderHeight() {
-    const toolbar = document.querySelector('.toolbar') as HTMLElement;
-    if (toolbar) {
-        const height = toolbar.offsetHeight;
-        document.documentElement.style.setProperty('--header-height', height + 'px');
+    if (toolbarManager) {
+        toolbarManager.updateHeaderHeight();
     }
 }
 
@@ -1521,6 +1541,14 @@ window.addEventListener('message', (event) => {
                 showToast('Error saving');
                 shouldExitEditMode = false;
             }
+            break;
+
+        case 'versionHistoryError':
+            showToast(m.message || 'Version history failed');
+            break;
+
+        case 'versionRestoredMd':
+            showToast('Version restored');
             break;
 
         case 'resolvedImageUris':
@@ -1590,6 +1618,15 @@ function wireButtons() {
             tooltip: 'Search in Preview (Ctrl+Shift+F)',
             cls: 'icon-only',
             onClick: () => toggleSearchOverlay()
+        },
+        {
+            id: 'versionHistoryButton',
+            icon: Icons.VersionHistory,
+            tooltip: 'Version History',
+            cls: 'icon-only edit-mode-hide',
+            onClick: () => {
+                vscode.postMessage({ command: 'showVersionHistory' });
+            }
         },
         {
             id: 'focusModeButton',

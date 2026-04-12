@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.8.2 - Version History, Undo/Redo, and Focus Fixes
+- Fixed Version History preview/restore flow so preview remains read-only until Restore is confirmed.
+- Improved Undo/Redo handling to preserve non-structural scroll position and avoid data loss during table edits.
+- Replaced the version history button label with an SVG-only icon in table/XLSX toolbars.
+- Added focus capture to table and XLSX webviews so clicking the grid clears file selection and Delete targets the table cell.
+- Mirrored version-history preview behavior into the XLSX and MD editor for a consistent experience across CSV, TSV, MD and XLSX.
+- Fixed sticky toolbar and header layout issues in xlsx and md.
+- Added Spacious Cells support to XLSX tables, matching the CSV/TSV behavior.
+- Fixed ctrl + z and ctrl + y not working properly in xlsx edit mode.
+- Modified UI for xlsx to match the google sheets style more closely.
+
 ## v1.8.1 - Copy Fix & Version History
 - Fixed an issue where Ctrl+C, Ctrl+V, and Ctrl+A were incorrectly intercepted while editing a cell, restoring native browser text selection.
 - Redesigned and centered the Autosave confirmation alert for better visibility.

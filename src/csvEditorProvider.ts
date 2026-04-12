@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createHash } from 'crypto';
+import { VERSION_HISTORY_RETENTION_MS, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS, getVersionHistoryFile } from './shared/versionHistory';
 
 export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
     constructor(private readonly context: vscode.ExtensionContext) { }
@@ -175,13 +175,10 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 return null;
             };
 
-            const HISTORY_RETENTION_MS = 48 * 60 * 60 * 1000;
-            const VERSION_SNAPSHOT_DEBOUNCE_MS = 1000;
             let versionSnapshotDebounceTimer: any = null;
 
             const getHistoryFilePath = () => {
-                const key = createHash('sha1').update(filePath).digest('hex');
-                return path.join(this.context.globalStorageUri.fsPath, '.history', `csv-${key}.json`);
+                return getVersionHistoryFile(this.context.globalStorageUri.fsPath, filePath, 'csv');
             };
 
             const ensureHistoryDir = async () => {
@@ -211,7 +208,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
             const pruneHistory = async (entries?: VersionHistoryEntry[]) => {
                 const now = Date.now();
                 const source = entries ?? await loadHistory();
-                const pruned = source.filter(entry => now - entry.timestamp <= HISTORY_RETENTION_MS);
+                const pruned = source.filter(entry => now - entry.timestamp <= VERSION_HISTORY_RETENTION_MS);
                 if (pruned.length !== source.length) {
                     await saveHistory(pruned);
                 }
@@ -251,7 +248,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 versionSnapshotDebounceTimer = setTimeout(() => {
                     versionSnapshotDebounceTimer = null;
                     void persistVersionSnapshot();
-                }, VERSION_SNAPSHOT_DEBOUNCE_MS);
+                }, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS);
             };
 
             const serializeCsv = () => {
@@ -349,6 +346,8 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 columnCount = 0;
                                 await parseCSV();
                             }
+
+                            await persistVersionSnapshot();
 
                             // Send initial metadata to webview
                             webviewPanel.webview.postMessage({

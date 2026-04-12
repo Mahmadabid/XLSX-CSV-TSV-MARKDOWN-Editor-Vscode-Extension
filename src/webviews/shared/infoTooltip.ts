@@ -11,9 +11,9 @@ export class InfoTooltip {
             tooltipDiv.innerHTML = `
                 <img src="${viewImgUri}" alt="Change to ${viewName}" style="width: auto; height: 32px; margin-left: auto; margin-top: 2px;" />
                 <span class="tooltiptext hidden">
-                    <span class="warning">Important:</span> Click the blue table icon <img src="${logoSvgUri}" alt="Table Icon" style="width: 16px; vertical-align: middle; height: 16px;" />
+                    <span class="warning">Important:</span> Click the toolbar button <img src="${logoSvgUri}" alt="Switch icon" style="width: 16px; vertical-align: middle; height: 16px;" />
                      to switch to ${viewName} from edit file mode.
-                    <span class="instruction">The table icon will only work on edit file mode and is located on the top right corner in the editor toolbar.</span>
+                    <span class="instruction">This action only works in edit file mode and appears in the top right corner of the editor toolbar.</span>
                 </span>
             `;
             toolbarEl.appendChild(tooltipDiv);

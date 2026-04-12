@@ -165,9 +165,30 @@ input[type="checkbox"]:hover {
     z-index: 1;
 }
 
-body:not(.sticky-toolbar-enabled) #content {
-    height: calc(100vh - var(--header-height));
+body:not(.sticky-toolbar-enabled) {
+    overflow: hidden;
 }
+
+body:not(.sticky-toolbar-enabled) #content {
+    height: 100vh;
+    overflow: auto;
+}
+
+/* Non-sticky: let #content be the primary scroller so toolbar scrolls away */
+body:not(.sticky-toolbar-enabled) .markdown-container {
+    height: auto;
+    min-height: calc(100vh - var(--header-height));
+    overflow: visible;
+}
+
+body:not(.sticky-toolbar-enabled) .markdown-preview,
+body:not(.sticky-toolbar-enabled) .markdown-editor,
+body:not(.sticky-toolbar-enabled) .toc-panel {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+}
+
 
 /* ===== Loading Indicator ===== */
 .loading-indicator {
@@ -1037,10 +1058,26 @@ body.edit-mode .edit-mode-hide {
 }
 
 body.sticky-toolbar-enabled .toolbar {
-    padding: 4px 12px;
     position: fixed;
     top: 0;
+    left: 0;
+    right: 0;
     z-index: 10000;
+    padding: 4px 12px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+body:not(.sticky-toolbar-enabled) .toolbar {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    margin: 0;
+    background-color: var(--panel-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 body.sticky-toolbar-enabled .toolbar.expanded-toolbar {
@@ -1050,11 +1087,6 @@ body.sticky-toolbar-enabled .toolbar.expanded-toolbar {
 
 body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar {
     position: relative;
-}
-
-body:not(.sticky-toolbar-enabled) .toolbar {
-    position: relative;
-    width: 100%;
 }
 
 .toolbar img {
@@ -1080,13 +1112,17 @@ body:not(.sticky-toolbar-enabled) .toolbar {
 
 .markdown-preview,
 .markdown-editor,
-.toolbar {
+.toolbar,
+#content {
     /* Firefox */
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 /* WebKit-based browsers (Chrome, Edge, Safari) */
+body::-webkit-scrollbar,
+html::-webkit-scrollbar,
+#content::-webkit-scrollbar,
 .markdown-preview::-webkit-scrollbar,
 .markdown-editor::-webkit-scrollbar,
 .toolbar::-webkit-scrollbar {
@@ -1094,12 +1130,18 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     height: 10px;
 }
 
+body::-webkit-scrollbar-track,
+html::-webkit-scrollbar-track,
+#content::-webkit-scrollbar-track,
 .markdown-preview::-webkit-scrollbar-track,
 .markdown-editor::-webkit-scrollbar-track,
 .toolbar::-webkit-scrollbar-track {
     background: var(--scrollbar-track);
 }
 
+body::-webkit-scrollbar-thumb,
+html::-webkit-scrollbar-thumb,
+#content::-webkit-scrollbar-thumb,
 .markdown-preview::-webkit-scrollbar-thumb,
 .markdown-editor::-webkit-scrollbar-thumb,
 .toolbar::-webkit-scrollbar-thumb {
@@ -1114,15 +1156,24 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     border-radius: 6px;
 }
 
+body::-webkit-scrollbar-thumb:hover,
+html::-webkit-scrollbar-thumb:hover,
+#content::-webkit-scrollbar-thumb:hover,
 .markdown-preview::-webkit-scrollbar-thumb:hover,
 .markdown-editor::-webkit-scrollbar-thumb:hover,
 .toolbar::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
 }
 
+body::-webkit-scrollbar-button,
+html::-webkit-scrollbar-button,
+#content::-webkit-scrollbar-button,
 .markdown-preview::-webkit-scrollbar-button,
 .markdown-editor::-webkit-scrollbar-button,
 .toolbar::-webkit-scrollbar-button,
+body::-webkit-scrollbar-corner,
+html::-webkit-scrollbar-corner,
+#content::-webkit-scrollbar-corner,
 .markdown-preview::-webkit-scrollbar-corner,
 .markdown-editor::-webkit-scrollbar-corner,
 .toolbar::-webkit-scrollbar-corner {
@@ -1145,7 +1196,7 @@ body:not(.sticky-toolbar-enabled) .toolbar {
 
 body.sticky-toolbar-enabled .formatting-toolbar {
     position: sticky;
-    top: 40px;
+    top: var(--header-height);
 }
 
 .formatting-toolbar.hidden {

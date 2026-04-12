@@ -13,11 +13,78 @@ export interface ToolbarButton {
 export class ToolbarManager {
     private container: HTMLElement;
     private buttons: Map<string, HTMLButtonElement> = new Map();
+    private resizeObserver: ResizeObserver | null = null;
+    private isSticky: boolean = false;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
-        if (!el) throw new Error(`Toolbar container ${containerId} not found`);
+        if (!el) throw new Error(`Toolbar container ${containerId} not found`); 
         this.container = el;
+    }
+
+    applyStickyLayout(stickyToolbar: boolean, contentId: string = 'content', scrollQuery: string = '.table-scroll') {
+        this.isSticky = stickyToolbar;
+        const container = this.container;
+        const content = document.getElementById(contentId);
+        const scrollArea = document.querySelector(scrollQuery);
+        const headerBg = document.querySelector('.header-background') as HTMLElement | null;
+
+        if (stickyToolbar) {
+            document.body.classList.add('sticky-toolbar-enabled');
+            if (container.parentNode !== document.body) {
+                if (content && content.parentNode === document.body) {
+                    document.body.insertBefore(container, content);
+                } else if (document.body.firstChild) {
+                    document.body.insertBefore(container, document.body.firstChild);
+                } else {
+                    document.body.appendChild(container);
+                }
+            }
+            container.classList.remove('not-sticky');
+            container.classList.add('expanded-toolbar');
+            if (headerBg) headerBg.style.display = '';
+
+            if (!this.resizeObserver) {
+                this.resizeObserver = new ResizeObserver(() => this.updateHeaderHeight());
+                this.resizeObserver.observe(container);
+            }
+        } else {
+            document.body.classList.remove('sticky-toolbar-enabled');
+            const target = scrollArea || content || document.body;
+            if (target && container.parentNode !== target) {
+                target.insertBefore(container, target.firstChild);
+            }
+            container.classList.add('not-sticky');
+            container.classList.remove('expanded-toolbar');
+            if (headerBg) headerBg.style.display = 'none';
+
+            if (this.resizeObserver) {
+                this.resizeObserver.disconnect();
+                this.resizeObserver = null;
+            }
+        }
+        this.updateHeaderHeight();
+    }
+
+    updateHeaderHeight() {
+        const headerBg = document.querySelector('.header-background') as HTMLElement | null;
+
+        if (!this.isSticky) {
+            document.documentElement.style.setProperty('--header-height', '0px');
+            if (headerBg) headerBg.style.height = '';
+            return;
+        }
+
+        let height = Math.max(6, Math.ceil(this.container.getBoundingClientRect().height));
+        const maxHeightStr = getComputedStyle(document.documentElement).getPropertyValue('--header-height-max');
+        const maxHeight = parseInt(maxHeightStr, 10) || 96;
+        height = Math.min(height, maxHeight);
+
+        document.documentElement.style.setProperty('--header-height', height + 'px');
+
+        if (headerBg) {
+            headerBg.style.height = height + 'px';
+        }
     }
 
     setButtons(buttons: ToolbarButton[]) {

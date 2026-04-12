@@ -8,7 +8,7 @@
 
 body {
     font-family: var(--font-family);
-    padding: 48px 0 0 3px;
+    padding: 0;
     background-color: var(--bg-color);
     color: var(--text-color);
     margin: 0;
@@ -17,6 +17,10 @@ body {
     line-height: 1.4;
     -webkit-font-smoothing: antialiased;
     transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+body.sticky-toolbar-enabled {
+    padding-top: var(--header-height);
 }
 
 /* Sticky toolbar parity with CSV */
@@ -37,15 +41,38 @@ body.sticky-toolbar-disabled .toolbar {
     left: auto;
     width: 100%;
     z-index: 2;
+    padding: 4px 12px;
 }
 
 .toolbar.not-sticky {
     position: relative;
 }
 
+.toolbar.expanded-toolbar {
+    padding: 12px 18px;
+    gap: 16px;
+    overflow-x: auto;
+    white-space: nowrap;
+    align-items: center;
+}
+
+body.sticky-toolbar-enabled .toolbar {
+    padding: 4px 12px;
+    background-color: var(--toolbar-bg);
+}
+
+body.sticky-toolbar-enabled .toolbar.expanded-toolbar {
+    padding: 4px 18px;
+    gap: 12px;
+}
+
+:root {
+    --header-height-max: 96px;
+}
+
 body:not(.sticky-toolbar-enabled) .table-scroll,
 body.sticky-toolbar-disabled .table-scroll {
-    max-height: calc(100vh - 6px);
+    max-height: calc(100vh);
 }
 
 /* Toolbar */
@@ -73,7 +100,7 @@ body.sticky-toolbar-disabled .table-scroll {
     max-width: 240px;
     position: relative;
     z-index: 10001;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .sheet-selector:focus {
@@ -192,6 +219,38 @@ td[data-hyperlink] {
     transform: translate(-50%, -50%) scale(1);
 }
 
+.version-preview-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    margin: 8px 12px 0;
+    border: 1px solid var(--vscode-widget-border);
+    border-radius: 8px;
+    background: var(--vscode-editorInfo-background);
+    color: var(--vscode-editorInfo-foreground);
+    box-shadow: var(--shadow-sm);
+}
+
+.version-preview-banner.hidden {
+    display: none;
+}
+
+.version-preview-text {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.version-preview-actions {
+    display: inline-flex;
+    gap: 8px;
+}
+
+body.preview-mode td {
+    cursor: default;
+}
+
 .toast-icon-wrapper {
     width: 22px;
     height: 22px;
@@ -246,18 +305,15 @@ body.edit-mode td.editable-cell:focus {
 #content {
     position: relative;
     z-index: 1;
+    height: calc(100vh - var(--header-height));
 }
 
 .table-scroll {
-    height: calc(100vh - 48px);
+    height: calc(100vh - var(--header-height));
     width: 100%;
     overflow: auto;
     position: relative;
     -webkit-overflow-scrolling: touch;
-}
-
-body.edit-mode .table-scroll {
-    height: calc(100vh - 56px);
 }
 
 .table-scroll,
@@ -304,44 +360,86 @@ body.edit-mode .table-scroll {
 
 /* Table */
 table {
-    border-collapse: separate;
-    border-spacing: 0;
-    font-size: 13px;
-    position: relative;
-    background-color: var(--bg-color);
+    border-collapse: collapse;
+    width: max-content;
+    min-width: 0;
+    table-layout: fixed;
     user-select: none;
     -webkit-user-select: none;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-spacing: 0;
+    border: none;
+    border-radius: 0;
     overflow: visible;
+    background-color: var(--bg-color);
 }
 
-th,
-td {
+#xlsxTable th,
+#xlsxTable td {
     border: 1px solid var(--border-color);
-    padding: 8px 12px;
-    position: relative;
+    padding: 2px 6px;
+    text-align: left;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    position: relative;
     cursor: cell;
+    font-family: Arial, sans-serif;
+    font-size: 10pt;
+    line-height: normal;
+    height: 21px;
+    max-width: 200px;
+}
+
+body.spacious-cells #xlsxTable td {
+    padding: 2px 6px;
+    height: 32px !important;
+    font-size: 10.5pt;
+}
+
+body.spacious-cells #xlsxTable th {
+    padding: 2px 6px;
+    height: 26px !important;
+    font-size: 10.5pt;
+}
+
+body.expanded-mode table {
+    table-layout: auto;
+}
+
+body.expanded-mode #xlsxTable th,
+body.expanded-mode #xlsxTable td,
+body.expanded-mode th.col-header,
+body.expanded-mode td {
+    max-width: none !important;
+}
+
+th {
+    background-color: var(--header-bg);
+    font-weight: normal;
+    color: var(--text-color);
+    text-align: center;
+}
+
+tbody th:first-child,
+tbody td:first-child,
+thead th:first-child {
+    width: auto !important;
+    min-width: 30px !important;
+    background-color: var(--header-bg);
+    text-align: center;
+    color: var(--text-color);
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+    position: sticky;
+    left: 0;
+    z-index: 20;
+    border-right: 2px solid var(--border-color);
     white-space: nowrap;
-    min-width: 40px;
-    border-right: 1px solid var(--border-color);
-    border-bottom: 1px solid var(--border-color);
-    transition: background-color 0.1s ease, border-color 0.1s ease;
-}
-
-thead th {
-    border-top: 1px solid var(--border-color);
-}
-
-tbody tr th:first-child,
-tbody tr td:first-child {
-    border-left: 1px solid var(--border-color);
+    overflow: visible;
+    text-overflow: clip;
 }
 
 thead th:first-child {
-    border-left: 1px solid var(--border-color);
     position: sticky;
     top: 0;
     left: 0;
@@ -354,33 +452,21 @@ th.row-header,
 th.col-header {
     background-color: var(--header-bg);
     color: var(--text-color);
-    font-weight: 600;
-    font-size: 13px;
+    font-weight: normal;
+    font-size: 10pt;
     text-align: center;
     user-select: none;
     cursor: pointer;
-    z-index: 1;
-    border-bottom: 2px solid var(--border-color);
 }
 
 th.row-header {
-    width: var(--row-header-width);
-    min-width: var(--row-header-width);
-    max-width: var(--row-header-width);
-    text-align: center;
-    white-space: nowrap;
-    overflow: visible;
-    position: sticky;
+    position: sticky !important;
     left: 0;
     z-index: 20;
-    border-right: 2px solid var(--border-color);
 }
 
 th.col-header {
-    height: 20px;
-    min-height: 20px;
-    min-width: 40px;
-    position: sticky;
+    position: sticky !important;
     top: 0;
     z-index: 10;
     background-color: var(--header-bg);
@@ -426,21 +512,13 @@ th.col-header:hover {
 td {
     background-color: var(--bg-color);
     color: var(--text-color);
-    min-height: 20px;
-    white-space: nowrap;
-    min-width: 40px;
+    padding: 2px 6px;
     vertical-align: top;
-    position: relative;
 }
 
 th.col-header,
 td {
-    max-width: 180px;
-}
-
-body.expanded-mode th.col-header,
-body.expanded-mode td {
-    max-width: none;
+    max-width: 200px;
 }
 
 td[style*="border"] {
@@ -510,94 +588,79 @@ body.vscode-theme td[data-black-border="true"] {
 }
 
 
-td.merged-cell[style*="vertical-align: top"] .cell-content {
+td[style*="vertical-align: top"] .cell-content {
     align-items: flex-start;
 }
 
-td.merged-cell[style*="vertical-align: bottom"] .cell-content {
+td[style*="vertical-align: bottom"] .cell-content {
     align-items: flex-end;
 }
 
-td.merged-cell[style*="vertical-align: middle"] .cell-content {
+td[style*="vertical-align: middle"] .cell-content {
     align-items: center;
 }
 
-td.merged-cell[style*="text-align: left"] .cell-content {
+td[style*="text-align: left"] .cell-content {
     justify-content: flex-start;
     text-align: left;
 }
 
-td.merged-cell[style*="text-align: right"] .cell-content {
+td[style*="text-align: right"] .cell-content {
     justify-content: flex-end;
     text-align: right;
 }
 
-td.merged-cell[style*="text-align: center"] .cell-content {
+td[style*="text-align: center"] .cell-content {
     justify-content: center;
     text-align: center;
 }
 
-/* Selection styles */
+/* Selection styles (Styled Mode - Preserves inline background colors using translucent overlays) */
 td.selected {
-    box-shadow: inset 0 0 0 1000px var(--selection-bg) !important;
-    outline: 1px solid var(--selection-border) !important;
-    outline-offset: -1px;
-    z-index: 4;
-}
-
-td:hover {
-    box-shadow: inset 0 0 0 1000px var(--row-hover-bg) !important;
-}
-
-td.selected:hover {
-    box-shadow: inset 0 0 0 1000px var(--selection-bg), inset 0 0 0 1000px var(--row-hover-bg) !important;
+    box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--selection-bg) 55%, transparent) !important;
+    background-color: transparent; /* fallback if inline bg isn't set */
+    z-index: 5;
 }
 
 td.active-cell {
-    outline: 2px solid var(--selection-border) !important;
-    outline-offset: -2px;
-    box-shadow: none !important;
-    z-index: 5;
+    border: 2px solid var(--selection-border) !important;
+    z-index: 6;
 }
 
 td.active-cell::after {
     content: '';
     position: absolute;
-    right: 0;
-    bottom: 0;
+    right: -4px;
+    bottom: -4px;
     width: 6px;
     height: 6px;
-    background: var(--selection-border);
-    border: 1px solid var(--bg-color);
-    z-index: 6;
+    background: var(--accent-color);
+    border: 1px solid var(--vscode-editor-background);
+    border-radius: 0;
+    cursor: crosshair;
 }
 
 /* Row/Column selection */
 td.column-selected,
-th.column-selected,
-td.row-selected,
-th.row-selected {
-    box-shadow: inset 0 0 0 1000px var(--selection-bg) !important;
+td.row-selected {
+    box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--selection-bg) 55%, transparent) !important;
+    background-color: transparent;
 }
 
-td.column-selected:hover,
-td.row-selected:hover {
-    box-shadow: inset 0 0 0 1000px var(--selection-bg), inset 0 0 0 1000px var(--row-hover-bg) !important;
+td:hover {
+    box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--row-hover-bg) 45%, transparent) !important;
+    background-color: transparent;
 }
 
 /* Header cells: make selected headers darker and readable (match CSV behavior) */
 th.column-selected {
     background-color: var(--accent-color) !important;
-    color: var(--button-text) !important;
-    border-bottom: 2px solid var(--accent-color) !important;
-    box-shadow: none !important;
+    color: var(--contrast-text) !important;
 }
 
 th.row-selected {
     background-color: var(--accent-color) !important;
-    color: var(--button-text) !important;
-    border-right: 2px solid var(--accent-color) !important;
-    box-shadow: none !important;
+    color: var(--contrast-text) !important;
 }
 
 /* Corner cell when selected */
@@ -605,9 +668,7 @@ th.corner-cell.column-selected,
 th.corner-cell.row-selected,
 th.corner-cell.selected {
     background-color: var(--accent-color) !important;
-    color: var(--button-text) !important;
-    box-shadow: none !important;
-    border: none !important;
+    color: var(--contrast-text) !important;
 }
 
 /* Copy animation */
@@ -615,9 +676,11 @@ th.corner-cell.selected {
     0% {
         box-shadow: none;
     }
+
     50% {
         box-shadow: inset 0 0 0 1000px var(--copy-flash-bg) !important;
     }
+
     100% {
         box-shadow: none;
     }
@@ -656,9 +719,11 @@ th.corner-cell {
 
 /* Cell content wrapper */
 .cell-content {
-    display: block;
+    display: flex;
     width: 100%;
     height: 100%;
+    align-items: flex-start;
+    justify-content: flex-start;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -668,23 +733,23 @@ th.corner-cell {
     z-index: 2;
 }
 
-body:not(.edit-mode) ::selection {
-    background-color: transparent;
+::selection {
+    background-color: var(--selection-bg);
 }
 
-body:not(.edit-mode) ::-moz-selection {
-    background-color: transparent;
+::-moz-selection {
+    background-color: var(--selection-bg);
 }
 
 body.edit-mode td[contenteditable="true"]::selection,
 body.edit-mode td[contenteditable="true"] *::selection {
-    background-color: color-mix(in srgb, var(--selection-border) 35%, transparent);
+    background-color: var(--selection-bg);
     color: inherit;
 }
 
 body.edit-mode td[contenteditable="true"]::-moz-selection,
 body.edit-mode td[contenteditable="true"] *::-moz-selection {
-    background-color: color-mix(in srgb, var(--selection-border) 35%, transparent);
+    background-color: var(--selection-bg);
     color: inherit;
 }
 
@@ -748,9 +813,9 @@ body.edit-mode td[contenteditable="true"] *::-moz-selection {
 
 .sheets-color-swatch:hover {
     transform: scale(1.25);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
     z-index: 2;
-    border-color: rgba(128,128,128,0.5);
+    border-color: rgba(128, 128, 128, 0.5);
 }
 
 .sheets-color-custom {
@@ -783,6 +848,7 @@ body.edit-mode td[contenteditable="true"] *::-moz-selection {
 #sheetsCustomColorInput::-webkit-color-swatch-wrapper {
     padding: 0;
 }
+
 #sheetsCustomColorInput::-webkit-color-swatch {
     border: 1px solid var(--border-color);
     border-radius: 50%;
@@ -817,24 +883,52 @@ body.edit-mode td[contenteditable="true"] *::-moz-selection {
     background: var(--row-hover-bg);
 }
 
+.header-context-separator {
+    height: 1px;
+    margin: 6px 4px;
+    background: var(--border-color);
+    opacity: 0.7;
+}
+
 /* First row as header */
 body.first-row-as-header tbody tr.header-row td {
-    font-weight: 700;
+    background-color: var(--header-bg);
+    font-weight: 700 !important;
+}
+
+body.first-row-as-header tbody tr.header-row td .cell-content,
+body.first-row-as-header tbody tr.header-row td .cell-content * {
+    font-weight: 700 !important;
 }
 
 /* Sticky header row */
 body.sticky-header-enabled tbody tr.header-row td,
 body.sticky-header-enabled tbody tr.header-row th {
-    position: sticky;
-    top: 0;
+    position: sticky !important;
+    top: 21px;
+    z-index: 10;
+}
+
+body.spacious-cells.sticky-header-enabled tbody tr.header-row td,
+body.spacious-cells.sticky-header-enabled tbody tr.header-row th {
+    position: sticky !important;
+    top: 21px;
     z-index: 10;
 }
 
 body.sticky-header-enabled tbody tr.header-row th.row-header {
-    position: sticky;
-    top: 0;
+    position: sticky !important;
+    top: 21px;
     left: 0;
-    z-index: 30;
+    z-index: 20;
+    background-color: var(--header-bg);
+}
+
+body.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
+    position: sticky !important;
+    top: 21px;
+    left: 0;
+    z-index: 20;
     background-color: var(--header-bg);
 }
 
@@ -871,6 +965,7 @@ body.sticky-header-enabled tbody tr.header-row th.row-header {
     0% {
         transform: rotate(0deg);
     }
+
     100% {
         transform: rotate(360deg);
     }
@@ -950,67 +1045,181 @@ body.sticky-header-enabled tbody tr.header-row th.row-header {
    PLAIN VIEW MODE
    Removes all XLSX styling to display like CSV/TSV
    ========================= */
+body.plain-view table {
+    border-collapse: collapse;
+    width: max-content;
+    min-width: 0;
+    table-layout: fixed;
+    user-select: none;
+    -webkit-user-select: none;
+    border-spacing: 0;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    background-color: var(--bg-color);
+}
+
+body.plain-view th,
 body.plain-view td {
-    background-color: var(--bg-color) !important;
-    color: var(--text-color) !important;
-    border: 1px solid var(--border-color) !important;
-    font-weight: normal !important;
-    font-style: normal !important;
-    text-decoration: none !important;
-    font-size: 13px !important;
-    font-family: var(--font-family) !important;
-    text-align: left !important;
-    vertical-align: top !important;
+    border: 1px solid var(--border-color);
+    padding: 2px 6px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    position: relative;
+    cursor: cell;
+    font-family: Arial, sans-serif;
+    font-size: 10pt;
+    line-height: normal;
+    height: 21px;
+    max-width: 200px;
 }
 
-body.plain-view td.merged-cell {
-    /* In plain view, merged cells display as regular cells - no special styling needed */
-    display: table-cell;
+body.plain-view.spacious-cells #xlsxTable th,
+body.plain-view.spacious-cells #xlsxTable td {
+    height: 28px;
+    line-height: 28px;
+    padding: 2px 6px;
+    box-sizing: border-box;
+    font-size: 10.5pt;
 }
 
-body.plain-view td[data-hyperlink] {
-    color: var(--link-color) !important;
-    text-decoration: underline !important;
+body.plain-view th {
+    background-color: var(--header-bg);
+    font-weight: normal;
+    color: var(--text-color);
+    text-align: center;
 }
 
-/* Selection still works in plain view */
-body.plain-view td.selected {
-    box-shadow: inset 0 0 0 1000px var(--selection-bg) !important;
-    outline: 1px solid var(--selection-border) !important;
-}
-
-body.plain-view td.active-cell {
-    outline: 2px solid var(--selection-border) !important;
-}
-
-body.plain-view td:hover {
-    box-shadow: inset 0 0 0 1000px var(--row-hover-bg) !important;
-}
-
-body.plain-view td.column-selected,
-body.plain-view td.row-selected {
-    box-shadow: inset 0 0 0 1000px var(--selection-bg) !important;
-}
-
-/* Plain view header row styling (matches CSV behavior) */
-body.plain-view.first-row-as-header tbody tr.header-row td {
-    font-weight: 700 !important;
-    background-color: var(--header-bg) !important;
-}
-
-/* Plain view sticky header (matches CSV behavior) */
-body.plain-view.sticky-header-enabled tbody tr.header-row td,
-body.plain-view.sticky-header-enabled tbody tr.header-row th {
+body.plain-view th.col-header {
     position: sticky;
     top: 0;
     z-index: 10;
-    background-color: var(--header-bg) !important;
+    background-color: var(--header-bg);
 }
 
-body.plain-view.sticky-header-enabled tbody tr.header-row th.row-header {
+tbody th:first-child,
+tbody td:first-child,
+thead th:first-child {
+    width: auto;
+    min-width: 30px;
+    background-color: var(--header-bg);
+    text-align: center;
+    color: var(--text-color);
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+    position: sticky;
+    left: 0;
+    z-index: 20;
+    border-right: 2px solid var(--border-color);
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+body.plain-view th.row-header {
+    position: sticky;
+    left: 0;
+    z-index: 20;
+}
+
+body.plain-view thead th:first-child {
     position: sticky;
     top: 0;
     left: 0;
     z-index: 30;
-    background-color: var(--header-bg) !important;
+    background-color: var(--header-bg);
+}
+
+body.plain-view td {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-weight: normal;
+    font-style: normal;
+    text-decoration: none;
+    text-align: left;
+    vertical-align: top;
+}
+
+body.plain-view td.merged-cell {
+    display: table-cell;
+}
+
+body.plain-view td span.cell-content {
+    display: block;
+    user-select: none;
+    pointer-events: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+body.plain-view td.selected {
+    background-color: var(--selection-bg) !important;
+    z-index: 5;
+}
+
+body.plain-view td.active-cell {
+    border: 2px solid var(--selection-border) !important;
+    background-color: transparent !important;
+    z-index: 6;
+}
+
+body.plain-view td.active-cell::after {
+    content: "";
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    width: 6px;
+    height: 6px;
+    background: var(--accent-color);
+    border: 1px solid var(--vscode-editor-background);
+    border-radius: 0;
+    cursor: crosshair;
+}
+
+body.plain-view td.column-selected,
+body.plain-view td.row-selected {
+    background-color: var(--selection-bg) !important;
+}
+
+body.plain-view td:hover {
+    background-color: var(--row-hover-bg) !important;
+}
+
+body.plain-view.first-row-as-header tbody tr.header-row td {
+    font-weight: 700;
+    background-color: var(--header-bg);
+}
+
+body.plain-view.sticky-header-enabled tbody tr.header-row td,
+body.plain-view.sticky-header-enabled tbody tr.header-row th {
+    position: sticky;
+    top: 21px;
+    z-index: 10;
+    background-color: var(--header-bg);
+}
+
+body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row td,
+body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row th {
+    position: sticky;
+    top: 21px;
+    z-index: 10;
+    background-color: var(--header-bg);
+}
+
+body.plain-view.sticky-header-enabled tbody tr.header-row th.row-header {
+    position: sticky;
+    top: 21px;
+    left: 0;
+    z-index: 20;
+    background-color: var(--header-bg);
+}
+
+body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
+    position: sticky;
+    top: 21px;
+    left: 0;
+    z-index: 20;
+    background-color: var(--header-bg);
 }

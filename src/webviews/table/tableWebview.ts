@@ -1245,31 +1245,9 @@ import { InfoTooltip } from '../shared/infoTooltip';
         }
 
         // Update toolbar stickiness
-        const container = document.querySelector('.toolbar');
-        const content = $('content');
-        const scrollArea = document.querySelector('.table-scroll');
-        const headerBg = document.querySelector('.header-background') as HTMLElement;
-
-        if (container) {
-            if (settings.stickyToolbar) {
-                if (container.parentNode !== document.body) {
-                    if (content && content.parentNode) document.body.insertBefore(container, content);
-                    else document.body.appendChild(container);
-                }
-                container.classList.remove('not-sticky');
-                container.classList.add('expanded-toolbar');
-                if (headerBg) headerBg.style.display = '';
-            } else {
-                const target = scrollArea || content;
-                if (target && container.parentNode !== target) {
-                    target.insertBefore(container, target.firstChild);
-                }
-                container.classList.add('not-sticky');
-                container.classList.remove('expanded-toolbar');
-                if (headerBg) headerBg.style.display = 'none';
-            }
+        if (toolbarManager) {
+            toolbarManager.applyStickyLayout(!!settings.stickyToolbar, 'content', '.table-scroll');
         }
-        setTimeout(updateHeaderHeight, 0);
 
         if (rowHeightChanged) {
             // Force re-render of virtual rows
@@ -1341,22 +1319,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
     }
 
     function updateHeaderHeight() {
-        const container = document.querySelector('.toolbar');
-        if (!container) return;
-        
-        let h = Math.max(6, Math.ceil(container.getBoundingClientRect().height));
-        // Cap header height to avoid large gaps when toolbar wraps or settings are open
-        const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-height-max')) || 96;
-        h = Math.min(h, maxH);
-        document.documentElement.style.setProperty('--header-height', h + 'px');
-        
-        const headerBg = document.querySelector('.header-background') as HTMLElement;
-        if (headerBg) {
-            if (document.body.classList.contains('sticky-toolbar-enabled')) {
-                headerBg.style.height = h + 'px';
-            } else {
-                headerBg.style.height = '';
-            }
+        if (toolbarManager) {
+            toolbarManager.updateHeaderHeight();
         }
     }
 
@@ -1460,6 +1424,23 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 updateSelectionInfo();
             }
         });
+
+        const focusWebviewSurface = () => {
+            const container = $('tableContainer') as HTMLElement | null;
+            if (!container) return;
+            if (!container.hasAttribute('tabindex')) {
+                container.setAttribute('tabindex', '-1');
+            }
+            container.focus({ preventScroll: true });
+        };
+
+        document.addEventListener('pointerdown', (e) => {
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+            if (target.closest('#csv-table') || target.closest('#tableContainer') || target.closest('.toolbar')) {
+                focusWebviewSurface();
+            }
+        }, true);
 
         table.addEventListener('mousemove', (e) => {
             if (isCellEditing || !isSelecting || !startCell) return;
