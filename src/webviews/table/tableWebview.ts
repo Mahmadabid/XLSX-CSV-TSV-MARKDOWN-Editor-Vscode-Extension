@@ -46,9 +46,13 @@ import { InfoTooltip } from '../shared/infoTooltip';
     const selectedColumnIndices = new Set<number>();
 
     // Undo/Redo for edit mode
-    let undoStack: { data: string[][], totalRows: number, columnCount: number }[] = [];
-    let redoStack: { data: string[][], totalRows: number, columnCount: number }[] = [];
-    const MAX_HISTORY = 50;
+    interface CellCoord {
+        row: number;
+        col: number;
+    }
+
+    let isVersionPreviewMode = false;
+    let previewVersionId: string | null = null;
 
     // Settings
     interface Settings {
@@ -89,7 +93,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
     }
 
     function setButtonsEnabled(enabled: boolean) {
-        const ids = ['toggleViewButton', 'toggleBackgroundButton', 'toggleExpandButton'];
+        const ids = ['toggleViewButton', 'toggleBackgroundButton', 'toggleExpandButton', 'versionHistoryButton'];
         ids.forEach((id) => {
             const el = $(id) as HTMLButtonElement;
             if (el) el.disabled = !enabled;
@@ -485,96 +489,119 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
     // ===== Edit Mode =====
 
-    function getTableData() {
-        const data: string[][] = [];
-        for (let i = 0; i < totalRows; i++) {
-            const cached = rowCache.get(i);
-            if (cached) {
-                data.push([...cached]);
-            } else {
-                data.push([]);
-            }
-        }
-        return { data, totalRows, columnCount };
+    function getCurrentFocusCell(): CellCoord | null {
+        const coords = getCellCoordinates(editingCell || activeCell);
+        if (coords) return coords;
+
+        const firstSelected = selectedCells.values().next().value as HTMLElement | undefined;
+        if (!firstSelected) return null;
+        return getCellCoordinates(firstSelected);
     }
 
     function pushToUndo() {
-        const currentData = getTableData();
-        if (undoStack.length > 0) {
-            if (JSON.stringify(undoStack[undoStack.length - 1].data) === JSON.stringify(currentData.data)) {
-                return;
-            }
-        }
-        undoStack.push(currentData);
-        if (undoStack.length > MAX_HISTORY) undoStack.shift();
-        redoStack = [];
+        if (isVersionPreviewMode) return;
+        vscode.postMessage({ command: 'pushUndoSnapshot' });
     }
 
-    function syncBackendWithData(targetState: {data: string[][], totalRows: number, columnCount: number}) {
-        let currentColCount = columnCount;
-        let currentRowCount = totalRows;
-
-        while (currentColCount < targetState.columnCount) {
-            vscode.postMessage({ command: 'insertColumn', colIndex: currentColCount });
-            currentColCount++;
-        }
-        while (currentColCount > targetState.columnCount) {
-            currentColCount--;
-            vscode.postMessage({ command: 'deleteColumn', colIndex: currentColCount });
+    function focusAndHighlightCell(coord: CellCoord | null, options?: { preserveScroll?: boolean }) {
+        if (!coord || totalRows <= 0 || columnCount <= 0) {
+            return;
         }
 
-        while (currentRowCount < targetState.totalRows) {
-            vscode.postMessage({ command: 'insertRow', rowIndex: currentRowCount });
-            currentRowCount++;
-        }
-        while (currentRowCount > targetState.totalRows) {
-            currentRowCount--;
-            vscode.postMessage({ command: 'deleteRow', rowIndex: currentRowCount });
+        const row = Math.max(0, Math.min(totalRows - 1, coord.row));
+        const col = Math.max(0, Math.min(columnCount - 1, coord.col));
+        const preserveScroll = options?.preserveScroll === true;
+
+        clearSelection();
+
+        const container = getTableContainer();
+        if (container && !preserveScroll) {
+            const desiredTop = Math.max(0, row * ROW_HEIGHT - Math.floor(container.clientHeight / 2));
+            container.scrollTop = desiredTop;
         }
 
-        targetState.data.forEach((row, i) => {
-            if (i < targetState.totalRows) {
-                vscode.postMessage({ command: 'updateRow', rowIndex: i, rowData: [...row] });
+        requestAnimationFrame(() => {
+            const targetCell = document.querySelector(`td[data-row="${row}"][data-col="${col}"]`) as HTMLElement;
+            if (!targetCell) {
+                return;
             }
+
+            targetCell.classList.add('selected', 'active-cell', 'history-flash');
+            selectedCells.add(targetCell);
+            activeCell = targetCell;
+            startCell = { row, col };
+            endCell = { row, col };
+
+            const thRow = document.querySelector(`th.row-header[data-row="${row}"]`) as HTMLElement;
+            if (thRow) thRow.classList.add('row-selected');
+            const thCol = document.querySelector(`th.col-header[data-col="${col}"]`) as HTMLElement;
+            if (thCol) thCol.classList.add('column-selected');
+
+            updateSelectionInfo();
+            setTimeout(() => {
+                targetCell.classList.remove('history-flash');
+            }, 700);
         });
     }
 
     function undo() {
-        if (undoStack.length <= 1) return;
-        const current = undoStack.pop();
-        if (current) redoStack.push(current);
-        const previous = undoStack[undoStack.length - 1];
-
-        syncBackendWithData(previous);
-
-        totalRows = previous.totalRows;
-        columnCount = previous.columnCount;
-        rowCache.clear();
-        previous.data.forEach((row, i) => {
-            rowCache.set(i, [...row]);
-        });
-
-        updateHeadersLocal(); updateVisibleRows(true);
-        scheduleSave();
+        if (isVersionPreviewMode) return;
+        vscode.postMessage({ command: 'undo' });
     }
 
     function redo() {
-        if (redoStack.length === 0) return;
-        const state = redoStack.pop();
-        if (state) {
-            undoStack.push(state);
+        if (isVersionPreviewMode) return;
+        vscode.postMessage({ command: 'redo' });
+    }
 
-            syncBackendWithData(state);
+    function ensurePreviewBanner(): HTMLElement {
+        let banner = $('versionPreviewBanner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'versionPreviewBanner';
+            banner.className = 'version-preview-banner hidden';
+            banner.innerHTML = `
+                <span id="versionPreviewText" class="version-preview-text"></span>
+                <div class="version-preview-actions">
+                    <button id="restoreVersionButton" class="toggle-button" type="button">Restore</button>
+                    <button id="cancelVersionPreviewButton" class="toggle-button" type="button">Cancel</button>
+                </div>
+            `;
 
-            totalRows = state.totalRows;
-            columnCount = state.columnCount;
-            rowCache.clear();
-            state.data.forEach((row, i) => {
-                rowCache.set(i, [...row]);
+            const content = $('content');
+            if (content) {
+                content.insertBefore(banner, content.firstChild);
+            } else {
+                document.body.appendChild(banner);
+            }
+
+            const restoreBtn = $('restoreVersionButton') as HTMLButtonElement;
+            const cancelBtn = $('cancelVersionPreviewButton') as HTMLButtonElement;
+            restoreBtn?.addEventListener('click', () => {
+                if (!previewVersionId) return;
+                vscode.postMessage({ command: 'restoreVersion', versionId: previewVersionId });
             });
+            cancelBtn?.addEventListener('click', () => {
+                vscode.postMessage({ command: 'cancelVersionPreview' });
+            });
+        }
+        return banner;
+    }
 
-            updateHeadersLocal(); updateVisibleRows(true);
-            scheduleSave();
+    function setVersionPreviewMode(isPreview: boolean, label?: string) {
+        isVersionPreviewMode = isPreview;
+        document.body.classList.toggle('preview-mode', isPreview);
+
+        const banner = ensurePreviewBanner();
+        if (isPreview) {
+            const previewText = $('versionPreviewText');
+            if (previewText) {
+                previewText.textContent = label || 'Previewing selected version (read-only)';
+            }
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+            previewVersionId = null;
         }
     }
 
@@ -592,6 +619,10 @@ import { InfoTooltip } from '../shared/infoTooltip';
     let editingCell: HTMLElement | null = null;
 
     function startEditing(cell: HTMLElement, clear = false) {
+        if (isVersionPreviewMode) {
+            showToast('Version preview is read-only');
+            return;
+        }
         if (isCellEditing) stopEditing();
         isCellEditing = true;
         editingCell = cell;
@@ -643,6 +674,10 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
 
     function performSave(shouldExit = false, isAutosave = false) {
+        if (isVersionPreviewMode) {
+            showToast('Cannot save while previewing a version');
+            return;
+        }
         if (isSaving) return;
         isSaving = true;
         exitAfterSave = shouldExit;
@@ -708,6 +743,11 @@ import { InfoTooltip } from '../shared/infoTooltip';
         e.preventDefault();
         hideContextMenu();
 
+        if (isVersionPreviewMode) {
+            showToast('Version preview is read-only');
+            return;
+        }
+
         const isRowHeader = target.classList.contains('row-header');
         const isColHeader = target.classList.contains('col-header');
         const isCell = target.tagName === 'TD';
@@ -739,16 +779,16 @@ import { InfoTooltip } from '../shared/infoTooltip';
         if (isRowHeader) {
             const rowIdx = parseInt(target.dataset.row!, 10);
             contextMenu.appendChild(createMenuItem('Insert row above', () => {
-                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx });
                 insertRowLocal(rowIdx);
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx });
             }));
             contextMenu.appendChild(createMenuItem('Insert row below', () => {
-                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx + 1 });
                 insertRowLocal(rowIdx + 1);
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx + 1 });
             }));
             contextMenu.appendChild(createMenuItem('Delete row', () => {
-                vscode.postMessage({ command: 'deleteRow', rowIndex: rowIdx });
                 deleteRowLocal(rowIdx);
+                vscode.postMessage({ command: 'deleteRow', rowIndex: rowIdx });
             }));
         }
 
@@ -759,16 +799,16 @@ import { InfoTooltip } from '../shared/infoTooltip';
         if (isColHeader) {
             const colIdx = parseInt(target.dataset.col!, 10);
             contextMenu.appendChild(createMenuItem('Insert column left', () => {
-                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx });
                 insertColumnLocal(colIdx);
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx });
             }));
             contextMenu.appendChild(createMenuItem('Insert column right', () => {
-                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx + 1 });
                 insertColumnLocal(colIdx + 1);
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx + 1 });
             }));
             contextMenu.appendChild(createMenuItem('Delete column', () => {
-                vscode.postMessage({ command: 'deleteColumn', colIndex: colIdx });
                 deleteColumnLocal(colIdx);
+                vscode.postMessage({ command: 'deleteColumn', colIndex: colIdx });
             }));
         }
 
@@ -776,29 +816,29 @@ import { InfoTooltip } from '../shared/infoTooltip';
             const rowIdx = parseInt(target.dataset.row!, 10);
             const colIdx = parseInt(target.dataset.col!, 10);
             contextMenu.appendChild(createMenuItem('Insert row above', () => {
-                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx });
                 insertRowLocal(rowIdx);
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx });
             }));
             contextMenu.appendChild(createMenuItem('Insert row below', () => {
-                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx + 1 });
                 insertRowLocal(rowIdx + 1);
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx + 1 });
             }));
             contextMenu.appendChild(createMenuItem('Insert column left', () => {
-                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx });
                 insertColumnLocal(colIdx);
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx });
             }));
             contextMenu.appendChild(createMenuItem('Insert column right', () => {
-                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx + 1 });
                 insertColumnLocal(colIdx + 1);
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx + 1 });
             }));
             contextMenu.appendChild(createSeparator());
             contextMenu.appendChild(createMenuItem('Delete cell and shift left', () => {
-                vscode.postMessage({ command: 'deleteCellShiftLeft', rowIndex: rowIdx, colIndex: colIdx });
                 deleteCellShiftLeftLocal(rowIdx, colIdx);
+                vscode.postMessage({ command: 'deleteCellShiftLeft', rowIndex: rowIdx, colIndex: colIdx });
             }));
             contextMenu.appendChild(createMenuItem('Delete cell and shift up', () => {
-                vscode.postMessage({ command: 'deleteCellShiftUp', rowIndex: rowIdx, colIndex: colIdx });
                 deleteCellShiftUpLocal(rowIdx, colIdx);
+                vscode.postMessage({ command: 'deleteCellShiftUp', rowIndex: rowIdx, colIndex: colIdx });
             }));
         }
 
@@ -1436,22 +1476,41 @@ import { InfoTooltip } from '../shared/infoTooltip';
         document.addEventListener('keydown', (e) => {
             const isCmdOrCtrl = e.ctrlKey || e.metaKey;
 
+            if (isVersionPreviewMode) {
+                const key = e.key.toLowerCase();
+                const allowNavigation = ['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'pageup', 'pagedown', 'home', 'end'].includes(key);
+
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    vscode.postMessage({ command: 'cancelVersionPreview' });
+                    return;
+                }
+
+                if (isCmdOrCtrl && key === 'c') {
+                    e.preventDefault();
+                    copySelectionToClipboard();
+                    return;
+                }
+
+                if (!allowNavigation) {
+                    e.preventDefault();
+                    showToast('Version preview is read-only');
+                    return;
+                }
+            }
+
             if (isCmdOrCtrl) {
                 if (e.key.toLowerCase() === 'z') {
                     e.preventDefault();
-                    if (isCellEditing) {
-                        if (e.shiftKey) document.execCommand('redo');
-                        else document.execCommand('undo');
-                    } else {
-                        if (e.shiftKey) redo();
-                        else undo();
-                    }
+                    if (isCellEditing) stopEditing();
+                    if (e.shiftKey) redo();
+                    else undo();
                     return;
                 }
                 if (e.key.toLowerCase() === 'y') {
                     e.preventDefault();
-                    if (isCellEditing) document.execCommand('redo');
-                    else redo();
+                    if (isCellEditing) stopEditing();
+                    redo();
                     return;
                 }
             }
@@ -1792,6 +1851,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     }
                 }
 
+                rowCache.clear();
+
                 initializeVirtualScrolling();
                 initializeSelection();
 
@@ -1799,8 +1860,77 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     adjustColumnWidths('default');
                     syncToolbarScroll();
                     applySettings(currentSettings, false);
-                    undoStack = [getTableData()];
+                    setVersionPreviewMode(false);
                 }, 200);
+                break;
+
+            case 'previewVersion':
+            case 'versionRestored':
+            case 'versionPreviewCancelled':
+            case 'applyUndoRedoState':
+                const shouldPreserveScroll = m.command === 'applyUndoRedoState' && m.hasStructuralChange === false;
+                const stateContainer = getTableContainer();
+                const prevScrollTop = stateContainer?.scrollTop ?? 0;
+                const prevScrollLeft = stateContainer?.scrollLeft ?? 0;
+
+                fileFormat = m.format || fileFormat;
+                totalRows = m.totalRows || 0;
+                columnCount = m.columnCount || 0;
+
+                if (!shouldPreserveScroll) {
+                    const stateHead = document.querySelector('#csv-table thead');
+                    if (stateHead) stateHead.innerHTML = m.headerHtml || '';
+
+                    const stateTable = $('csv-table');
+                    if (stateTable) {
+                        const stateColgroup = stateTable.querySelector('colgroup');
+                        if (stateColgroup) {
+                            let colHtml = '<col style="width: 30px;">';
+                            for (let i = 0; i < columnCount; i++) {
+                                colHtml += '<col style="width: 150px;">';
+                            }
+                            stateColgroup.innerHTML = colHtml;
+                        }
+                    }
+                }
+
+                rowCache.clear();
+                if (Array.isArray(m.rows)) {
+                    m.rows.forEach((row: string[], i: number) => {
+                        rowCache.set(i, [...row]);
+                    });
+                }
+
+                updateVisibleRows(true);
+
+                if (shouldPreserveScroll && stateContainer) {
+                    stateContainer.scrollTop = prevScrollTop;
+                    stateContainer.scrollLeft = prevScrollLeft;
+                    updateVisibleRows(true);
+                }
+
+                if (m.command === 'previewVersion') {
+                    previewVersionId = m.versionId || null;
+                    const previewLabel = m.timestamp
+                        ? `Previewing ${new Date(m.timestamp).toLocaleString()} (read-only)`
+                        : 'Previewing selected version (read-only)';
+                    setVersionPreviewMode(true, previewLabel);
+                } else {
+                    setVersionPreviewMode(false);
+                }
+
+                if (m.command === 'versionRestored') {
+                    showToast('Version restored');
+                }
+
+                if (m.command === 'versionPreviewCancelled') {
+                    showToast('Preview canceled');
+                }
+
+                if (m.command === 'applyUndoRedoState') {
+                    focusAndHighlightCell(m.focusCell || null, { preserveScroll: shouldPreserveScroll });
+                    scheduleSave();
+                }
                 break;
 
             case 'rowsData':
@@ -1829,6 +1959,10 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 if (m.text) {
                     handlePasteData(m.text);
                 }
+                break;
+
+            case 'versionHistoryError':
+                showToast(m.message || 'Version history failed');
                 break;
         }
 
@@ -1889,6 +2023,15 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 tooltip: 'Toggle Theme',
                 cls: 'edit-mode-hide',
                 onClick: () => {}
+            },
+            {
+                id: 'versionHistoryButton',
+                icon: Icons.VersionHistory,
+                tooltip: 'Version history',
+                cls: 'edit-mode-hide icon-only',
+                onClick: () => {
+                    vscode.postMessage({ command: 'showVersionHistory' });
+                }
             },
             {
                 id: 'helpButton',

@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
+import { createHash } from 'crypto';
 
 export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
     constructor(private readonly context: vscode.ExtensionContext) { }
@@ -85,6 +87,203 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 return label;
             }
 
+            type VersionHistoryEntry = {
+                id: string;
+                timestamp: number;
+                totalRows: number;
+                columnCount: number;
+                data: string[][];
+            };
+
+            type EditSnapshot = {
+                data: string[][];
+                columnCount: number;
+            };
+
+            const MAX_UNDO_HISTORY = 100;
+            let undoStack: EditSnapshot[] = [];
+            let redoStack: EditSnapshot[] = [];
+            let previewEntry: VersionHistoryEntry | null = null;
+
+            const cloneRows = (rows: string[][]): string[][] => rows.map(row => [...row]);
+
+            const buildHeaderHtml = (cols: number) => {
+                let headerHtml = '<tr><th class="row-header">&nbsp;</th>';
+                for (let i = 1; i <= cols; i++) {
+                    headerHtml += `<th class="col-header" data-col="${i - 1}">${excelColumnLabel(i)}<div class="col-resize-handle"></div></th>`;
+                }
+                headerHtml += '</tr>';
+                return headerHtml;
+            };
+
+            const getVisibleRows = () => previewEntry?.data ?? allRows;
+            const getVisibleColumnCount = () => previewEntry?.columnCount ?? columnCount;
+
+            const snapshotsEqual = (left: EditSnapshot, right: EditSnapshot) => {
+                if (left.columnCount !== right.columnCount || left.data.length !== right.data.length) {
+                    return false;
+                }
+
+                for (let row = 0; row < left.data.length; row++) {
+                    const leftRow = left.data[row] || [];
+                    const rightRow = right.data[row] || [];
+                    for (let col = 0; col < left.columnCount; col++) {
+                        if ((leftRow[col] || '') !== (rightRow[col] || '')) {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            };
+
+            const createEditSnapshot = (): EditSnapshot => ({
+                data: cloneRows(allRows),
+                columnCount
+            });
+
+            const pushUndoSnapshot = () => {
+                if (previewEntry) return;
+
+                const snapshot = createEditSnapshot();
+                const last = undoStack[undoStack.length - 1];
+                if (last && snapshotsEqual(last, snapshot)) {
+                    return;
+                }
+
+                undoStack.push(snapshot);
+                if (undoStack.length > MAX_UNDO_HISTORY) {
+                    undoStack.shift();
+                }
+                redoStack = [];
+            };
+
+            const findChangedCell = (fromState: EditSnapshot, toState: EditSnapshot) => {
+                const maxRows = Math.max(fromState.data.length, toState.data.length);
+                const maxCols = Math.max(fromState.columnCount, toState.columnCount);
+
+                for (let row = 0; row < maxRows; row++) {
+                    const fromRow = fromState.data[row] || [];
+                    const toRow = toState.data[row] || [];
+                    for (let col = 0; col < maxCols; col++) {
+                        if ((fromRow[col] || '') !== (toRow[col] || '')) {
+                            return { row, col };
+                        }
+                    }
+                }
+
+                return null;
+            };
+
+            const HISTORY_RETENTION_MS = 48 * 60 * 60 * 1000;
+            const VERSION_SNAPSHOT_DEBOUNCE_MS = 2000;
+            let versionSnapshotDebounceTimer: any = null;
+
+            const getHistoryFilePath = () => {
+                const key = createHash('sha1').update(filePath).digest('hex');
+                return path.join(this.context.globalStorageUri.fsPath, '.history', `tsv-${key}.json`);
+            };
+
+            const ensureHistoryDir = async () => {
+                const historyDir = path.dirname(getHistoryFilePath());
+                await fs.promises.mkdir(historyDir, { recursive: true });
+            };
+
+            const loadHistory = async (): Promise<VersionHistoryEntry[]> => {
+                const historyFile = getHistoryFilePath();
+                try {
+                    const content = await fs.promises.readFile(historyFile, 'utf8');
+                    const parsed = JSON.parse(content);
+                    if (!Array.isArray(parsed)) {
+                        return [];
+                    }
+                    return parsed as VersionHistoryEntry[];
+                } catch {
+                    return [];
+                }
+            };
+
+            const saveHistory = async (entries: VersionHistoryEntry[]) => {
+                await ensureHistoryDir();
+                await fs.promises.writeFile(getHistoryFilePath(), JSON.stringify(entries), 'utf8');
+            };
+
+            const pruneHistory = async (entries?: VersionHistoryEntry[]) => {
+                const now = Date.now();
+                const source = entries ?? await loadHistory();
+                const pruned = source.filter(entry => now - entry.timestamp <= HISTORY_RETENTION_MS);
+                if (pruned.length !== source.length) {
+                    await saveHistory(pruned);
+                }
+                return pruned;
+            };
+
+            const persistVersionSnapshot = async () => {
+                const history = await pruneHistory();
+                const currentSnapshot = createEditSnapshot();
+                const last = history.length > 0 ? history[history.length - 1] : null;
+                if (last) {
+                    const lastSnapshot: EditSnapshot = {
+                        data: last.data,
+                        columnCount: last.columnCount
+                    };
+                    if (snapshotsEqual(lastSnapshot, currentSnapshot)) {
+                        return;
+                    }
+                }
+
+                const now = Date.now();
+                history.push({
+                    id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+                    timestamp: now,
+                    totalRows: allRows.length,
+                    columnCount,
+                    data: allRows.map(row => [...row])
+                });
+                await saveHistory(history);
+            };
+
+            const saveVersionSnapshot = () => {
+                if (versionSnapshotDebounceTimer) {
+                    clearTimeout(versionSnapshotDebounceTimer);
+                }
+
+                versionSnapshotDebounceTimer = setTimeout(() => {
+                    versionSnapshotDebounceTimer = null;
+                    void persistVersionSnapshot();
+                }, VERSION_SNAPSHOT_DEBOUNCE_MS);
+            };
+
+            const serializeTsv = () => {
+                let text = '';
+                for (let i = 0; i < allRows.length; i++) {
+                    const row = allRows[i] || [];
+                    const rowStr = row.map(cell => {
+                        const cellStr = cell === undefined || cell === null ? '' : String(cell);
+                        return cellStr.replace(/\t/g, ' ').replace(/\n/g, ' ');
+                    }).join('\t');
+                    text += rowStr + '\n';
+                }
+                return text;
+            };
+
+            const applyVersionToEditor = async (entry: VersionHistoryEntry) => {
+                allRows = entry.data.map(row => [...row]);
+                columnCount = entry.columnCount;
+                previewEntry = null;
+
+                fs.writeFileSync(document.uri.fsPath, serializeTsv(), 'utf8');
+
+                webviewPanel.webview.postMessage({
+                    command: 'versionRestored',
+                    headerHtml: buildHeaderHtml(columnCount),
+                    totalRows: allRows.length,
+                    columnCount,
+                    rows: cloneRows(allRows),
+                    format: 'tsv'
+                });
+            };
+
             // Set up webview
             webviewPanel.webview.options = {
                 enableScripts: true,
@@ -140,20 +339,18 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 switch (message.command) {
                     case 'webviewReady':
                         try {
-                            // Parse the TSV first
-                            await parseTSV();
+                            await pruneHistory();
 
-                            // Generate header HTML
-                            let headerHtml = '<tr><th class="row-header">&nbsp;</th>';
-                            for (let i = 1; i <= columnCount; i++) {
-                                headerHtml += `<th class="col-header" data-col="${i - 1}">${excelColumnLabel(i)}<div class="col-resize-handle"></div></th>`;
+                            if (!parseComplete) {
+                                allRows = [];
+                                columnCount = 0;
+                                await parseTSV();
                             }
-                            headerHtml += '</tr>';
 
                             // Send initial metadata to webview
                             webviewPanel.webview.postMessage({
                                 command: 'initVirtualTable',
-                                headerHtml,
+                                headerHtml: buildHeaderHtml(getVisibleColumnCount()),
                                 totalRows: allRows.length,
                                 columnCount,
                                 format: 'tsv'
@@ -199,9 +396,10 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     case 'getRows':
                         if (parseComplete) {
                             const { start, end, requestId } = message;
+                            const sourceRows = getVisibleRows();
                             const clampedStart = Math.max(0, start);
-                            const clampedEnd = Math.min(allRows.length, end);
-                            const rows = allRows.slice(clampedStart, clampedEnd);
+                            const clampedEnd = Math.min(sourceRows.length, end);
+                            const rows = sourceRows.slice(clampedStart, clampedEnd);
                             
                             webviewPanel.webview.postMessage({
                                 command: 'rowsData',
@@ -216,7 +414,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     case 'getRowCount':
                         webviewPanel.webview.postMessage({
                             command: 'rowCount',
-                            totalRows: allRows.length,
+                            totalRows: getVisibleRows().length,
                             requestId: message.requestId
                         });
                         break;
@@ -274,26 +472,155 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         }
                         break;
 
+                    case 'pushUndoSnapshot':
+                        pushUndoSnapshot();
+                        break;
+
+                    case 'undo': {
+                        if (previewEntry || undoStack.length === 0) {
+                            break;
+                        }
+
+                        const current = createEditSnapshot();
+                        const previous = undoStack.pop()!;
+                        redoStack.push(current);
+
+                        allRows = cloneRows(previous.data);
+                        columnCount = previous.columnCount;
+
+                        webviewPanel.webview.postMessage({
+                            command: 'applyUndoRedoState',
+                            headerHtml: buildHeaderHtml(columnCount),
+                            totalRows: allRows.length,
+                            columnCount,
+                            focusCell: findChangedCell(current, previous),
+                            hasStructuralChange: current.columnCount !== previous.columnCount || current.data.length !== previous.data.length,
+                            rows: cloneRows(allRows),
+                            format: 'tsv'
+                        });
+                        break;
+                    }
+
+                    case 'redo': {
+                        if (previewEntry || redoStack.length === 0) {
+                            break;
+                        }
+
+                        const current = createEditSnapshot();
+                        const next = redoStack.pop()!;
+                        undoStack.push(current);
+
+                        allRows = cloneRows(next.data);
+                        columnCount = next.columnCount;
+
+                        webviewPanel.webview.postMessage({
+                            command: 'applyUndoRedoState',
+                            headerHtml: buildHeaderHtml(columnCount),
+                            totalRows: allRows.length,
+                            columnCount,
+                            focusCell: findChangedCell(current, next),
+                            hasStructuralChange: current.columnCount !== next.columnCount || current.data.length !== next.data.length,
+                            rows: cloneRows(allRows),
+                            format: 'tsv'
+                        });
+                        break;
+                    }
+
+                    case 'cancelVersionPreview':
+                        if (previewEntry) {
+                            previewEntry = null;
+                            webviewPanel.webview.postMessage({
+                                command: 'versionPreviewCancelled',
+                                headerHtml: buildHeaderHtml(columnCount),
+                                totalRows: allRows.length,
+                                columnCount,
+                                rows: cloneRows(allRows),
+                                format: 'tsv'
+                            });
+                        }
+                        break;
+
+                    case 'restoreVersion':
+                        try {
+                            if (!message.versionId) break;
+                            const history = await pruneHistory();
+                            const entry = history.find(item => item.id === message.versionId);
+                            if (entry) {
+                                await applyVersionToEditor(entry);
+                            }
+                        } catch (err) {
+                            webviewPanel.webview.postMessage({
+                                command: 'versionHistoryError',
+                                message: `Restore failed: ${String(err)}`
+                            });
+                        }
+                        break;
+
                     case 'saveCsv':
                         try {
-                            // Serialize allRows to TSV
-                            let text = '';
-                            for (let i = 0; i < allRows.length; i++) {
-                                const row = allRows[i] || [];
-                                const rowStr = row.map(cell => {
-                                    const cellStr = cell === undefined || cell === null ? '' : String(cell);
-                                    return cellStr.replace(/\t/g, ' ').replace(/\n/g, ' ');
-                                }).join('\t');
-                                text += rowStr + '\n';
+                            if (previewEntry) {
+                                webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: 'Preview mode is read-only', isAutosave: message.isAutosave });
+                                break;
                             }
-                            fs.writeFileSync(document.uri.fsPath, text, 'utf8');
+                            fs.writeFileSync(document.uri.fsPath, serializeTsv(), 'utf8');
+                            saveVersionSnapshot();
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: true, isAutosave: message.isAutosave });
                         } catch (err) {
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: String(err), isAutosave: message.isAutosave });
                         }
                         break;
 
+                    case 'showVersionHistory':
+                        try {
+                            const history = await pruneHistory();
+                            if (history.length === 0) {
+                                webviewPanel.webview.postMessage({
+                                    command: 'versionHistoryError',
+                                    message: 'No saved versions available'
+                                });
+                                break;
+                            }
+
+                            const sorted = [...history].sort((a, b) => b.timestamp - a.timestamp);
+                            const picked = await vscode.window.showQuickPick(
+                                sorted.map(entry => ({
+                                    label: new Date(entry.timestamp).toLocaleString(),
+                                    description: `${entry.totalRows} rows x ${entry.columnCount} cols`,
+                                    detail: `Saved ${Math.max(1, Math.round((Date.now() - entry.timestamp) / 60000))} min ago`,
+                                    entry
+                                })),
+                                {
+                                    placeHolder: `Version history (${sorted.length} versions)`
+                                }
+                            );
+
+                            if (picked?.entry) {
+                                previewEntry = {
+                                    ...picked.entry,
+                                    data: cloneRows(picked.entry.data)
+                                };
+
+                                webviewPanel.webview.postMessage({
+                                    command: 'previewVersion',
+                                    versionId: previewEntry.id,
+                                    timestamp: previewEntry.timestamp,
+                                    headerHtml: buildHeaderHtml(previewEntry.columnCount),
+                                    totalRows: previewEntry.totalRows,
+                                    columnCount: previewEntry.columnCount,
+                                    rows: cloneRows(previewEntry.data),
+                                    format: 'tsv'
+                                });
+                            }
+                        } catch (err) {
+                            webviewPanel.webview.postMessage({
+                                command: 'versionHistoryError',
+                                message: `Version history failed: ${String(err)}`
+                            });
+                        }
+                        break;
+
                     case 'updateRow':
+                        if (previewEntry) break;
                         // Update a single row in memory (for edit mode)
                         if (message.rowIndex !== undefined && message.rowData) {
                             allRows[message.rowIndex] = message.rowData;
@@ -301,6 +628,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         break;
 
                     case 'insertRow':
+                        if (previewEntry) break;
                         if (message.rowIndex !== undefined) {
                             const newRow = new Array(columnCount).fill('');
                             allRows.splice(message.rowIndex, 0, newRow);
@@ -308,12 +636,14 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         break;
 
                     case 'deleteRow':
+                        if (previewEntry) break;
                         if (message.rowIndex !== undefined) {
                             allRows.splice(message.rowIndex, 1);
                         }
                         break;
 
                     case 'insertColumn':
+                        if (previewEntry) break;
                         if (message.colIndex !== undefined) {
                             columnCount++;
                             for (let i = 0; i < allRows.length; i++) {
@@ -323,6 +653,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         break;
 
                     case 'deleteColumn':
+                        if (previewEntry) break;
                         if (message.colIndex !== undefined) {
                             columnCount--;
                             for (let i = 0; i < allRows.length; i++) {
@@ -332,6 +663,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         break;
 
                     case 'deleteCellShiftLeft':
+                        if (previewEntry) break;
                         if (message.rowIndex !== undefined && message.colIndex !== undefined) {
                             const row = allRows[message.rowIndex];
                             if (row) {
@@ -342,6 +674,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         break;
 
                     case 'deleteCellShiftUp':
+                        if (previewEntry) break;
                         if (message.rowIndex !== undefined && message.colIndex !== undefined) {
                             for (let i = message.rowIndex; i < allRows.length - 1; i++) {
                                 if (allRows[i] && allRows[i + 1]) {
@@ -436,6 +769,11 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
             });
 
             webviewPanel.onDidDispose(() => { 
+                if (versionSnapshotDebounceTimer) {
+                    clearTimeout(versionSnapshotDebounceTimer);
+                    versionSnapshotDebounceTimer = null;
+                    void persistVersionSnapshot();
+                }
                 configChangeDisposable.dispose(); 
                 themeChangeDisposable.dispose(); 
             });

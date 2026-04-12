@@ -306,6 +306,20 @@ td.active-cell::after {
     cursor: crosshair;
 }
 
+td.history-flash {
+    animation: historyFlash 0.7s ease;
+}
+
+@keyframes historyFlash {
+    0% {
+        box-shadow: inset 0 0 0 2px var(--accent-color), 0 0 0 0 rgba(0, 127, 212, 0.45);
+    }
+
+    100% {
+        box-shadow: inset 0 0 0 2px var(--selection-border), 0 0 0 12px rgba(0, 127, 212, 0);
+    }
+}
+
 /* Row/Column Selection */
 td.column-selected {
     background-color: var(--selection-bg) !important;
@@ -451,19 +465,23 @@ td[contenteditable="true"] {
 }
 
 .toast-notification.autosave-toast {
+    position: fixed;
     top: auto;
     bottom: 20px;
-    left: 20px;
-    transform: translateY(10px) scale(0.9);
+    left: 50%;
+    transform: translateX(-50%) scale(0.9);
 }
 
 .toast-notification.autosave-toast.show {
-    transform: translateY(0) scale(1);
+    transform: translateX(-50%) scale(1);
 }
 
 .toast-notification.show {
     opacity: 1;
     visibility: visible;
+}
+
+.toast-notification:not(.autosave-toast).show {
     transform: translate(-50%, -50%) scale(1);
 }
 
@@ -507,6 +525,38 @@ td[contenteditable="true"] {
     padding: 4px 12px;
     align-items: center;
 } 
+
+.version-preview-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    margin: 8px 12px 0;
+    border: 1px solid var(--vscode-widget-border);
+    border-radius: 8px;
+    background: var(--vscode-editorInfo-background);
+    color: var(--vscode-editorInfo-foreground);
+    box-shadow: var(--shadow-sm);
+}
+
+.version-preview-banner.hidden {
+    display: none;
+}
+
+.version-preview-text {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.version-preview-actions {
+    display: inline-flex;
+    gap: 8px;
+}
+
+body.preview-mode td {
+    cursor: default;
+}
 
 
 /* --- Settings Button (Icon Only) --- */

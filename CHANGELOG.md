@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.8.1 - Copy Fix & Version History
+- Fixed an issue where Ctrl+C, Ctrl+V, and Ctrl+A were incorrectly intercepted while editing a cell, restoring native browser text selection.
+- Redesigned and centered the Autosave confirmation alert for better visibility.
+- Updated Ctrl+Z and Ctrl+Y to properly handle custom Undo/Redo tracking behaviors inside the editor.
+- Added a new Version History timeline and button, archiving the last 2 days of historical states to allow precise structural restoration.
+
 ## v1.8.0 - Spacious Cells & UI Fixes
 - Added support for spacious cells in the table view.
 - Fixed the unsticky toolbar leaving empty space below the table and lacking background color.
