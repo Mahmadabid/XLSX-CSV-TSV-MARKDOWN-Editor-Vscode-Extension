@@ -1,4 +1,4 @@
-﻿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import * as Excel from 'exceljs';
 import { convertARGBToRGBA, isShadeOfBlack, isShadeOfWhite } from './xlsx/xlsxUtilities';
 
@@ -143,6 +143,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     await cfg.update('xlsx.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.stickyHeader', !!s.stickyHeader, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.hyperlinkPreview', !!s.hyperlinkPreview, vscode.ConfigurationTarget.Global);
+                    await cfg.update('xlsx.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
                 } catch (err) {
                     console.error('Failed to persist XLSX settings:', err);
                 }
@@ -987,3 +988,5 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 </html>`;
     }
 }
+
+

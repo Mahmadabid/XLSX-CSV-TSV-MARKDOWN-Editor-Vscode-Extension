@@ -826,13 +826,13 @@ body.first-row-as-header tbody tr.header-row td {
 body.sticky-header-enabled tbody tr.header-row td,
 body.sticky-header-enabled tbody tr.header-row th {
     position: sticky;
-    top: 34px;
+    top: 0;
     z-index: 10;
 }
 
 body.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky;
-    top: 34px;
+    top: 0;
     left: 0;
     z-index: 30;
     background-color: var(--header-bg);
@@ -1002,14 +1002,14 @@ body.plain-view.first-row-as-header tbody tr.header-row td {
 body.plain-view.sticky-header-enabled tbody tr.header-row td,
 body.plain-view.sticky-header-enabled tbody tr.header-row th {
     position: sticky;
-    top: 34px;
+    top: 0;
     z-index: 10;
     background-color: var(--header-bg) !important;
 }
 
 body.plain-view.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky;
-    top: 34px;
+    top: 0;
     left: 0;
     z-index: 30;
     background-color: var(--header-bg) !important;

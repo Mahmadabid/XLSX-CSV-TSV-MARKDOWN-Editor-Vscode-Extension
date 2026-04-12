@@ -1,261 +1,272 @@
 {
-  "name": "xlsx-viewer",
-  "displayName": "XLSX, CSV, TSV & Markdown Editor",
-  "description": "View and edit XLSX files with colors, fonts and styles from Excel files (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
-  "version": "1.7.9",
-  "publisher": "muhammad-ahmad",
-  "engines": {
-    "vscode": "^1.60.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Mahmadabid/XLSX-CSV-TSV-MARKDOWN-Editor-Vscode-Extension"
-  },
-  "keywords": [
-    "xlsx",
-    "excel",
-    "csv",
-    "office",
-    "tsv",
-    "spreadsheet",
-    "viewer",
-    "editor",
-    "xlsx-editor",
-    "table-edit",
-    "toolbar",
-    "settings",
-    "multiple sheets",
-    "style",
-    "fonts",
-    "theme"
-  ],
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [],
-  "main": "./dist/extension.js",
-  "contributes": {
-    "customEditors": [
-      {
-        "viewType": "xlsxViewer.xlsx",
-        "displayName": "XLSX Viewer & Editor",
-        "selector": [
-          {
-            "filenamePattern": "*.xlsx"
-          }
-        ]
-      },
-      {
-        "viewType": "xlsxViewer.csv",
-        "displayName": "CSV Viewer & Editor",
-        "selector": [
-          {
-            "filenamePattern": "*.csv"
-          }
-        ]
-      },
-      {
-        "viewType": "xlsxViewer.tsv",
-        "displayName": "TSV Viewer & Editor",
-        "selector": [
-          {
-            "filenamePattern": "*.tsv"
-          }
-        ]
-      },
-      {
-        "viewType": "xlsxViewer.md",
-        "displayName": "Markdown Viewer & Editor",
-        "priority": "option",
-        "selector": [
-          {
-            "filenamePattern": "*.md"
-          }
-        ]
-      }
-    ],
-    "commands": [
-      {
-        "command": "xlsx-viewer.goBackToMdPreview",
-        "title": "Open in Preview",
-        "category": "Markdown",
-        "icon": "resources/md/logo.svg"
-      },
-      {
-        "command": "xlsx-viewer.goBackToTableView",
-        "title": "Open in Table View",
-        "category": "CSV/TSV",
-        "icon": "resources/table/table.svg"
-      },
-      {
-        "command": "xlsx-viewer.goBackToXlsxView",
-        "title": "Open in XLSX Viewer",
-        "category": "XLSX",
-        "icon": "resources/xlsx/table.svg"
-      }
-    ],
-    "menus": {
-      "editor/title": [
-        {
-          "when": "resourceExtname == '.xlsx' && activeEditor != 'xlsxViewer.xlsx'",
-          "command": "xlsx-viewer.goBackToXlsxView",
-          "group": "navigation"
-        },
-        {
-          "when": "resourceExtname == '.csv' && activeEditor != 'xlsxViewer.csv'",
-          "command": "xlsx-viewer.goBackToTableView",
-          "group": "navigation"
-        },
-        {
-          "when": "resourceExtname == '.tsv' && activeEditor != 'xlsxViewer.tsv'",
-          "command": "xlsx-viewer.goBackToTableView",
-          "group": "navigation"
-        },
-        {
-          "when": "resourceExtname == '.md' && activeEditor != 'xlsxViewer.md'",
-          "command": "xlsx-viewer.goBackToMdPreview",
-          "group": "navigation"
-        }
-      ]
+    "name": "xlsx-viewer",
+    "displayName": "XLSX, CSV, TSV & Markdown Editor",
+    "description": "View and edit XLSX files with colors, fonts and styles from Excel files (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
+    "version": "1.8.0",
+    "publisher": "muhammad-ahmad",
+    "engines": {
+        "vscode": "^1.60.0"
     },
-    "configuration": {
-      "title": "XLSX, CSV & TSV Editor",
-      "properties": {
-        "xlsxViewer.csv.firstRowIsHeader": {
-          "type": "boolean",
-          "default": false,
-          "description": "Treat the first row of CSV files as a header (makes the first row bold)."
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Mahmadabid/XLSX-CSV-TSV-MARKDOWN-Editor-Vscode-Extension"
+    },
+    "keywords": [
+        "xlsx",
+        "excel",
+        "csv",
+        "office",
+        "tsv",
+        "spreadsheet",
+        "viewer",
+        "editor",
+        "xlsx-editor",
+        "table-edit",
+        "toolbar",
+        "settings",
+        "multiple sheets",
+        "style",
+        "fonts",
+        "theme"
+    ],
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [],
+    "main": "./dist/extension.js",
+    "contributes": {
+        "customEditors": [
+            {
+                "viewType": "xlsxViewer.xlsx",
+                "displayName": "XLSX Viewer & Editor",
+                "selector": [
+                    {
+                        "filenamePattern": "*.xlsx"
+                    }
+                ]
+            },
+            {
+                "viewType": "xlsxViewer.csv",
+                "displayName": "CSV Viewer & Editor",
+                "selector": [
+                    {
+                        "filenamePattern": "*.csv"
+                    }
+                ]
+            },
+            {
+                "viewType": "xlsxViewer.tsv",
+                "displayName": "TSV Viewer & Editor",
+                "selector": [
+                    {
+                        "filenamePattern": "*.tsv"
+                    }
+                ]
+            },
+            {
+                "viewType": "xlsxViewer.md",
+                "displayName": "Markdown Viewer & Editor",
+                "priority": "option",
+                "selector": [
+                    {
+                        "filenamePattern": "*.md"
+                    }
+                ]
+            }
+        ],
+        "commands": [
+            {
+                "command": "xlsx-viewer.goBackToMdPreview",
+                "title": "Open in Preview",
+                "category": "Markdown",
+                "icon": "resources/md/logo.svg"
+            },
+            {
+                "command": "xlsx-viewer.goBackToTableView",
+                "title": "Open in Table View",
+                "category": "CSV/TSV",
+                "icon": "resources/table/table.svg"
+            },
+            {
+                "command": "xlsx-viewer.goBackToXlsxView",
+                "title": "Open in XLSX Viewer",
+                "category": "XLSX",
+                "icon": "resources/xlsx/table.svg"
+            }
+        ],
+        "menus": {
+            "editor/title": [
+                {
+                    "when": "resourceExtname == '.xlsx' && activeEditor != 'xlsxViewer.xlsx'",
+                    "command": "xlsx-viewer.goBackToXlsxView",
+                    "group": "navigation"
+                },
+                {
+                    "when": "resourceExtname == '.csv' && activeEditor != 'xlsxViewer.csv'",
+                    "command": "xlsx-viewer.goBackToTableView",
+                    "group": "navigation"
+                },
+                {
+                    "when": "resourceExtname == '.tsv' && activeEditor != 'xlsxViewer.tsv'",
+                    "command": "xlsx-viewer.goBackToTableView",
+                    "group": "navigation"
+                },
+                {
+                    "when": "resourceExtname == '.md' && activeEditor != 'xlsxViewer.md'",
+                    "command": "xlsx-viewer.goBackToMdPreview",
+                    "group": "navigation"
+                }
+            ]
         },
-        "xlsxViewer.csv.stickyHeader": {
-          "type": "boolean",
-          "default": false,
-          "description": "Make the first row sticky when 'First row is header' is enabled."
-        },
-        "xlsxViewer.csv.stickyToolbar": {
-          "type": "boolean",
-          "default": true,
-          "description": "Keep the CSV toolbar sticky at the top of the editor."
-        },
-        "xlsxViewer.tsv.firstRowIsHeader": {
-          "type": "boolean",
-          "default": false,
-          "description": "Treat the first row of TSV files as a header (makes the first row bold)."
-        },
-        "xlsxViewer.tsv.stickyHeader": {
-          "type": "boolean",
-          "default": false,
-          "description": "Make the first row sticky when 'First row is header' is enabled."
-        },
-        "xlsxViewer.tsv.stickyToolbar": {
-          "type": "boolean",
-          "default": true,
-          "description": "Keep the TSV toolbar sticky at the top of the editor."
-        },
-        "xlsxViewer.xlsx.stickyToolbar": {
-          "type": "boolean",
-          "default": true,
-          "description": "Keep the XLSX toolbar sticky at the top of the editor."
-        },
-        "xlsxViewer.xlsx.firstRowIsHeader": {
-          "type": "boolean",
-          "default": false,
-          "description": "Treat the first row of XLSX files as a header (makes the first row bold)."
-        },
-        "xlsxViewer.xlsx.stickyHeader": {
-          "type": "boolean",
-          "default": false,
-          "description": "Make the first row sticky when 'First row is header' is enabled."
-        },
-        "xlsxViewer.xlsx.hyperlinkPreview": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show a hover tooltip for hyperlinks with Open/Copy actions."
-        },
-        "xlsxViewer.md.stickyToolbar": {
-          "type": "boolean",
-          "default": true,
-          "description": "Keep the Markdown toolbar sticky at the top of the editor."
-        },
-        "xlsxViewer.md.wordWrap": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable word wrap in the Markdown preview."
-        },
-        "xlsxViewer.md.syncScroll": {
-          "type": "boolean",
-          "default": true,
-          "description": "Synchronize scroll position between editor and preview in split view."
-        },
-        "xlsxViewer.md.previewPosition": {
-          "type": "string",
-          "default": "right",
-          "enum": [
-            "left",
-            "right"
-          ],
-          "description": "Position of the preview pane in split view (left or right)."
-        },
-        "xlsxViewer.md.showOutline": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the Markdown outline panel in the preview."
-        },
-        "xlsxViewer.md.showLineNumbers": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show line numbers in code blocks."
+        "configuration": {
+            "title": "XLSX, CSV & TSV Editor",
+            "properties": {
+                "xlsxViewer.csv.firstRowIsHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Treat the first row of CSV files as a header (makes the first row bold)."
+                },
+                "xlsxViewer.csv.stickyHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Make the first row sticky when 'First row is header' is enabled."
+                },
+                "xlsxViewer.csv.stickyToolbar": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Keep the CSV toolbar sticky at the top of the editor."
+                },
+                "xlsxViewer.csv.spaciousCells": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Increase cell padding and height for a more spacious view."
+                },
+                "xlsxViewer.tsv.firstRowIsHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Treat the first row of TSV files as a header (makes the first row bold)."
+                },
+                "xlsxViewer.tsv.stickyHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Make the first row sticky when 'First row is header' is enabled."
+                },
+                "xlsxViewer.tsv.stickyToolbar": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Keep the TSV toolbar sticky at the top of the editor."
+                },
+                "xlsxViewer.tsv.spaciousCells": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Increase cell padding and height for a more spacious view."
+                },
+                "xlsxViewer.xlsx.stickyToolbar": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Keep the XLSX toolbar sticky at the top of the editor."
+                },
+                "xlsxViewer.xlsx.firstRowIsHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Treat the first row of XLSX files as a header (makes the first row bold)."
+                },
+                "xlsxViewer.xlsx.stickyHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Make the first row sticky when 'First row is header' is enabled."
+                },
+                "xlsxViewer.xlsx.hyperlinkPreview": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show a hover tooltip for hyperlinks with Open/Copy actions."
+                },
+                "xlsxViewer.md.stickyToolbar": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Keep the Markdown toolbar sticky at the top of the editor."
+                },
+                "xlsxViewer.md.wordWrap": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable word wrap in the Markdown preview."
+                },
+                "xlsxViewer.md.syncScroll": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Synchronize scroll position between editor and preview in split view."
+                },
+                "xlsxViewer.md.previewPosition": {
+                    "type": "string",
+                    "default": "right",
+                    "enum": [
+                        "left",
+                        "right"
+                    ],
+                    "description": "Position of the preview pane in split view (left or right)."
+                },
+                "xlsxViewer.md.showOutline": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show the Markdown outline panel in the preview."
+                },
+                "xlsxViewer.md.showLineNumbers": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show line numbers in code blocks."
+                }
+            }
         }
-      }
-    }
-  },
-  "scripts": {
-    "vscode:prepublish": "npm run package",
-    "compile": "npm run check-types && npm run lint && node esbuild.js",
-    "watch": "npm-run-all -p watch:*",
-    "watch:esbuild": "node esbuild.js --watch",
-    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-    "package": "npm run check-types && npm run lint && node esbuild.js --production",
-    "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "npm run compile-tests && npm run compile && npm run lint",
-    "check-types": "tsc --noEmit",
-    "lint": "eslint src/**/*.ts",
-    "test": "vscode-test"
-  },
-  "devDependencies": {
-    "@types/mocha": "^8.2.2",
-    "@types/node": "14.x",
-    "@types/turndown": "^5.0.6",
-    "@types/vscode": "^1.60.0",
-    "@typescript-eslint/eslint-plugin": "^8.30.1",
-    "@typescript-eslint/parser": "^8.30.1",
-    "esbuild": "^0.25.1",
-    "eslint": "^9.24.0",
-    "mocha": "^11.7.5",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^4.3.2",
-    "vscode-test": "^1.5.2"
-  },
-  "dependencies": {
-    "@types/highlight.js": "^9.12.4",
-    "@types/markdown-it": "^14.1.2",
-    "@types/markdown-it-container": "^2.0.11",
-    "exceljs": "^4.3.0",
-    "highlight.js": "^11.11.1",
-    "markdown-it": "^14.1.0",
-    "markdown-it-abbr": "^2.0.0",
-    "markdown-it-container": "^4.0.0",
-    "markdown-it-deflist": "^3.0.0",
-    "markdown-it-emoji": "^3.0.0",
-    "markdown-it-footnote": "^4.0.0",
-    "markdown-it-ins": "^4.0.0",
-    "markdown-it-mark": "^4.0.0",
-    "markdown-it-sub": "^2.0.0",
-    "markdown-it-sup": "^2.0.0",
-    "markdown-it-task-lists": "^2.1.1",
-    "turndown": "^7.2.2",
-    "turndown-plugin-gfm": "^1.0.2"
-  },
-  "license": "MIT",
-  "icon": "icon.png"
+    },
+    "scripts": {
+        "build": "npm run compile",
+        "vscode:prepublish": "npm run package",
+        "compile": "npm run check-types && npm run lint && node esbuild.js",
+        "watch": "npm-run-all -p watch:*",
+        "watch:esbuild": "node esbuild.js --watch",
+        "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+        "package": "npm run check-types && npm run lint && node esbuild.js --production",
+        "compile-tests": "tsc -p . --outDir out",
+        "watch-tests": "tsc -p . -w --outDir out",
+        "pretest": "npm run compile-tests && npm run compile && npm run lint",
+        "check-types": "tsc --noEmit",
+        "lint": "eslint src/**/*.ts",
+        "test": "vscode-test"
+    },
+    "devDependencies": {
+        "@types/mocha": "^8.2.2",
+        "@types/node": "14.x",
+        "@types/turndown": "^5.0.6",
+        "@types/vscode": "^1.60.0",
+        "@typescript-eslint/eslint-plugin": "^8.30.1",
+        "@typescript-eslint/parser": "^8.30.1",
+        "esbuild": "^0.25.1",
+        "eslint": "^9.24.0",
+        "mocha": "^11.7.5",
+        "npm-run-all": "^4.1.5",
+        "typescript": "^4.3.2",
+        "vscode-test": "^1.5.2"
+    },
+    "dependencies": {
+        "@types/highlight.js": "^9.12.4",
+        "@types/markdown-it": "^14.1.2",
+        "@types/markdown-it-container": "^2.0.11",
+        "exceljs": "^4.3.0",
+        "highlight.js": "^11.11.1",
+        "markdown-it": "^14.1.0",
+        "markdown-it-abbr": "^2.0.0",
+        "markdown-it-container": "^4.0.0",
+        "markdown-it-deflist": "^3.0.0",
+        "markdown-it-emoji": "^3.0.0",
+        "markdown-it-footnote": "^4.0.0",
+        "markdown-it-ins": "^4.0.0",
+        "markdown-it-mark": "^4.0.0",
+        "markdown-it-sub": "^2.0.0",
+        "markdown-it-sup": "^2.0.0",
+        "markdown-it-task-lists": "^2.1.1",
+        "turndown": "^7.2.2",
+        "turndown-plugin-gfm": "^1.0.2"
+    },
+    "license": "MIT",
+    "icon": "icon.png"
 }

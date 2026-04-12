@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.8.0 - Spacious Cells & UI Fixes
+- Added support for spacious cells in the table view.
+- Fixed the unsticky toolbar leaving empty space below the table and lacking background color.
+- Fixed the sticky header offset gap when spacious cells and sticky headers are both enabled.
+- Changed UI for csv and tsv to match the google sheets style more closely.
+- Removed Edit Table button and allowed editing directly in the table view for csv and tsv.
+- Added autosave for csv and tsv when editing directly in the table view.
+- Added row and column addition and deletion for csv and tsv in the table view.
+- Added cell deletion and shift up/left for csv and tsv in the table view.
+
 ## v1.7.9 - XLSX Edit Mode & Formatting Fixes
 - Fixed XLSX table edit mode so background color targets the active cell instead of leaking to multiple previously-selected cells.
 - Fixed XLSX table edit mode cell selection behavior for reliable single-cell targeting.

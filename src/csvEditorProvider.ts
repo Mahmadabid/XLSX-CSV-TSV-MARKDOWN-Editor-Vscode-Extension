@@ -129,7 +129,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         resolve();
                     });
 
-                    fileStream.on('error', (err) => {
+                    fileStream.on('error', (err: any) => {
                         reject(err);
                     });
                 });
@@ -146,7 +146,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             // Generate header HTML
                             let headerHtml = '<tr><th class="row-header">&nbsp;</th>';
                             for (let i = 1; i <= columnCount; i++) {
-                                headerHtml += `<th class="col-header" data-col="${i - 1}">${excelColumnLabel(i)}</th>`;
+                                headerHtml += `<th class="col-header" data-col="${i - 1}">${excelColumnLabel(i)}<div class="col-resize-handle"></div></th>`;
                             }
                             headerHtml += '</tr>';
 
@@ -180,6 +180,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 firstRowIsHeader: cfg.get('csv.firstRowIsHeader', false),
                                 stickyHeader: cfg.get('csv.stickyHeader', false),
                                 stickyToolbar: cfg.get('csv.stickyToolbar', true),
+                                spaciousCells: cfg.get('csv.spaciousCells', false),
                                 isDefaultEditor: isDefault
                             };
                             webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -226,6 +227,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('csv.firstRowIsHeader', !!s.firstRowIsHeader, vscode.ConfigurationTarget.Global);
                             await cfg.update('csv.stickyHeader', !!s.stickyHeader, vscode.ConfigurationTarget.Global);
                             await cfg.update('csv.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
+                            await cfg.update('csv.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
                         }
@@ -242,6 +244,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 firstRowIsHeader: cfg_e.get('csv.firstRowIsHeader', false),
                                 stickyHeader: cfg_e.get('csv.stickyHeader', false),
                                 stickyToolbar: cfg_e.get('csv.stickyToolbar', true),
+                                spaciousCells: cfg_e.get('csv.spaciousCells', false),
                                 isDefaultEditor: true
                             }
                         });
@@ -273,19 +276,23 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                     case 'saveCsv':
                         try {
-                            const text = typeof message.text === 'string' ? message.text : '';
-                            // Update in-memory data after save
-                            const lines: string[] = text.split('\n').filter((l: string) => l.length > 0 || text.endsWith('\n'));
-                            allRows = [];
-                            for (const line of lines) {
-                                if (line.trim() || lines.indexOf(line) < lines.length - 1) {
-                                    allRows.push(parseRowString(line));
-                                }
+                            // Serialize allRows to CSV
+                            let text = '';
+                            for (let i = 0; i < allRows.length; i++) {
+                                const row = allRows[i] || [];
+                                const rowStr = row.map(cell => {
+                                    const cellStr = cell === undefined || cell === null ? '' : String(cell);
+                                    if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n') || cellStr.includes('\r')) {
+                                        return `"${cellStr.replace(/"/g, '""')}"`;
+                                    }
+                                    return cellStr;
+                                }).join(',');
+                                text += rowStr + '\n';
                             }
-                            await vscode.workspace.fs.writeFile(document.uri, Buffer.from(text, 'utf8'));
-                            webviewPanel.webview.postMessage({ command: 'saveResult', ok: true });
+                            fs.writeFileSync(document.uri.fsPath, text, 'utf8');
+                            webviewPanel.webview.postMessage({ command: 'saveResult', ok: true, isAutosave: message.isAutosave });
                         } catch (err) {
-                            webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: String(err) });
+                            webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: String(err), isAutosave: message.isAutosave });
                         }
                         break;
 
@@ -293,6 +300,63 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         // Update a single row in memory (for edit mode)
                         if (message.rowIndex !== undefined && message.rowData) {
                             allRows[message.rowIndex] = message.rowData;
+                        }
+                        break;
+
+                    case 'insertRow':
+                        if (message.rowIndex !== undefined) {
+                            const newRow = new Array(columnCount).fill('');
+                            allRows.splice(message.rowIndex, 0, newRow);
+                        }
+                        break;
+
+                    case 'deleteRow':
+                        if (message.rowIndex !== undefined) {
+                            allRows.splice(message.rowIndex, 1);
+                        }
+                        break;
+
+                    case 'insertColumn':
+                        if (message.colIndex !== undefined) {
+                            columnCount++;
+                            for (let i = 0; i < allRows.length; i++) {
+                                allRows[i].splice(message.colIndex, 0, '');
+                            }
+                        }
+                        break;
+
+                    case 'deleteColumn':
+                        if (message.colIndex !== undefined) {
+                            columnCount--;
+                            for (let i = 0; i < allRows.length; i++) {
+                                allRows[i].splice(message.colIndex, 1);
+                            }
+                        }
+                        break;
+
+                    case 'deleteCellShiftLeft':
+                        if (message.rowIndex !== undefined && message.colIndex !== undefined) {
+                            const row = allRows[message.rowIndex];
+                            if (row) {
+                                row.splice(message.colIndex, 1);
+                                row.push('');
+                            }
+                        }
+                        break;
+
+                    case 'deleteCellShiftUp':
+                        if (message.rowIndex !== undefined && message.colIndex !== undefined) {
+                            for (let i = message.rowIndex; i < allRows.length - 1; i++) {
+                                if (allRows[i] && allRows[i + 1]) {
+                                    allRows[i][message.colIndex] = allRows[i + 1][message.colIndex];
+                                }
+                            }
+                            if (allRows.length > 0) {
+                                const lastRow = allRows[allRows.length - 1];
+                                if (lastRow) {
+                                    lastRow[message.colIndex] = '';
+                                }
+                            }
                         }
                         break;
 
@@ -304,6 +368,21 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             }
                         } catch {
                             // ignore
+                        }
+                        break;
+
+                    case 'copy':
+                        if (typeof message.text === 'string') {
+                            await vscode.env.clipboard.writeText(message.text);
+                        }
+                        break;
+
+                    case 'readClipboard':
+                        try {
+                            const text = await vscode.env.clipboard.readText();
+                            webviewPanel.webview.postMessage({ command: 'clipboardData', text });
+                        } catch (err) {
+                            console.error('Failed to read clipboard', err);
                         }
                         break;
 
@@ -340,6 +419,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         firstRowIsHeader: cfg.get('csv.firstRowIsHeader', false),
                         stickyHeader: cfg.get('csv.stickyHeader', false),
                         stickyToolbar: cfg.get('csv.stickyToolbar', true),
+                        spaciousCells: cfg.get('csv.spaciousCells', false),
                         isDefaultEditor: isDefault
                     };
                     try { 

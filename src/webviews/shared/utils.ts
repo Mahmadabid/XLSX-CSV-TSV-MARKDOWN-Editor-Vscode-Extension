@@ -15,7 +15,7 @@ export class Utils {
         return div.innerHTML;
     }
 
-    static showToast(message: string) {
+    static showToast(message: string, isAutosave = false) {
         let toast = document.getElementById('saveToast');
         if (!toast) {
             toast = document.createElement('div');
@@ -35,10 +35,16 @@ export class Utils {
         const textSpan = toast.querySelector('.toast-text');
         if (textSpan) textSpan.textContent = message;
         
+        if (isAutosave) {
+            toast.classList.add('autosave-toast');
+        } else {
+            toast.classList.remove('autosave-toast');
+        }
+        
         toast.classList.add('show');
         setTimeout(() => {
             toast?.classList.remove('show');
-        }, 3000);
+        }, isAutosave ? 1000 : 3000);
     }
 
     static async writeToClipboardAsync(text: string): Promise<boolean> {

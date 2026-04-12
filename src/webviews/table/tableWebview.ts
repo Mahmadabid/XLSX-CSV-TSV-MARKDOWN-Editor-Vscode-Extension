@@ -12,13 +12,14 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
 (function () {
     // ===== Configuration =====
-    const { ROW_HEIGHT, BUFFER_ROWS, CHUNK_SIZE } = VirtualScrollConfig;
+    const { BUFFER_ROWS, CHUNK_SIZE } = VirtualScrollConfig;
+    let ROW_HEIGHT = VirtualScrollConfig.ROW_HEIGHT;
 
     // ===== State =====
     let isTableView = true;
-    let isEditMode = false;
     let isSaving = false;
     let exitAfterSave = false;
+    let saveTimeout: any = null;
 
     // Virtual scrolling state
     let totalRows = 0;
@@ -45,8 +46,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
     const selectedColumnIndices = new Set<number>();
 
     // Undo/Redo for edit mode
-    let undoStack: string[][][] = [];
-    let redoStack: string[][][] = [];
+    let undoStack: { data: string[][], totalRows: number, columnCount: number }[] = [];
+    let redoStack: { data: string[][], totalRows: number, columnCount: number }[] = [];
     const MAX_HISTORY = 50;
 
     // Settings
@@ -54,6 +55,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
         firstRowIsHeader: boolean;
         stickyToolbar: boolean;
         stickyHeader: boolean;
+        spaciousCells?: boolean;
         isDefaultEditor?: boolean;
     }
 
@@ -61,6 +63,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
         firstRowIsHeader: false,
         stickyToolbar: true,
         stickyHeader: false,
+        spaciousCells: false,
         isDefaultEditor: true
     };
 
@@ -86,8 +89,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
     }
 
     function setButtonsEnabled(enabled: boolean) {
-        const ids = ['toggleViewButton', 'toggleTableEditButton', 'saveTableEditsButton',
-            'cancelTableEditsButton', 'toggleBackgroundButton', 'toggleExpandButton'];
+        const ids = ['toggleViewButton', 'toggleBackgroundButton', 'toggleExpandButton'];
         ids.forEach((id) => {
             const el = $(id) as HTMLButtonElement;
             if (el) el.disabled = !enabled;
@@ -121,7 +123,6 @@ import { InfoTooltip } from '../shared/infoTooltip';
             html += `<td data-row="${rowIndex}" data-col="${colIndex}" `;
             html += `data-default-bg="true" data-default-color="true"`;
             if (isEmpty) html += ` data-empty="true"`;
-            if (isEditMode) html += ` contenteditable="true" spellcheck="false"`;
             html += `>${displayContent}</td>`;
         }
 
@@ -157,16 +158,16 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
         tbody.innerHTML = html;
 
-        if (isEditMode) {
-            applyEditModeToCells();
-        }
-
         reapplySelection();
     }
 
-    async function updateVisibleRows() {
+    async function updateVisibleRows(force = false) {
         const container = getTableContainer();
         if (!container || totalRows === 0) return;
+
+        if (isCellEditing) {
+            stopEditing();
+        }
 
         const scrollTop = container.scrollTop;
         const clientHeight = container.clientHeight;
@@ -180,7 +181,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
         const chunkStart = Math.floor(firstVisibleRow / CHUNK_SIZE) * CHUNK_SIZE;
         const chunkEnd = Math.min(totalRows, Math.ceil(lastVisibleRow / CHUNK_SIZE) * CHUNK_SIZE);
 
-        if (chunkStart === currentVisibleStart && chunkEnd === currentVisibleEnd) {
+        if (!force && chunkStart === currentVisibleStart && chunkEnd === currentVisibleEnd) {
             return;
         }
 
@@ -234,7 +235,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
     function clearSelection() {
         document.querySelectorAll(
-            'td.selected, td.active-cell, td.column-selected, td.row-selected, th.column-selected, th.row-selected'
+            'td.selected, td.active-cell, td.column-selected, td.row-selected, th.column-selected, th.row-selected, th.row-header.row-selected, th.col-header.column-selected'
         ).forEach((el) => {
             el.classList.remove('selected', 'active-cell', 'column-selected', 'row-selected', 'copying');
         });
@@ -256,6 +257,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
             document.querySelectorAll(`td[data-col="${colIdx}"], th[data-col="${colIdx}"]`).forEach((cell) => {
                 cell.classList.add('column-selected');
                 if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                else if (cell.tagName === 'TH') cell.classList.add('column-selected');
             });
         });
 
@@ -281,6 +283,20 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     activeCell = newCell;
                 }
             }
+        }
+
+        if (selectedCells.size > 0 && selectedRowIndices.size === 0 && selectedColumnIndices.size === 0) {
+            const cellsArray = Array.from(selectedCells);
+            const rows = new Set(cellsArray.map((cell) => parseInt(cell.dataset.row!, 10)));
+            const cols = new Set(cellsArray.map((cell) => parseInt(cell.dataset.col!, 10)));
+            rows.forEach(r => {
+                const thRow = document.querySelector(`th.row-header[data-row="${r}"]`);
+                if (thRow) thRow.classList.add('row-selected');
+            });
+            cols.forEach(c => {
+                const thCol = document.querySelector(`th.col-header[data-col="${c}"]`);
+                if (thCol) thCol.classList.add('column-selected');
+            });
         }
     }
 
@@ -329,8 +345,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
         const minCol = Math.min(start.col, end.col);
         const maxCol = Math.max(start.col, end.col);
 
-        document.querySelectorAll('td.selected, td.active-cell').forEach((el) => {
-            el.classList.remove('selected', 'active-cell');
+        document.querySelectorAll('td.selected, td.active-cell, th.row-selected, th.column-selected').forEach((el) => {
+            el.classList.remove('selected', 'active-cell', 'row-selected', 'column-selected');
         });
         selectedCells.clear();
 
@@ -344,6 +360,16 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 selectedCells.add(htmlCell);
             }
         });
+
+        // Add header highlighting
+        for (let r = minRow; r <= maxRow; r++) {
+            const thRow = document.querySelector(`th.row-header[data-row="${r}"]`) as HTMLElement;
+            if (thRow) thRow.classList.add('row-selected');
+        }
+        for (let c = minCol; c <= maxCol; c++) {
+            const thCol = document.querySelector(`th.col-header[data-col="${c}"]`) as HTMLElement;
+            if (thCol) thCol.classList.add('column-selected');
+        }
 
         const startCellElement = document.querySelector(
             `td[data-row="${start.row}"][data-col="${start.col}"]`
@@ -394,6 +420,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
             document.querySelectorAll(`td[data-col="${columnIndex}"], th[data-col="${columnIndex}"]`).forEach((cell) => {
                 cell.classList.add('column-selected');
                 if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                else if (cell.tagName === 'TH') cell.classList.add('column-selected');
             });
             lastSelectedColumn = columnIndex;
         }
@@ -458,7 +485,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
     // ===== Edit Mode =====
 
-    function getTableData(): string[][] {
+    function getTableData() {
         const data: string[][] = [];
         for (let i = 0; i < totalRows; i++) {
             const cached = rowCache.get(i);
@@ -468,13 +495,13 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 data.push([]);
             }
         }
-        return data;
+        return { data, totalRows, columnCount };
     }
 
     function pushToUndo() {
         const currentData = getTableData();
         if (undoStack.length > 0) {
-            if (JSON.stringify(undoStack[undoStack.length - 1]) === JSON.stringify(currentData)) {
+            if (JSON.stringify(undoStack[undoStack.length - 1].data) === JSON.stringify(currentData.data)) {
                 return;
             }
         }
@@ -483,30 +510,71 @@ import { InfoTooltip } from '../shared/infoTooltip';
         redoStack = [];
     }
 
+    function syncBackendWithData(targetState: {data: string[][], totalRows: number, columnCount: number}) {
+        let currentColCount = columnCount;
+        let currentRowCount = totalRows;
+
+        while (currentColCount < targetState.columnCount) {
+            vscode.postMessage({ command: 'insertColumn', colIndex: currentColCount });
+            currentColCount++;
+        }
+        while (currentColCount > targetState.columnCount) {
+            currentColCount--;
+            vscode.postMessage({ command: 'deleteColumn', colIndex: currentColCount });
+        }
+
+        while (currentRowCount < targetState.totalRows) {
+            vscode.postMessage({ command: 'insertRow', rowIndex: currentRowCount });
+            currentRowCount++;
+        }
+        while (currentRowCount > targetState.totalRows) {
+            currentRowCount--;
+            vscode.postMessage({ command: 'deleteRow', rowIndex: currentRowCount });
+        }
+
+        targetState.data.forEach((row, i) => {
+            if (i < targetState.totalRows) {
+                vscode.postMessage({ command: 'updateRow', rowIndex: i, rowData: [...row] });
+            }
+        });
+    }
+
     function undo() {
         if (undoStack.length <= 1) return;
         const current = undoStack.pop();
         if (current) redoStack.push(current);
         const previous = undoStack[undoStack.length - 1];
 
-        previous.forEach((row, i) => {
-            rowCache.set(i, row);
+        syncBackendWithData(previous);
+
+        totalRows = previous.totalRows;
+        columnCount = previous.columnCount;
+        rowCache.clear();
+        previous.data.forEach((row, i) => {
+            rowCache.set(i, [...row]);
         });
 
-        updateVisibleRows();
+        updateHeadersLocal(); updateVisibleRows(true);
+        scheduleSave();
     }
 
     function redo() {
         if (redoStack.length === 0) return;
-        const data = redoStack.pop();
-        if (data) {
-            undoStack.push(data);
+        const state = redoStack.pop();
+        if (state) {
+            undoStack.push(state);
 
-            data.forEach((row, i) => {
-                rowCache.set(i, row);
+            syncBackendWithData(state);
+
+            totalRows = state.totalRows;
+            columnCount = state.columnCount;
+            rowCache.clear();
+            state.data.forEach((row, i) => {
+                rowCache.set(i, [...row]);
             });
 
-            updateVisibleRows();
+            updateHeadersLocal(); updateVisibleRows(true);
+            scheduleSave();
         }
     }
 
@@ -518,91 +586,75 @@ import { InfoTooltip } from '../shared/infoTooltip';
         });
     }
 
-    function restoreOriginalCellValues() {
-        if ((window as any)._originalCacheSnapshot) {
-            rowCache = new Map((window as any)._originalCacheSnapshot);
-            (window as any)._originalCacheSnapshot = null;
-            updateVisibleRows();
-        }
-    }
+    function restoreOriginalCellValues() { if ((window as any)._originalCacheSnapshot) { rowCache = new Map((window as any)._originalCacheSnapshot); (window as any)._originalCacheSnapshot = null; updateVisibleRows(true); } }
 
-    function applyEditModeToCells() {
-        document.querySelectorAll('td[data-row][data-col]').forEach((cell) => {
-            if (isEditMode) {
-                const current = normalizeCellText(cell.textContent || '');
-                cell.textContent = current;
-                cell.setAttribute('contenteditable', 'true');
-                cell.setAttribute('spellcheck', 'false');
-            } else {
-                cell.removeAttribute('contenteditable');
-                cell.removeAttribute('spellcheck');
-                const current = normalizeCellText(cell.textContent || '');
-                cell.textContent = current === '' ? '\u00a0' : current;
-            }
-        });
-    }
+    let isCellEditing = false;
+    let editingCell: HTMLElement | null = null;
 
-    function setEditMode(enabled: boolean) {
-        isEditMode = !!enabled;
-        document.body.classList.toggle('edit-mode', isEditMode);
-
-        const saveBtn = $('saveTableEditsButton');
-        const cancelBtn = $('cancelTableEditsButton');
-        const toggleViewBtn = $('toggleViewButton');
-        const toggleTableEditBtn = $('toggleTableEditButton');
-        const toggleExpandBtn = $('toggleExpandButton');
-
-        if (toolbarManager) {
-            toolbarManager.setButtonVisibility('toggleViewButton', !isEditMode);
-            toolbarManager.setButtonVisibility('toggleTableEditButton', !isEditMode);
-            toolbarManager.setButtonVisibility('toggleExpandButton', !isEditMode);
-            toolbarManager.setButtonVisibility('saveTableEditsButton', isEditMode);
-            toolbarManager.setButtonVisibility('cancelTableEditsButton', isEditMode);
+    function startEditing(cell: HTMLElement, clear = false) {
+        if (isCellEditing) stopEditing();
+        isCellEditing = true;
+        editingCell = cell;
+        cell.setAttribute('contenteditable', 'true');
+        cell.focus();
+        if (clear) {
+            cell.textContent = '';
         } else {
-            if (toggleViewBtn) toggleViewBtn.classList.toggle('hidden', isEditMode);
-            if (toggleTableEditBtn) toggleTableEditBtn.classList.toggle('hidden', isEditMode);
-            if (toggleExpandBtn) toggleExpandBtn.classList.toggle('hidden', isEditMode);
-            if (saveBtn) saveBtn.classList.toggle('hidden', !isEditMode);
-            if (cancelBtn) cancelBtn.classList.toggle('hidden', !isEditMode);
+            const range = document.createRange();
+            range.selectNodeContents(cell);
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
         }
-
-        if (isEditMode) {
-            clearSelection();
-            captureOriginalCellValues();
-            undoStack = [getTableData()];
-            redoStack = [];
-        } else {
-            undoStack = [];
-            redoStack = [];
-        }
-
-        applyEditModeToCells();
     }
 
-    function serializeTableToCsv(): string {
-        const rows: string[] = [];
-        const delimiter = fileFormat === 'tsv' ? '\t' : ',';
+    function stopEditing() {
+        if (!isCellEditing || !editingCell) return;
+        isCellEditing = false;
+        editingCell.removeAttribute('contenteditable');
+        
+        const row = parseInt(editingCell.dataset.row!, 10);
+        const col = parseInt(editingCell.dataset.col!, 10);
+        const value = normalizeCellText(editingCell.textContent || '');
 
-        for (let i = 0; i < totalRows; i++) {
-            const rowData = rowCache.get(i) || [];
-            const row: string[] = [];
-            for (let j = 0; j < columnCount; j++) {
-                const value = normalizeCellText(rowData[j] || '');
-                row.push(escapeCsvCell(value));
-            }
-            rows.push(row.join(delimiter));
+        let rowData = rowCache.get(row);
+        if (!rowData) {
+            rowData = [];
+            rowCache.set(row, rowData);
         }
-
-        return rows.join('\n') + (rows.length ? '\n' : '');
+        if (rowData[col] !== value) {
+            pushToUndo();
+            const cloned = [...rowData];
+            cloned[col] = value;
+            rowCache.set(row, cloned);
+            vscode.postMessage({ command: 'updateRow', rowIndex: row, rowData: cloned });
+            scheduleSave();
+        }
+        editingCell = null;
     }
 
-    function performSave(shouldExit = false) {
-        if (isSaving || !isEditMode) return;
+    function scheduleSave() {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            performSave(false, true);
+        }, 1000);
+    }
+
+
+
+    function performSave(shouldExit = false, isAutosave = false) {
+        if (isSaving) return;
         isSaving = true;
         exitAfterSave = shouldExit;
         setButtonsEnabled(false);
 
+        if (isCellEditing) {
+            stopEditing();
+        }
+
         // Commit current edits to cache
+        let didMutate = false;
+        let preSavePush = false;
         document.querySelectorAll('td[data-row][data-col]').forEach((cell) => {
             const htmlCell = cell as HTMLElement;
             const row = parseInt(htmlCell.dataset.row!, 10);
@@ -614,8 +666,20 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 rowData = [];
                 rowCache.set(row, rowData);
             }
-            rowData[col] = value;
+            if (rowData[col] !== value) {
+                if (!preSavePush) {
+                    pushToUndo();
+                    preSavePush = true;
+                }
+                const cloned = [...rowData];
+                cloned[col] = value;
+                rowCache.set(row, cloned);
+                didMutate = true;
+                vscode.postMessage({ command: 'updateRow', rowIndex: row, rowData: cloned });
+            }
         });
+
+        // pushToUndo now happens before mutating in loop
 
         if (document.activeElement && document.activeElement.tagName === 'TD') {
             (document.activeElement as HTMLElement).blur();
@@ -627,8 +691,213 @@ import { InfoTooltip } from '../shared/infoTooltip';
             window.getSelection()!.removeAllRanges();
         }
 
-        const csvText = serializeTableToCsv();
-        vscode.postMessage({ command: 'saveCsv', text: csvText });
+        vscode.postMessage({ command: 'saveCsv', isAutosave });
+    }
+
+    // ===== Context Menu =====
+    let contextMenu: HTMLElement | null = null;
+
+    function hideContextMenu() {
+        if (contextMenu) {
+            contextMenu.remove();
+            contextMenu = null;
+        }
+    }
+
+    function showContextMenu(e: MouseEvent, target: HTMLElement) {
+        e.preventDefault();
+        hideContextMenu();
+
+        const isRowHeader = target.classList.contains('row-header');
+        const isColHeader = target.classList.contains('col-header');
+        const isCell = target.tagName === 'TD';
+
+        if (!isRowHeader && !isColHeader && !isCell) return;
+
+        contextMenu = document.createElement('div');
+        contextMenu.className = 'context-menu';
+        contextMenu.style.left = `${e.clientX}px`;
+        contextMenu.style.top = `${e.clientY}px`;
+
+        const createMenuItem = (label: string, onClick: () => void) => {
+            const item = document.createElement('div');
+            item.className = 'context-menu-item';
+            item.textContent = label;
+            item.addEventListener('click', () => {
+                hideContextMenu();
+                onClick();
+            });
+            return item;
+        };
+
+        const createSeparator = () => {
+            const sep = document.createElement('div');
+            sep.className = 'context-menu-separator';
+            return sep;
+        };
+
+        if (isRowHeader) {
+            const rowIdx = parseInt(target.dataset.row!, 10);
+            contextMenu.appendChild(createMenuItem('Insert row above', () => {
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx });
+                insertRowLocal(rowIdx);
+            }));
+            contextMenu.appendChild(createMenuItem('Insert row below', () => {
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx + 1 });
+                insertRowLocal(rowIdx + 1);
+            }));
+            contextMenu.appendChild(createMenuItem('Delete row', () => {
+                vscode.postMessage({ command: 'deleteRow', rowIndex: rowIdx });
+                deleteRowLocal(rowIdx);
+            }));
+        }
+
+        if (isRowHeader && isColHeader) {
+            contextMenu.appendChild(createSeparator());
+        }
+
+        if (isColHeader) {
+            const colIdx = parseInt(target.dataset.col!, 10);
+            contextMenu.appendChild(createMenuItem('Insert column left', () => {
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx });
+                insertColumnLocal(colIdx);
+            }));
+            contextMenu.appendChild(createMenuItem('Insert column right', () => {
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx + 1 });
+                insertColumnLocal(colIdx + 1);
+            }));
+            contextMenu.appendChild(createMenuItem('Delete column', () => {
+                vscode.postMessage({ command: 'deleteColumn', colIndex: colIdx });
+                deleteColumnLocal(colIdx);
+            }));
+        }
+
+        if (isCell) {
+            const rowIdx = parseInt(target.dataset.row!, 10);
+            const colIdx = parseInt(target.dataset.col!, 10);
+            contextMenu.appendChild(createMenuItem('Insert row above', () => {
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx });
+                insertRowLocal(rowIdx);
+            }));
+            contextMenu.appendChild(createMenuItem('Insert row below', () => {
+                vscode.postMessage({ command: 'insertRow', rowIndex: rowIdx + 1 });
+                insertRowLocal(rowIdx + 1);
+            }));
+            contextMenu.appendChild(createMenuItem('Insert column left', () => {
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx });
+                insertColumnLocal(colIdx);
+            }));
+            contextMenu.appendChild(createMenuItem('Insert column right', () => {
+                vscode.postMessage({ command: 'insertColumn', colIndex: colIdx + 1 });
+                insertColumnLocal(colIdx + 1);
+            }));
+            contextMenu.appendChild(createSeparator());
+            contextMenu.appendChild(createMenuItem('Delete cell and shift left', () => {
+                vscode.postMessage({ command: 'deleteCellShiftLeft', rowIndex: rowIdx, colIndex: colIdx });
+                deleteCellShiftLeftLocal(rowIdx, colIdx);
+            }));
+            contextMenu.appendChild(createMenuItem('Delete cell and shift up', () => {
+                vscode.postMessage({ command: 'deleteCellShiftUp', rowIndex: rowIdx, colIndex: colIdx });
+                deleteCellShiftUpLocal(rowIdx, colIdx);
+            }));
+        }
+
+        document.body.appendChild(contextMenu);
+    }
+
+    function deleteCellShiftLeftLocal(rowIdx: number, colIdx: number) {
+        pushToUndo();
+        const row = [...(rowCache.get(rowIdx) || new Array(columnCount).fill(''))];
+        row.splice(colIdx, 1);
+        row.push('');
+        rowCache.set(rowIdx, row);
+        updateVisibleRows(true);
+        scheduleSave();
+    }
+
+    function deleteCellShiftUpLocal(rowIdx: number, colIdx: number) {
+        pushToUndo();
+        for (let i = rowIdx; i < totalRows - 1; i++) {
+            const currentRow = [...(rowCache.get(i) || new Array(columnCount).fill(''))];
+            const nextRow = rowCache.get(i + 1) || new Array(columnCount).fill('');
+            currentRow[colIdx] = nextRow[colIdx];
+            rowCache.set(i, currentRow);
+        }
+        const lastRow = [...(rowCache.get(totalRows - 1) || new Array(columnCount).fill(''))];
+        lastRow[colIdx] = '';
+        rowCache.set(totalRows - 1, lastRow);
+        updateVisibleRows(true);
+        scheduleSave();
+    }
+
+    function insertRowLocal(index: number) {
+        pushToUndo();
+        const newCache = new Map<number, string[]>();
+        for (let i = 0; i < totalRows; i++) {
+            if (i < index) newCache.set(i, rowCache.get(i) || []);
+            else newCache.set(i + 1, rowCache.get(i) || []);
+        }
+        newCache.set(index, new Array(columnCount).fill(''));
+        rowCache = newCache;
+        totalRows++;
+        updateVisibleRows(true);
+        scheduleSave();
+    }
+
+    function deleteRowLocal(index: number) {
+        pushToUndo();
+        const newCache = new Map<number, string[]>();
+        for (let i = 0; i < totalRows; i++) {
+            if (i < index) newCache.set(i, rowCache.get(i) || []);
+            else if (i > index) newCache.set(i - 1, rowCache.get(i) || []);
+        }
+        rowCache = newCache;
+        totalRows--;
+        updateVisibleRows(true);
+        scheduleSave();
+    }
+
+    function insertColumnLocal(index: number) {
+        pushToUndo();
+        for (let i = 0; i < totalRows; i++) {
+            const row = rowCache.get(i) || new Array(columnCount).fill('');
+            row.splice(index, 0, '');
+            rowCache.set(i, row);
+        }
+        columnCount++;
+        updateHeadersLocal(); updateVisibleRows(true);
+        scheduleSave();
+    }
+
+    function deleteColumnLocal(index: number) {
+        pushToUndo();
+        for (let i = 0; i < totalRows; i++) {
+            const row = rowCache.get(i) || new Array(columnCount).fill('');
+            row.splice(index, 1);
+            rowCache.set(i, row);
+        }
+        columnCount--;
+        updateHeadersLocal(); updateVisibleRows(true);
+        scheduleSave();
+    }
+
+    function updateHeadersLocal() {
+        const thead = document.querySelector('#csv-table thead');
+        if (thead) {
+            let headerHtml = '<tr><th class="row-header">&nbsp;</th>';
+            for (let i = 1; i <= columnCount; i++) {
+                let label = '';
+                let n = i;
+                while (n > 0) {
+                    const rem = (n - 1) % 26;
+                    label = String.fromCharCode(65 + rem) + label;
+                    n = Math.floor((n - 1) / 26);
+                }
+                headerHtml += `<th class="col-header" data-col="${i - 1}">${label}</th>`;
+            }
+            headerHtml += '</tr>';
+            thead.innerHTML = headerHtml;
+        }
     }
 
     // ===== Copy =====
@@ -736,11 +1005,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
                 const tsv = outputLines.join('\n');
                 
-                const writeSuccess = await writeToClipboardAsync(tsv);
-                if (!writeSuccess) {
-                    showToast('Copy failed');
-                    return;
-                }
+                vscode.postMessage({ command: 'copy', text: tsv });
 
                 // Flash visible selected cells
                 selectedCells.forEach(cell => cell.classList.add('copying'));
@@ -775,11 +1040,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
                 const tsv = outputLines.join('\n');
                 
-                const writeSuccess = await writeToClipboardAsync(tsv);
-                if (!writeSuccess) {
-                    showToast('Copy failed');
-                    return;
-                }
+                vscode.postMessage({ command: 'copy', text: tsv });
 
                 selectedCells.forEach(cell => cell.classList.add('copying'));
                 setTimeout(() => {
@@ -843,8 +1104,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
                         if (width > maxWidth) maxWidth = width;
                     }
                 }
-                const finalWidth = mode === 'expand' ? maxWidth : Math.min(maxWidth, 180);
-                colGroupHtml += `<col style="width: ${finalWidth}px; max-width: ${mode === 'expand' ? 'none' : '180px'};">`;
+                const finalWidth = mode === 'expand' ? maxWidth : Math.min(maxWidth, 200);
+                colGroupHtml += `<col style="width: ${finalWidth}px;">`;
             });
 
             colGroup.innerHTML = colGroupHtml;
@@ -891,6 +1152,10 @@ import { InfoTooltip } from '../shared/infoTooltip';
         currentSettings = settings || {} as Settings;
         if (!settings) return;
 
+        if (!settings.firstRowIsHeader) {
+            settings.stickyHeader = false;
+        }
+
         document.body.classList.toggle('first-row-as-header', !!settings.firstRowIsHeader);
         document.body.classList.toggle('sticky-header-enabled', !!settings.stickyHeader);
         document.body.classList.toggle('sticky-toolbar-enabled', !!settings.stickyToolbar);
@@ -898,10 +1163,13 @@ import { InfoTooltip } from '../shared/infoTooltip';
         const chkHeader = $('chkHeaderRow') as HTMLInputElement;
         const chkSticky = $('chkStickyHeader') as HTMLInputElement;
         const chkToolbar = $('chkStickyToolbar') as HTMLInputElement;
+        const chkSpacious = $('chkSpaciousCells') as HTMLInputElement;
 
         if (chkHeader) chkHeader.checked = !!settings.firstRowIsHeader;
-        if (chkSticky) chkSticky.checked = !!settings.stickyHeader;
+        if (chkSticky) { chkSticky.checked = !!settings.stickyHeader; chkSticky.disabled = !settings.firstRowIsHeader; if (chkSticky.parentElement) { chkSticky.parentElement.style.opacity = !settings.firstRowIsHeader ? '0.5' : '1'; chkSticky.parentElement.style.pointerEvents = !settings.firstRowIsHeader ? 'none' : 'auto'; } }
         if (chkToolbar) chkToolbar.checked = !!settings.stickyToolbar;
+        if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
+        if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
 
         // Show/hide enable button based on whether this is the default editor
         if (toolbarManager) {
@@ -918,6 +1186,21 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 } else {
                     firstRow.classList.remove('header-row');
                 }
+            }
+        }
+
+        let rowHeightChanged = false;
+        if (settings.spaciousCells) {
+            document.body.classList.add('spacious-cells');
+            if (ROW_HEIGHT !== 25) {
+                ROW_HEIGHT = 25; // Approx height for spacious cells
+                rowHeightChanged = true;
+            }
+        } else {
+            document.body.classList.remove('spacious-cells');
+            if (ROW_HEIGHT !== VirtualScrollConfig.ROW_HEIGHT) {
+                ROW_HEIGHT = VirtualScrollConfig.ROW_HEIGHT;
+                rowHeightChanged = true;
             }
         }
 
@@ -947,6 +1230,13 @@ import { InfoTooltip } from '../shared/infoTooltip';
             }
         }
         setTimeout(updateHeaderHeight, 0);
+
+        if (rowHeightChanged) {
+            // Force re-render of virtual rows
+            currentVisibleStart = -1;
+            currentVisibleEnd = -1;
+            updateVisibleRows();
+        }
 
         if (chkSticky) chkSticky.disabled = !chkHeader?.checked;
 
@@ -991,6 +1281,15 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     applySettings(currentSettings, true);
                 },
                 defaultValue: currentSettings.stickyToolbar
+            },
+            {
+                id: 'chkSpaciousCells',
+                label: 'Spacious Cells',
+                onChange: (val: boolean) => {
+                    currentSettings.spaciousCells = val;
+                    applySettings(currentSettings, true);
+                },
+                defaultValue: currentSettings.spaciousCells
             }
         ];
 
@@ -1004,20 +1303,21 @@ import { InfoTooltip } from '../shared/infoTooltip';
     function updateHeaderHeight() {
         const container = document.querySelector('.toolbar');
         if (!container) return;
-        // Respect non-sticky mode (stylesheet sets --header-height for non-sticky)
-        if (!document.body.classList.contains('sticky-toolbar-enabled')) {
-            document.documentElement.style.removeProperty('--header-height');
-            const headerBg = document.querySelector('.header-background') as HTMLElement;
-            if (headerBg) headerBg.style.height = '';
-            return;
-        }
+        
         let h = Math.max(6, Math.ceil(container.getBoundingClientRect().height));
         // Cap header height to avoid large gaps when toolbar wraps or settings are open
         const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-height-max')) || 96;
         h = Math.min(h, maxH);
         document.documentElement.style.setProperty('--header-height', h + 'px');
+        
         const headerBg = document.querySelector('.header-background') as HTMLElement;
-        if (headerBg) headerBg.style.height = h + 'px';
+        if (headerBg) {
+            if (document.body.classList.contains('sticky-toolbar-enabled')) {
+                headerBg.style.height = h + 'px';
+            } else {
+                headerBg.style.height = '';
+            }
+        }
     }
 
     // ===== Event Handlers =====
@@ -1028,32 +1328,41 @@ import { InfoTooltip } from '../shared/infoTooltip';
         table.dataset.listenersAdded = 'true';
 
         table.addEventListener('focusout', (e) => {
-            if (isEditMode && (e.target as HTMLElement).tagName === 'TD') {
-                const target = e.target as HTMLElement;
-                const row = parseInt(target.dataset.row!, 10);
-                const col = parseInt(target.dataset.col!, 10);
-                const value = normalizeCellText(target.textContent || '');
+            if (isCellEditing && e.target === editingCell) {
+                stopEditing();
+            }
+        });
 
-                let rowData = rowCache.get(row);
-                if (!rowData) {
-                    rowData = [];
-                    rowCache.set(row, rowData);
-                }
-                rowData[col] = value;
+        table.addEventListener('dblclick', (e) => {
+            const target = (e.target as HTMLElement).closest('td') as HTMLElement;
+            if (target) {
+                startEditing(target);
+            }
+        });
 
-                pushToUndo();
+        table.addEventListener('contextmenu', (e) => {
+            const target = (e.target as HTMLElement).closest('td, th') as HTMLElement;
+            if (target) {
+                showContextMenu(e, target);
             }
         });
 
         table.addEventListener('mousedown', (e) => {
+            if (e.button === 2) return; // Right click handled by contextmenu
+            hideContextMenu();
+            
             const target = (e.target as HTMLElement).closest('td, th') as HTMLElement;
             if (!target) return;
+
+            if (isCellEditing && target !== editingCell) {
+                stopEditing();
+            }
+
+            if (target === editingCell) return;
 
             const isHeaderInteraction =
                 target.classList.contains('col-header') ||
                 target.classList.contains('row-header');
-
-            if (isEditMode && !isHeaderInteraction) return;
 
             e.preventDefault();
 
@@ -1102,13 +1411,18 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     target.classList.add('selected', 'active-cell');
                     selectedCells.add(target);
                     activeCell = target;
+
+                    const thRow = document.querySelector(`th.row-header[data-row="${coords.row}"]`) as HTMLElement;
+                    if (thRow) thRow.classList.add('row-selected');
+                    const thCol = document.querySelector(`th.col-header[data-col="${coords.col}"]`) as HTMLElement;
+                    if (thCol) thCol.classList.add('column-selected');
                 }
                 updateSelectionInfo();
             }
         });
 
         table.addEventListener('mousemove', (e) => {
-            if (isEditMode || !isSelecting || !startCell) return;
+            if (isCellEditing || !isSelecting || !startCell) return;
             const target = (e.target as HTMLElement).closest('td') as HTMLElement;
             if (!target) return;
             const coords = getCellCoordinates(target);
@@ -1122,12 +1436,10 @@ import { InfoTooltip } from '../shared/infoTooltip';
         document.addEventListener('keydown', (e) => {
             const isCmdOrCtrl = e.ctrlKey || e.metaKey;
 
-            if (isEditMode && isCmdOrCtrl) {
+            if (isCmdOrCtrl) {
                 if (e.key.toLowerCase() === 'z') {
                     e.preventDefault();
-                    const active = document.activeElement as HTMLElement | null;
-                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
-                    if (isEditingCell) {
+                    if (isCellEditing) {
                         if (e.shiftKey) document.execCommand('redo');
                         else document.execCommand('undo');
                     } else {
@@ -1138,9 +1450,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 }
                 if (e.key.toLowerCase() === 'y') {
                     e.preventDefault();
-                    const active = document.activeElement as HTMLElement | null;
-                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
-                    if (isEditingCell) document.execCommand('redo');
+                    if (isCellEditing) document.execCommand('redo');
                     else redo();
                     return;
                 }
@@ -1152,32 +1462,84 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 return;
             }
 
-            if (isEditMode) {
+            if (isCmdOrCtrl && isCellEditing) {
+                // Allow native browser text string copy/select inside contenteditable
+                return;
+            }
+
+            if (isCellEditing) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    const active = document.activeElement as HTMLElement;
-                    const coords = getCellCoordinates(active);
+                    stopEditing();
+                    const coords = getCellCoordinates(editingCell || activeCell);
                     if (coords) {
                         const nextCell = document.querySelector(
                             `td[data-row="${coords.row + 1}"][data-col="${coords.col}"]`
                         ) as HTMLElement;
                         if (nextCell) {
-                            nextCell.focus();
-                            const range = document.createRange();
-                            const sel = window.getSelection();
-                            range.selectNodeContents(nextCell);
-                            range.collapse(false);
-                            sel!.removeAllRanges();
-                            sel!.addRange(range);
+                            clearSelection();
+                            nextCell.classList.add('selected', 'active-cell');
+                            selectedCells.add(nextCell);
+                            activeCell = nextCell;
+                            startCell = { row: coords.row + 1, col: coords.col };
+                        }
+                    }
+                } else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    stopEditing();
+                    const coords = getCellCoordinates(editingCell || activeCell);
+                    if (coords) {
+                        const nextCell = document.querySelector(
+                            `td[data-row="${coords.row}"][data-col="${coords.col + 1}"]`
+                        ) as HTMLElement;
+                        if (nextCell) {
+                            clearSelection();
+                            nextCell.classList.add('selected', 'active-cell');
+                            selectedCells.add(nextCell);
+                            activeCell = nextCell;
+                            startCell = { row: coords.row, col: coords.col + 1 };
                         }
                     }
                 }
                 return;
             }
 
+            if (activeCell && !isCmdOrCtrl && e.key.length === 1 && !e.altKey) {
+                startEditing(activeCell, true);
+                return;
+            }
+
+            if (activeCell && e.key === 'Enter') {
+                e.preventDefault();
+                startEditing(activeCell);
+                return;
+            }
+
+            if (activeCell && (e.key === 'Backspace' || e.key === 'Delete')) {
+                e.preventDefault();
+                pushToUndo();
+                selectedCells.forEach(cell => {
+                    const row = parseInt(cell.dataset.row!, 10);
+                    const col = parseInt(cell.dataset.col!, 10);
+                    let rowData = rowCache.get(row);
+                    if (!rowData) {
+                        rowData = [];
+                        rowCache.set(row, rowData);
+                    }
+                    rowData[col] = '';
+                    cell.textContent = '';
+                    vscode.postMessage({ command: 'updateRow', rowIndex: row, rowData });
+                });
+                scheduleSave();
+                return;
+            }
+
             if (isCmdOrCtrl && e.key.toLowerCase() === 'c') {
                 e.preventDefault();
                 copySelectionToClipboard();
+            } else if (isCmdOrCtrl && e.key.toLowerCase() === 'v') {
+                e.preventDefault();
+                pasteFromClipboard();
             } else if (isCmdOrCtrl && e.key.toLowerCase() === 'a') {
                 e.preventDefault();
                 clearSelection();
@@ -1198,19 +1560,19 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     startCell = getCellCoordinates(all[0] as HTMLElement);
                 }
                 updateSelectionInfo();
-            } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && activeCell) {
+            } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key) && activeCell) {
                 const coords = getCellCoordinates(activeCell);
                 if (!coords) return;
                 let nr = coords.row, nc = coords.col;
                 if (e.key === 'ArrowUp' && nr > 0) nr--;
                 else if (e.key === 'ArrowDown') nr++;
                 else if (e.key === 'ArrowLeft' && nc > 0) nc--;
-                else if (e.key === 'ArrowRight') nc++;
+                else if (e.key === 'ArrowRight' || e.key === 'Tab') nc++;
 
                 const next = document.querySelector(`td[data-row="${nr}"][data-col="${nc}"]`) as HTMLElement;
                 if (next) {
                     e.preventDefault();
-                    if (e.shiftKey) {
+                    if (e.shiftKey && e.key !== 'Tab') {
                         selectCellsInRange(startCell || coords, { row: nr, col: nc });
                     } else {
                         clearSelection();
@@ -1218,6 +1580,22 @@ import { InfoTooltip } from '../shared/infoTooltip';
                         selectedCells.add(next);
                         activeCell = next;
                         startCell = { row: nr, col: nc };
+                        
+                        const thRow = document.querySelector(`th.row-header[data-row="${nr}"]`) as HTMLElement;
+                        if (thRow) thRow.classList.add('row-selected');
+                        const thCol = document.querySelector(`th.col-header[data-col="${nc}"]`) as HTMLElement;
+                        if (thCol) thCol.classList.add('column-selected');
+                        
+                        // Scroll into view if needed
+                        const container = $('tableContainer');
+                        if (container) {
+                            const rect = next.getBoundingClientRect();
+                            const containerRect = container.getBoundingClientRect();
+                            if (rect.bottom > containerRect.bottom) container.scrollTop += rect.bottom - containerRect.bottom + 20;
+                            if (rect.top < containerRect.top) container.scrollTop -= containerRect.top - rect.top + 20;
+                            if (rect.right > containerRect.right) container.scrollLeft += rect.right - containerRect.right + 20;
+                            if (rect.left < containerRect.left) container.scrollLeft -= containerRect.left - rect.left + 20;
+                        }
                     }
                     updateSelectionInfo();
                 }
@@ -1225,11 +1603,163 @@ import { InfoTooltip } from '../shared/infoTooltip';
         });
 
         document.addEventListener('click', (e) => {
-            if (!(e.target as HTMLElement).closest('#csv-table') && !(e.target as HTMLElement).closest('.toolbar')) {
+            if (!(e.target as HTMLElement).closest('#csv-table') && !(e.target as HTMLElement).closest('.toolbar') && !(e.target as HTMLElement).closest('.context-menu')) {
                 clearSelection();
+                hideContextMenu();
             }
         });
     }
+
+    async function pasteFromClipboard() {
+        if (!activeCell) return;
+        
+        try {
+            // Try navigator.clipboard first
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                    handlePasteData(text);
+                    return;
+                }
+            }
+        } catch (err) {
+            console.warn('navigator.clipboard failed, falling back to vscode clipboard', err);
+        }
+        
+        // Fallback to vscode clipboard
+        vscode.postMessage({ command: 'readClipboard' });
+    }
+
+    function handlePasteData(text: string) {
+        if (!activeCell || !text) return;
+        pushToUndo();
+        try {
+            const rows = text.split(/\r?\n/);
+            // Remove last empty row if it exists (common when copying from Excel/Sheets)
+            if (rows.length > 0 && rows[rows.length - 1] === '') {
+                rows.pop();
+            }
+
+            const startCoords = getCellCoordinates(activeCell);
+            if (!startCoords) return;
+
+            let maxRow = startCoords.row;
+            let maxCol = startCoords.col;
+
+            for (let r = 0; r < rows.length; r++) {
+                const cols = rows[r].split('\t');
+                const targetRow = startCoords.row + r;
+                
+                if (targetRow >= totalRows) {
+                    // Need to insert a new row
+                    insertRowLocal(totalRows);
+                }
+                
+                let rowData = rowCache.get(targetRow);
+                if (!rowData) {
+                    rowData = new Array(columnCount).fill('');
+                    rowCache.set(targetRow, rowData);
+                }
+
+                for (let c = 0; c < cols.length; c++) {
+                    const targetCol = startCoords.col + c;
+                    
+                    if (targetCol >= columnCount) {
+                        // Need to insert a new column
+                        insertColumnLocal(columnCount);
+                        rowData = rowCache.get(targetRow) || new Array(columnCount).fill(''); // Re-fetch as it might be recreated
+                    }
+                    
+                    rowData[targetCol] = cols[c];
+                    maxCol = Math.max(maxCol, targetCol);
+                    
+                    // Update DOM if cell is visible
+                    const cell = document.querySelector(`td[data-row="${targetRow}"][data-col="${targetCol}"]`) as HTMLElement;
+                    if (cell) {
+                        cell.textContent = cols[c] === '' ? '\u00a0' : cols[c];
+                    }
+                }
+                
+                maxRow = Math.max(maxRow, targetRow);
+                vscode.postMessage({ command: 'updateRow', rowIndex: targetRow, rowData });
+            }
+
+            scheduleSave();
+            // Select the pasted area
+            clearSelection();
+            const endCoords = { row: maxRow, col: maxCol };
+            selectCellsInRange(startCoords, endCoords);
+            
+            const startCellEl = document.querySelector(`td[data-row="${startCoords.row}"][data-col="${startCoords.col}"]`) as HTMLElement;
+            if (startCellEl) {
+                activeCell = startCellEl;
+                startCellEl.classList.add('active-cell');
+            }
+            
+            showToast(`Pasted ${rows.length} rows`);
+
+        } catch (err) {
+            console.error('Failed to read clipboard contents: ', err);
+            showToast('Paste failed: ' + String(err));
+        }
+    }
+
+    // ===== Resizing Logic =====
+    let isResizing = false;
+    let currentResizer: HTMLElement | null = null;
+    let startX = 0;
+    let startWidth = 0;
+    let resizeColIndex = -1;
+
+    document.addEventListener('mousedown', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.classList.contains('col-resize-handle')) {
+            isResizing = true;
+            currentResizer = target;
+            const th = target.closest('th');
+            if (th) {
+                resizeColIndex = parseInt(th.getAttribute('data-col') || '-1', 10);
+                const colgroup = document.querySelector('#csv-table colgroup');
+                if (colgroup && resizeColIndex >= 0) {
+                    const col = colgroup.children[resizeColIndex + 1] as HTMLElement; // +1 because of row-header
+                    if (col) {
+                        startX = e.pageX;
+                        startWidth = col.offsetWidth || 150;
+                        target.classList.add('resizing');
+                        e.preventDefault();
+                    }
+                }
+            }
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing || !currentResizer || resizeColIndex < 0) return;
+        
+        const dx = e.pageX - startX;
+        const newWidth = Math.max(40, startWidth + dx); // Min width 40px
+        
+        const colgroup = document.querySelector('#csv-table colgroup');
+        if (colgroup) {
+            const col = colgroup.children[resizeColIndex + 1] as HTMLElement;
+            if (col) {
+                col.style.width = `${newWidth}px`;
+                col.style.maxWidth = 'none'; // Remove max-width constraint when manually resizing
+            }
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            if (currentResizer) {
+                currentResizer.classList.remove('resizing');
+                currentResizer = null;
+            }
+            resizeColIndex = -1;
+            updateHeaderHeight();
+        }
+    });
 
     // ===== Message Handler =====
 
@@ -1269,6 +1799,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     adjustColumnWidths('default');
                     syncToolbarScroll();
                     applySettings(currentSettings, false);
+                    undoStack = [getTableData()];
                 }, 200);
                 break;
 
@@ -1286,15 +1817,17 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 isSaving = false;
                 setButtonsEnabled(true);
                 if (m.ok) {
-                    showToast('Saved');
+                    showToast('Saved', m.isAutosave);
                     (window as any)._originalCacheSnapshot = null;
-                    if (exitAfterSave) {
-                        setEditMode(false);
-                    } else {
-                        captureOriginalCellValues();
-                    }
+                    captureOriginalCellValues();
                 } else {
-                    showToast('Error saving');
+                    showToast('Error saving', m.isAutosave);
+                }
+                break;
+
+            case 'clipboardData':
+                if (m.text) {
+                    handlePasteData(m.text);
                 }
                 break;
         }
@@ -1319,32 +1852,6 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 onClick: () => {
                     isTableView = !isTableView;
                     vscode.postMessage({ command: 'toggleView', isTableView });
-                }
-            },
-            {
-                id: 'toggleTableEditButton',
-                icon: '',
-                label: 'Edit Table',
-                tooltip: 'Edit CSV directly in the table',
-                onClick: () => setEditMode(!isEditMode)
-            },
-            {
-                id: 'saveTableEditsButton',
-                icon: Icons.Save,
-                label: 'Save',
-                tooltip: 'Save table edits',
-                hidden: true,
-                onClick: () => performSave(true)
-            },
-            {
-                id: 'cancelTableEditsButton',
-                icon: Icons.Cancel,
-                label: 'Cancel',
-                tooltip: 'Cancel table edits',
-                hidden: true,
-                onClick: () => {
-                    restoreOriginalCellValues();
-                    setEditMode(false);
                 }
             },
             {
@@ -1414,7 +1921,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
         // Theme manager
         if (typeof ThemeManager !== 'undefined') {
             new ThemeManager('toggleBackgroundButton', {
-                onBeforeCycle: () => !isEditMode
+                onBeforeCycle: () => !isCellEditing
             }, vscode);
         }
     }
