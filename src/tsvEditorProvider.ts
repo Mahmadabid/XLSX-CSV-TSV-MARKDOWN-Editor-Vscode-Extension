@@ -700,6 +700,14 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         }
                         break;
 
+                    case 'convertFile':
+                        try {
+                            await vscode.commands.executeCommand('xlsx-viewer.convertFile', document.uri);
+                        } catch (err) {
+                            vscode.window.showErrorMessage(`Error converting file: ${err}`);
+                        }
+                        break;
+
                     case 'copy':
                         if (typeof message.text === 'string') {
                             await vscode.env.clipboard.writeText(message.text);

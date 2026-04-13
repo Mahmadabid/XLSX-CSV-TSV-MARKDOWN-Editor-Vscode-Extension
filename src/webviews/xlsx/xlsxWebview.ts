@@ -2326,6 +2326,7 @@ import {
         const openSettingsButton = document.getElementById('openSettingsButton');
         const toggleBackgroundButton = document.getElementById('toggleBackgroundButton');
         const helpButton = document.getElementById('helpButton');
+        const convertFileButton = document.getElementById('convertFileButton');
 
         const toggleTableEditButton = document.getElementById('toggleTableEditButton');
         const saveTableEditsButton = document.getElementById('saveTableEditsButton');
@@ -2360,6 +2361,7 @@ import {
         if (openSettingsButton) openSettingsButton.classList.toggle('hidden', isEditMode);
         if (toggleBackgroundButton) toggleBackgroundButton.classList.toggle('hidden', isEditMode);
         if (helpButton) helpButton.classList.toggle('hidden', isEditMode);
+        if (convertFileButton) convertFileButton.classList.toggle('hidden', isEditMode);
 
         if (!isEditMode) {
             hideLinkTooltip();
@@ -2562,6 +2564,10 @@ import {
                     command: 'openExternal',
                     url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
                 });
+            },
+            onConvertFile: () => {
+                if (isEditMode) return;
+                vscode.postMessage({ command: 'convertFile' });
             },
             onEnableAsDefault: () => {
                 vscode.postMessage({ command: 'enableAsDefault' });

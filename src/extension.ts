@@ -1,8 +1,47 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { XLSXEditorProvider } from './xlsxEditorProvider';
 import { CSVEditorProvider } from './csvEditorProvider';
 import { TSVEditorProvider } from './tsvEditorProvider';
 import { MDEditorProvider } from './mdEditorProvider';
+import {
+    convertTabularFile,
+    detectTabularFileType,
+    getTabularFileTypeInfo,
+    getTargetTabularFileTypes,
+    TabularFileType
+} from './shared/fileConversionService';
+
+function resolveDocumentUri(uri?: vscode.Uri): vscode.Uri | undefined {
+    if (uri instanceof vscode.Uri) {
+        return uri;
+    }
+
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor) {
+        return activeEditor.document.uri;
+    }
+
+    const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (activeTab?.input instanceof (vscode as any).TabInputCustom || activeTab?.input instanceof (vscode as any).TabInputText) {
+        return (activeTab.input as any).uri;
+    }
+
+    return undefined;
+}
+
+function getViewTypeForFileType(fileType: TabularFileType): string | undefined {
+    if (fileType === 'csv') {
+        return 'xlsxViewer.csv';
+    }
+    if (fileType === 'tsv') {
+        return 'xlsxViewer.tsv';
+    }
+    if (fileType === 'xlsx') {
+        return 'xlsxViewer.xlsx';
+    }
+    return undefined;
+}
 
 export function activate(context: vscode.ExtensionContext) {
     const xlsxProvider = new XLSXEditorProvider(context);
@@ -202,6 +241,100 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('xlsx-viewer.toggleMdAssociation', async (enable: boolean) => {
             await vscode.commands.executeCommand('xlsx-viewer.toggleAssociation', { type: 'md', enable });
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('xlsx-viewer.convertFile', async (uri?: vscode.Uri) => {
+            const sourceUri = resolveDocumentUri(uri);
+            if (!sourceUri) {
+                vscode.window.showWarningMessage('No file is selected for conversion.');
+                return;
+            }
+
+            if (sourceUri.scheme !== 'file') {
+                vscode.window.showErrorMessage('Only local files can be converted.');
+                return;
+            }
+
+            const sourceType = detectTabularFileType(sourceUri.fsPath);
+            if (!sourceType) {
+                vscode.window.showErrorMessage('Supported source formats are CSV, TSV, and XLSX.');
+                return;
+            }
+
+            const targetTypes = getTargetTabularFileTypes(sourceType);
+            if (!targetTypes.length) {
+                vscode.window.showErrorMessage('No target formats are available for conversion.');
+                return;
+            }
+
+            const picked = await vscode.window.showQuickPick(
+                targetTypes.map(type => {
+                    const info = getTabularFileTypeInfo(type);
+                    return {
+                        label: info.label,
+                        description: `.${info.extension}`,
+                        type
+                    };
+                }),
+                {
+                    title: 'Convert File To',
+                    placeHolder: `Choose target format for ${path.basename(sourceUri.fsPath)}`
+                }
+            );
+
+            if (!picked) {
+                return;
+            }
+
+            const targetInfo = getTabularFileTypeInfo(picked.type);
+            const sourceFilePath = sourceUri.fsPath;
+            const parsedSourcePath = path.parse(sourceFilePath);
+            const defaultTargetUri = vscode.Uri.file(
+                path.join(parsedSourcePath.dir, `${parsedSourcePath.name}.${targetInfo.extension}`)
+            );
+
+            const targetUri = await vscode.window.showSaveDialog({
+                defaultUri: defaultTargetUri,
+                filters: {
+                    [targetInfo.label]: [targetInfo.extension]
+                }
+            });
+
+            if (!targetUri) {
+                return;
+            }
+
+            const requiredExtension = `.${targetInfo.extension.toLowerCase()}`;
+            const requestedPath = targetUri.fsPath;
+            const finalTargetPath = path.extname(requestedPath).toLowerCase() === requiredExtension
+                ? requestedPath
+                : `${requestedPath}${requiredExtension}`;
+            const finalTargetUri = vscode.Uri.file(finalTargetPath);
+
+            try {
+                const result = await convertTabularFile({
+                    sourcePath: sourceFilePath,
+                    targetPath: finalTargetPath,
+                    sourceType,
+                    targetType: picked.type
+                });
+
+                const message = result.droppedSheets
+                    ? `Converted to ${targetInfo.label}. Only the first worksheet was kept because ${targetInfo.label} supports a single sheet.`
+                    : `Converted to ${targetInfo.label}.`;
+                vscode.window.showInformationMessage(message);
+
+                const targetViewType = getViewTypeForFileType(result.targetType);
+                if (targetViewType) {
+                    await vscode.commands.executeCommand('vscode.openWith', finalTargetUri, targetViewType);
+                } else {
+                    await vscode.commands.executeCommand('vscode.open', finalTargetUri);
+                }
+            } catch (error) {
+                vscode.window.showErrorMessage(`Conversion failed: ${String(error)}`);
+            }
         })
     );
 }

@@ -17,6 +17,7 @@ export interface CreateXlsxToolbarButtonsOptions {
     onOpenSettings: () => void;
     onToggleBackground: () => void;
     onHelp: () => void;
+    onConvertFile: () => void;
     onEnableAsDefault: () => void;
 }
 
@@ -117,6 +118,13 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
             tooltip: 'Help & Feedback',
             cls: 'icon-only',
             onClick: options.onHelp
+        },
+        {
+            id: 'convertFileButton',
+            icon: Icons.Convert,
+            label: 'Convert',
+            tooltip: 'Convert this file to CSV, TSV, or XLSX',
+            onClick: options.onConvertFile
         },
         {
             id: 'enableAsDefaultButton',

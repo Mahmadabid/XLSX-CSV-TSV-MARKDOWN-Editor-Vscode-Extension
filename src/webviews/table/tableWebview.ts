@@ -93,7 +93,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
     }
 
     function setButtonsEnabled(enabled: boolean) {
-        const ids = ['toggleViewButton', 'toggleBackgroundButton', 'toggleExpandButton', 'versionHistoryButton'];
+        const ids = ['toggleViewButton', 'toggleBackgroundButton', 'toggleExpandButton', 'versionHistoryButton', 'convertFileButton'];
         ids.forEach((id) => {
             const el = $(id) as HTMLButtonElement;
             if (el) el.disabled = !enabled;
@@ -2024,6 +2024,16 @@ import { InfoTooltip } from '../shared/infoTooltip';
                         command: 'openExternal',
                         url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
                     });
+                }
+            },
+            {
+                id: 'convertFileButton',
+                icon: Icons.Convert,
+                label: 'Convert',
+                tooltip: `Convert this ${fileFormat.toUpperCase()} file`,
+                cls: 'edit-mode-hide',
+                onClick: () => {
+                    vscode.postMessage({ command: 'convertFile' });
                 }
             },
             {

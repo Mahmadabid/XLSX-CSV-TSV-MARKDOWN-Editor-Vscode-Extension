@@ -52,6 +52,7 @@ XLSX, CSV, TSV & Markdown Editor is a powerful **Visual Studio Code** extension 
 ✅ **Excel-like Shortcuts** - <kbd>Ctrl+S</kbd> to save, <kbd>Enter</kbd> to move down, <kbd>Ctrl+Z/Y</kbd> for undo/redo\
 ✅ **Premium UI** - Smooth animations, sticky headers, and Apple-like visual feedback\
 ✅ **Edit File** - Open the CSV/TSV in VS Code’s default text editor when needed\
+✅ **File Conversion** - Convert between CSV, TSV, and XLSX from the in-view toolbar (and command palette) while editing/viewing supported files (multi-sheet XLSX exports to CSV/TSV use the first worksheet)\
 
 **TSV notes:** Copying from the table and pasting into other apps will use tab-delimited data for TSV files; serialization and escaping behave like CSV but use `\t` as the delimiter for TSV.
 

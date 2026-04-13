@@ -436,6 +436,15 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 return;
             }
 
+            if (message?.command === 'convertFile') {
+                try {
+                    await vscode.commands.executeCommand('xlsx-viewer.convertFile', document.uri);
+                } catch (err) {
+                    vscode.window.showErrorMessage(`Error converting file: ${err}`);
+                }
+                return;
+            }
+
             if (message?.command === 'saveXlsxEdits') {
                 try {
                     if (previewVersionId) {

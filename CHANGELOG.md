@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.8.3 - Cross-Format File Conversion
+- Added centralized file conversion system to convert between CSV, TSV, and XLSX.
+- Added a "Convert" action directly in CSV/TSV/XLSX toolbars for supported formats.
+- Implemented conversion logic for multi-sheet XLSX to single-sheet formats (notifies when extra sheets are dropped).
+- Centralized tabular data handling to allow easy addition of future formats.
+
 ## v1.8.2 - Version History, Undo/Redo, and Focus Fixes
 - Fixed Version History preview/restore flow so preview remains read-only until Restore is confirmed.
 - Improved Undo/Redo handling to preserve non-structural scroll position and avoid data loss during table edits.
