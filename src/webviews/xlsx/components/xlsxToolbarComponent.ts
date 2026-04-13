@@ -2,6 +2,7 @@ import { Icons } from '../../shared/icons';
 import { ToolbarButton } from '../../shared/toolbarManager';
 
 export interface CreateXlsxToolbarButtonsOptions {
+    onFind: () => void;
     textColorIcon: string;
     bgColorIcon: string;
     onToggleTableEdit: () => void;
@@ -33,8 +34,8 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
         {
             id: 'saveTableEditsButton',
             icon: Icons.Save,
-            label: 'Save',
             tooltip: 'Save table edits',
+            cls: 'icon-only',
             hidden: true,
             onClick: options.onSaveTableEdits
         },
@@ -86,18 +87,18 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
             onClick: options.onToggleExpand
         },
         {
+            id: 'findButton',
+            icon: Icons.Search,
+            cls: 'icon-only',
+            tooltip: 'Find in sheet (Ctrl/Cmd+F)',
+            onClick: options.onFind
+        },
+        {
             id: 'togglePlainViewButton',
             icon: Icons.Table,
             label: 'Plain',
             tooltip: 'Toggle Plain View (removes all styling)',
             onClick: options.onTogglePlainView
-        },
-        {
-            id: 'versionHistoryButton',
-            icon: Icons.VersionHistory,
-            tooltip: 'Version history',
-            cls: 'icon-only',
-            onClick: options.onVersionHistory
         },
         {
             id: 'openSettingsButton',
@@ -113,11 +114,11 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
             onClick: options.onToggleBackground
         },
         {
-            id: 'helpButton',
-            icon: Icons.Help,
-            tooltip: 'Help & Feedback',
+            id: 'versionHistoryButton',
+            icon: Icons.VersionHistory,
+            tooltip: 'Version history',
             cls: 'icon-only',
-            onClick: options.onHelp
+            onClick: options.onVersionHistory
         },
         {
             id: 'convertFileButton',
@@ -125,6 +126,13 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
             label: 'Convert',
             tooltip: 'Convert this file to CSV, TSV, or XLSX',
             onClick: options.onConvertFile
+        },
+        {
+            id: 'helpButton',
+            icon: Icons.Help,
+            tooltip: 'Help & Feedback',
+            cls: 'icon-only',
+            onClick: options.onHelp
         },
         {
             id: 'enableAsDefaultButton',

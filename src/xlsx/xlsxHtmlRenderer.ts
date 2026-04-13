@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { Icons } from '../webviews/shared/icons';
 
 export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
         const webview = webviewPanel.webview;
@@ -14,7 +13,7 @@ export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vs
             vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'xlsxWebview.css')
         );
         const imgUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(context.extensionUri, 'resources', 'table', 'view.png')
+            vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'view.png')
         );
         const svgUri = webview.asWebviewUri(
             vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'table.svg')

@@ -175,6 +175,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
+                mergeWarningEnabled: cfg.get('xlsx.mergeWarningEnabled', true),
                 isDefaultEditor: isDefault
             };
         };
@@ -356,6 +357,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     await cfg.update('xlsx.stickyHeader', !!s.stickyHeader, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.hyperlinkPreview', !!s.hyperlinkPreview, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
+                    await cfg.update('xlsx.mergeWarningEnabled', !!s.mergeWarningEnabled, vscode.ConfigurationTarget.Global);
                 } catch (err) {
                     console.error('Failed to persist XLSX settings:', err);
                 }
@@ -473,31 +475,85 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     for (const op of operations) {
                         const type = typeof op?.type === 'string' ? op.type : '';
                         const index = typeof op?.index === 'number' ? op.index : 0;
-                        if (!type || index <= 0) continue;
+                        if (!type) continue;
 
                         switch (type) {
                             case 'insertRowAbove':
-                                ws.spliceRows(index, 0, []);
+                                if (index > 0) ws.spliceRows(index, 0, []);
                                 break;
                             case 'insertRowBelow':
-                                ws.spliceRows(index + 1, 0, []);
+                                if (index > 0) ws.spliceRows(index + 1, 0, []);
                                 break;
                             case 'deleteRow':
-                                if (ws.rowCount > 1) {
+                                if (index > 0 && ws.rowCount > 1) {
                                     ws.spliceRows(index, 1);
                                 }
                                 break;
                             case 'insertColumnLeft':
-                                ws.spliceColumns(index, 0, []);
+                                if (index > 0) ws.spliceColumns(index, 0, []);
                                 break;
                             case 'insertColumnRight':
-                                ws.spliceColumns(index + 1, 0, []);
+                                if (index > 0) ws.spliceColumns(index + 1, 0, []);
                                 break;
                             case 'deleteColumn':
-                                if (ws.columnCount > 1) {
+                                if (index > 0 && ws.columnCount > 1) {
                                     ws.spliceColumns(index, 1);
                                 }
                                 break;
+                            case 'deleteCellShiftLeft': {
+                                const row = typeof op?.row === 'number' ? op.row : 0;
+                                const col = typeof op?.col === 'number' ? op.col : 0;
+                                if (!row || !col) break;
+
+                                for (let c = col; c < ws.columnCount; c++) {
+                                    const src = ws.getRow(row).getCell(c + 1);
+                                    const dst = ws.getRow(row).getCell(c);
+                                    dst.value = src.value as any;
+                                }
+                                ws.getRow(row).getCell(ws.columnCount).value = null;
+                                break;
+                            }
+                            case 'deleteCellShiftUp': {
+                                const row = typeof op?.row === 'number' ? op.row : 0;
+                                const col = typeof op?.col === 'number' ? op.col : 0;
+                                if (!row || !col) break;
+
+                                for (let r = row; r < ws.rowCount; r++) {
+                                    const src = ws.getRow(r + 1).getCell(col);
+                                    const dst = ws.getRow(r).getCell(col);
+                                    dst.value = src.value as any;
+                                }
+                                ws.getRow(ws.rowCount).getCell(col).value = null;
+                                break;
+                            }
+                            case 'mergeRange': {
+                                const startRow = typeof op?.startRow === 'number' ? op.startRow : 0;
+                                const startCol = typeof op?.startCol === 'number' ? op.startCol : 0;
+                                const endRow = typeof op?.endRow === 'number' ? op.endRow : 0;
+                                const endCol = typeof op?.endCol === 'number' ? op.endCol : 0;
+                                if (!startRow || !startCol || !endRow || !endCol) break;
+
+                                try {
+                                    ws.mergeCells(startRow, startCol, endRow, endCol);
+                                } catch {
+                                    // ignore invalid merge requests
+                                }
+                                break;
+                            }
+                            case 'unmergeRange': {
+                                const startRow = typeof op?.startRow === 'number' ? op.startRow : 0;
+                                const startCol = typeof op?.startCol === 'number' ? op.startCol : 0;
+                                const endRow = typeof op?.endRow === 'number' ? op.endRow : 0;
+                                const endCol = typeof op?.endCol === 'number' ? op.endCol : 0;
+                                if (!startRow || !startCol || !endRow || !endCol) break;
+
+                                try {
+                                    ws.unMergeCells(startRow, startCol, endRow, endCol);
+                                } catch {
+                                    // ignore invalid unmerge requests
+                                }
+                                break;
+                            }
                         }
                     }
 
@@ -578,6 +634,13 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                         const cell = ws.getRow(row).getCell(col);
 
+                        if (s?.clearFormatting) {
+                            (cell as any).fill = undefined;
+                            (cell as any).font = undefined;
+                            (cell as any).alignment = undefined;
+                            (cell as any).border = undefined;
+                        }
+
                         const bgArgb = toARGB(typeof s?.bgColor === 'string' ? s.bgColor : '');
                         if (bgArgb) {
                             cell.fill = {
@@ -594,6 +657,102 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 ...currentFont,
                                 color: { argb: textArgb }
                             } as Partial<Excel.Font>;
+                        }
+
+                        const nextFont: any = cell.font ? { ...cell.font } : {};
+                        let hasFontEdit = false;
+                        if (typeof s?.fontSize === 'number' && s.fontSize > 0) {
+                            nextFont.size = s.fontSize;
+                            hasFontEdit = true;
+                        }
+                        if (typeof s?.fontFamily === 'string' && s.fontFamily.trim().length > 0) {
+                            nextFont.name = s.fontFamily.trim();
+                            hasFontEdit = true;
+                        }
+                        if (typeof s?.bold === 'boolean') {
+                            nextFont.bold = s.bold;
+                            hasFontEdit = true;
+                        }
+                        if (typeof s?.italic === 'boolean') {
+                            nextFont.italic = s.italic;
+                            hasFontEdit = true;
+                        }
+                        if (typeof s?.strike === 'boolean') {
+                            nextFont.strike = s.strike;
+                            hasFontEdit = true;
+                        }
+                        if (hasFontEdit) {
+                            cell.font = nextFont as Partial<Excel.Font>;
+                        }
+
+                        const nextAlignment: any = cell.alignment ? { ...cell.alignment } : {};
+                        let hasAlignmentEdit = false;
+                        const hAlign = typeof s?.horizontalAlign === 'string' ? s.horizontalAlign : '';
+                        if (hAlign === 'left' || hAlign === 'center' || hAlign === 'right') {
+                            nextAlignment.horizontal = hAlign;
+                            hasAlignmentEdit = true;
+                        }
+                        const vAlign = typeof s?.verticalAlign === 'string' ? s.verticalAlign : '';
+                        if (vAlign === 'top' || vAlign === 'middle' || vAlign === 'bottom') {
+                            nextAlignment.vertical = vAlign;
+                            hasAlignmentEdit = true;
+                        }
+                        const wrapMode = typeof s?.wrapMode === 'string' ? s.wrapMode : '';
+                        if (wrapMode === 'wrap' || wrapMode === 'overflow' || wrapMode === 'clip') {
+                            nextAlignment.wrapText = wrapMode === 'wrap';
+                            hasAlignmentEdit = true;
+                        }
+                        if (typeof s?.indent === 'number') {
+                            nextAlignment.indent = Math.max(0, Math.round(s.indent));
+                            hasAlignmentEdit = true;
+                        }
+                        if (hasAlignmentEdit) {
+                            cell.alignment = nextAlignment as Partial<Excel.Alignment>;
+                        }
+
+                        if (s?.border) {
+                            if (s.border.clear) {
+                                (cell as any).border = undefined;
+                            } else {
+                                const borderStyle = typeof s.border.style === 'string'
+                                    ? s.border.style : 'thin';
+                                    
+                                const allowedStyles = [
+                                    "thin", "dotted", "dashDot", "hair", "dashDotDot", "slantDashDot", "mediumDashed", "mediumDashDotDot", "mediumDashDot", "medium", "double", "thick"
+                                ];
+                                
+                                let finalBorderStyle = 'thin';
+                                const sLower = borderStyle.toLowerCase();
+                                
+                                if (sLower.includes('thick') && sLower.includes('dash')) finalBorderStyle = 'mediumDashed'; // no thickDashed in exceljs? mediumDashed is closest
+                                else if (sLower.includes('thick') && sLower.includes('dot')) finalBorderStyle = 'mediumDashDot';
+                                else if (sLower.includes('medium') && sLower.includes('dash')) finalBorderStyle = 'mediumDashed';
+                                else if (sLower.includes('medium') && sLower.includes('dot')) finalBorderStyle = 'mediumDashDot';
+                                else if (sLower.includes('dashdotdot')) finalBorderStyle = 'dashDotDot';
+                                else if (sLower.includes('dashdot')) finalBorderStyle = 'dashDot';
+                                else if (sLower.includes('dashed') || sLower === 'dashed' || sLower.includes('dash')) finalBorderStyle = 'mediumDashed';
+                                else if (allowedStyles.includes(borderStyle)) finalBorderStyle = borderStyle;
+                                else if (sLower === 'thick') finalBorderStyle = 'thick';
+                                else if (sLower === 'medium') finalBorderStyle = 'medium';
+                                else if (sLower === 'dotted') finalBorderStyle = 'dotted';
+                                else if (sLower === 'double') finalBorderStyle = 'double';
+                                else finalBorderStyle = 'thin';
+
+                                const excelBorderStyle = finalBorderStyle;
+                                const borderColorArgb = toARGB(typeof s.border.color === 'string' ? s.border.color : '') || 'FF202124';
+
+                                const toEdge = (enabled?: boolean) => {
+                                    if (!enabled) return undefined;
+                                    return { style: excelBorderStyle as any, color: { argb: borderColorArgb } };
+                                };
+
+                                cell.border = {
+                                    top: toEdge(s.border.top),
+                                    right: toEdge(s.border.right),
+                                    bottom: toEdge(s.border.bottom),
+                                    left: toEdge(s.border.left)
+                                } as any;
+                            }
                         }
                     }
 
@@ -819,9 +978,32 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             for (let c = 1; c <= maxCol; c++) {
                 const mergeInfo = cellGrid[r] && cellGrid[r][c];
 
-                // Skip cells that are part of a merged range but not the master
+                // Track covered merged positions so renderer can skip phantom placeholders.
                 if (mergeInfo && mergeInfo.isMerged && !mergeInfo.isMaster) {
-                    continue; // Don't add to cells array
+                    rowData.cells.push({
+                        value: '',
+                        hyperlink: '',
+                        style: {},
+                        colNumber: c,
+                        rowNumber: r,
+                        isDefaultColor: false,
+                        hasDefaultBg: true,
+                        hasWhiteBackground: false,
+                        hasBlackBorder: false,
+                        hasWhiteBorder: false,
+                        hasBlackBackground: false,
+                        hasDefaultBorder: true,
+                        originalColor: 'rgb(0, 0, 0)',
+                        isEmpty: true,
+                        rowspan: mergeInfo.rowspan,
+                        colspan: mergeInfo.colspan,
+                        isMerged: true,
+                        isMaster: false,
+                        isMergeCovered: true,
+                        masterRow: mergeInfo.masterRow,
+                        masterCol: mergeInfo.masterCol
+                    });
+                    continue;
                 }
 
                 const cell = worksheet.getRow(r).getCell(c);
@@ -867,7 +1049,11 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     // Merged cell info
                     rowspan: mergeInfo ? mergeInfo.rowspan : 1,
                     colspan: mergeInfo ? mergeInfo.colspan : 1,
-                    isMerged: !!(mergeInfo && mergeInfo.isMerged)
+                    isMerged: !!(mergeInfo && mergeInfo.isMerged),
+                    isMaster: !!(mergeInfo && mergeInfo.isMaster),
+                    isMergeCovered: false,
+                    masterRow: mergeInfo ? mergeInfo.masterRow : r,
+                    masterCol: mergeInfo ? mergeInfo.masterCol : c
                 };
 
                 rowData.cells.push(cellData);
@@ -1128,6 +1314,20 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         case 'thick': width = '3px'; break;
                         case 'dotted': styleStr = 'dotted'; break;
                         case 'dashed': styleStr = 'dashed'; break;
+                        case 'dashDot':
+                        case 'dashDotDot':
+                        case 'slantDashDot':
+                            styleStr = 'dashed';
+                            break;
+                        case 'mediumDashed':
+                        case 'mediumDashDot':
+                        case 'mediumDashDotDot':
+                            width = '2px';
+                            styleStr = 'dashed';
+                            break;
+                        case 'hair':
+                            styleStr = 'dotted';
+                            break;
                         case 'double': styleStr = 'double'; width = '3px'; break;
                     }
 

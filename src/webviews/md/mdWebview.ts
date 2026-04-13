@@ -1588,15 +1588,15 @@ function wireButtons() {
         },
         {
             id: 'saveEditsButton',
-            icon: '',
-            label: 'Save',
+            icon: Icons.Save,
             tooltip: 'Save Changes (Ctrl+S)',
+            cls: 'icon-only',
             hidden: true,
             onClick: () => performSave(true)
         },
         {
             id: 'cancelEditsButton',
-            icon: '',
+            icon: Icons.Cancel,
             label: 'Cancel',
             tooltip: 'Cancel Changes (Esc)',
             hidden: true,
@@ -1615,18 +1615,23 @@ function wireButtons() {
         {
             id: 'searchButton',
             icon: Icons.Search,
-            tooltip: 'Search in Preview (Ctrl+Shift+F)',
+            tooltip: 'Search in Preview (Ctrl/Cmd+F)',
             cls: 'icon-only',
             onClick: () => toggleSearchOverlay()
         },
         {
-            id: 'versionHistoryButton',
-            icon: Icons.VersionHistory,
-            tooltip: 'Version History',
-            cls: 'icon-only edit-mode-hide',
-            onClick: () => {
-                vscode.postMessage({ command: 'showVersionHistory' });
-            }
+            id: 'openSettingsButton',
+            icon: Icons.Settings,
+            tooltip: 'Settings',
+            cls: 'icon-only',
+            onClick: () => { /* Handled by wireSettingsUI */ }
+        },
+        {
+            id: 'toggleBackgroundButton',
+            icon: Icons.ThemeLight + Icons.ThemeDark + Icons.ThemeVSCode,
+            tooltip: 'Toggle Theme',
+            cls: 'edit-mode-hide',
+            onClick: () => { /* Handled by ThemeManager */ }
         },
         {
             id: 'focusModeButton',
@@ -1650,29 +1655,12 @@ function wireButtons() {
             }
         },
         {
-            id: 'openSettingsButton',
-            icon: Icons.Settings,
-            tooltip: 'Settings',
-            cls: 'icon-only',
-            onClick: () => { /* Handled by wireSettingsUI */ }
-        },
-        {
-            id: 'toggleBackgroundButton',
-            icon: Icons.ThemeLight + Icons.ThemeDark + Icons.ThemeVSCode,
-            tooltip: 'Toggle Theme',
-            cls: 'edit-mode-hide',
-            onClick: () => { /* Handled by ThemeManager */ }
-        },
-        {
-            id: 'helpButton',
-            icon: Icons.Help,
-            tooltip: 'Help & Feedback',
-            cls: 'icon-only',
+            id: 'versionHistoryButton',
+            icon: Icons.VersionHistory,
+            tooltip: 'Version History',
+            cls: 'icon-only edit-mode-hide',
             onClick: () => {
-                vscode.postMessage({
-                    command: 'openExternal',
-                    url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
-                });
+                vscode.postMessage({ command: 'showVersionHistory' });
             }
         },
         {
@@ -1683,6 +1671,18 @@ function wireButtons() {
             cls: 'edit-mode-hide',
             onClick: () => {
                 vscode.postMessage({ command: 'disableMdEditor' });
+            }
+        },
+        {
+            id: 'helpButton',
+            icon: Icons.Help,
+            tooltip: 'Help & Feedback',
+            cls: 'icon-only edit-mode-hide',
+            onClick: () => {
+                vscode.postMessage({
+                    command: 'openExternal',
+                    url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
+                });
             }
         },
         {
@@ -1731,7 +1731,7 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'f') {
+    if (isCmdOrCtrl && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleSearchOverlay();
         return;

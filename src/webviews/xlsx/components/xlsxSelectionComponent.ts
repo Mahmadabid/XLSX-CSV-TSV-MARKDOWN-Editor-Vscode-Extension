@@ -209,6 +209,21 @@ export class XlsxSelectionManager {
     }
 
     reapplySelection(): void {
+        const previousSelectedCells = Array.from(this.bindings.selectedCells.values());
+        this.bindings.selectedCells.clear();
+
+        previousSelectedCells.forEach((cell) => {
+            const row = cell.dataset?.row;
+            const col = cell.dataset?.col;
+            if (row === undefined || col === undefined) return;
+
+            const mapped = document.querySelector('td[data-row="' + row + '"][data-col="' + col + '"]') as HTMLElement | null;
+            if (mapped) {
+                mapped.classList.add('selected');
+                this.bindings.selectedCells.add(mapped);
+            }
+        });
+
         this.bindings.selectedColumnIndices.forEach(colIdx => {
             document.querySelectorAll('td[data-col="' + colIdx + '"], th[data-col="' + colIdx + '"]').forEach((cell) => {
                 cell.classList.add('column-selected');
@@ -232,6 +247,7 @@ export class XlsxSelectionManager {
                 if (newCell) {
                     newCell.classList.add('active-cell');
                     this.bindings.setActiveCell(newCell);
+                    newCell.classList.add('selected');
                     this.bindings.selectedCells.add(newCell);
                 }
             }

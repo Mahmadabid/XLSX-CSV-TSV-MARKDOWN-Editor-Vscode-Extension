@@ -89,6 +89,11 @@ export function createXlsxRowHtml(params: XlsxRowHtmlParams): string {
     for (let actualCol = 1; actualCol <= columnCount; actualCol++) {
         const cellData = rowData.cells ? rowData.cells.find((cell: any) => cell.colNumber === actualCol) : null;
 
+        if (cellData && cellData.isMergeCovered) {
+            virtualColIndex++;
+            continue;
+        }
+
         if (cellData) {
             const styleStr = isPlainView ? '' : formatCellStyle(cellData.style || {});
             const cellHeight = rowHeight * (cellData.rowspan || 1);
@@ -118,7 +123,14 @@ export function createXlsxRowHtml(params: XlsxRowHtmlParams): string {
             if (!isPlainView) {
                 if (cellData.rowspan > 1) html += ' rowspan="' + cellData.rowspan + '"';
                 if (cellData.colspan > 1) html += ' colspan="' + cellData.colspan + '"';
-                if (cellData.isMerged) html += ' class="merged-cell"';
+            }
+
+            let classes = [];
+            if (!isPlainView && cellData.isMerged) classes.push('merged-cell');
+            if (isEditMode) classes.push('editable-cell');
+            
+            if (classes.length > 0) {
+                html += ' class="' + classes.join(' ') + '"';
             }
 
             let cellStyleStr = styleStr;
@@ -126,10 +138,6 @@ export function createXlsxRowHtml(params: XlsxRowHtmlParams): string {
                 cellStyleStr += 'height: ' + cellHeight + 'px; width: ' + cellWidth + 'px;';
             } else {
                 cellStyleStr += 'height: ' + rowHeight + 'px;';
-            }
-
-            if (isEditMode) {
-                html += ' contenteditable="true" spellcheck="false"';
             }
 
             if (cellStyleStr) {
@@ -149,7 +157,7 @@ export function createXlsxRowHtml(params: XlsxRowHtmlParams): string {
             html += ' data-empty="true"';
             html += ' data-original-color="rgb(0, 0, 0)"';
             if (isEditMode) {
-                html += ' contenteditable="true" spellcheck="false"';
+                html += ' class="editable-cell"';
             }
             html += ' style="height: ' + rowHeight + 'px;">';
             html += '<span class="cell-content">&nbsp;</span>';

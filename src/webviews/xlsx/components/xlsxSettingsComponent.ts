@@ -6,6 +6,7 @@ export interface XlsxViewSettings {
     stickyHeader: boolean;
     hyperlinkPreview: boolean;
     spaciousCells: boolean;
+    mergeWarningEnabled: boolean;
     isDefaultEditor?: boolean;
 }
 
@@ -15,6 +16,7 @@ export const defaultXlsxViewSettings: XlsxViewSettings = {
     stickyHeader: false,
     hyperlinkPreview: true,
     spaciousCells: false,
+    mergeWarningEnabled: true,
     isDefaultEditor: true
 };
 
@@ -25,6 +27,7 @@ export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): Xl
         stickyHeader: next && typeof next.stickyHeader === 'boolean' ? next.stickyHeader : previous.stickyHeader,
         hyperlinkPreview: next && typeof next.hyperlinkPreview === 'boolean' ? next.hyperlinkPreview : previous.hyperlinkPreview,
         spaciousCells: next && typeof next.spaciousCells === 'boolean' ? next.spaciousCells : previous.spaciousCells,
+        mergeWarningEnabled: next && typeof next.mergeWarningEnabled === 'boolean' ? next.mergeWarningEnabled : previous.mergeWarningEnabled,
         isDefaultEditor: next && typeof next.isDefaultEditor === 'boolean' ? next.isDefaultEditor : previous.isDefaultEditor
     };
 
@@ -41,6 +44,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
     const chkToolbar = document.getElementById('chkStickyToolbar') as HTMLInputElement | null;
     const chkHyperlink = document.getElementById('chkHyperlinkPreview') as HTMLInputElement | null;
     const chkSpacious = document.getElementById('chkSpaciousCells') as HTMLInputElement | null;
+    const chkMergeWarning = document.getElementById('chkMergeWarningEnabled') as HTMLInputElement | null;
 
     if (chkHeader) chkHeader.checked = !!settings.firstRowIsHeader;
     if (chkSticky) {
@@ -54,6 +58,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
     if (chkToolbar) chkToolbar.checked = !!settings.stickyToolbar;
     if (chkHyperlink) chkHyperlink.checked = !!settings.hyperlinkPreview;
     if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
+    if (chkMergeWarning) chkMergeWarning.checked = !!settings.mergeWarningEnabled;
 }
 
 export function createXlsxSettingsDefinitions(
@@ -121,6 +126,14 @@ export function createXlsxSettingsDefinitions(
                 applyAndPersist({ spaciousCells: val });
             },
             defaultValue: getSettings().spaciousCells
+        },
+        {
+            id: 'chkMergeWarningEnabled',
+            label: 'Merge Warning Popup',
+            onChange: (val: boolean) => {
+                applyAndPersist({ mergeWarningEnabled: val });
+            },
+            defaultValue: getSettings().mergeWarningEnabled
         }
     ];
 }

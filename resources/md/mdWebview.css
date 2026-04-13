@@ -108,55 +108,6 @@ body.edit-mode #content {
     flex-shrink: 0;
 }
 
-/* ===== Settings Panel (fixed positioned) ===== */
-.settings-panel.floating {
-    position: fixed;
-    left: 12px;
-    right: 12px;
-    z-index: 200001;
-}
-
-.settings-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    justify-content: flex-start;
-}
-
-.setting-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text-color);
-    user-select: none;
-    cursor: pointer;
-}
-
-input[type="checkbox"]:hover {
-    cursor: pointer;
-}
-
-/* Disabled checkbox state */
-.setting-item input[type="checkbox"]:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-    background-color: transparent;
-    border-color: var(--border-color);
-    box-shadow: none;
-}
-
-.setting-item input[type="checkbox"]:disabled::after {
-    content: none !important;
-}
-
-.setting-item input[type="checkbox"]:disabled+span {
-    opacity: 0.65;
-    cursor: not-allowed;
-    color: var(--text-color);
-}
-
 /* ===== Content ===== */
 #content {
     height: calc(100vh - var(--header-height));
@@ -1008,102 +959,6 @@ body.edit-mode .edit-mode-hide {
 /*                  Toolbar Styling                          */
 /* --------------------------------------------------------- */
 
-:root {
-    --header-height: 40px;
-}
-
-.toolbar {
-    min-height: 40px;
-    height: auto;
-    margin-top: 0;
-    margin-bottom: 0;
-    gap: 12px;
-    top: auto;
-    left: auto;
-    width: 100%;
-    box-sizing: border-box;
-    overflow-x: auto;
-    overflow-y: visible;
-    white-space: nowrap;
-    padding: 4px 12px;
-    align-items: center;
-    display: flex;
-    background-color: var(--bg-color);
-    border-bottom: 1px solid var(--border-color);
-    z-index: 10000;
-}
-
-.toolbar.not-sticky {
-    position: relative;
-}
-
-.toolbar.settings-open {
-    flex-wrap: nowrap;
-    align-items: center;
-    overflow-x: auto;
-    white-space: nowrap;
-}
-
-.toolbar.expanded-toolbar {
-    padding: 12px 18px;
-    gap: 16px;
-    overflow-x: auto;
-    white-space: nowrap;
-    align-items: center;
-}
-
-.toolbar.expanded-toolbar .settings-panel {
-    width: 100%;
-    position: sticky;
-}
-
-body.sticky-toolbar-enabled .toolbar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 10000;
-    padding: 4px 12px;
-    background: var(--panel-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-body:not(.sticky-toolbar-enabled) .toolbar {
-    position: relative;
-    top: auto;
-    left: auto;
-    right: auto;
-    margin: 0;
-    background-color: var(--panel-bg);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-}
-
-body.sticky-toolbar-enabled .toolbar.expanded-toolbar {
-    padding: 4px 18px;
-    gap: 12px;
-}
-
-body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar {
-    position: relative;
-}
-
-.toolbar img {
-    flex-shrink: 0;
-    max-width: none !important;
-    width: 120px;
-    height: auto;
-    display: inline-block;
-}
-
-.toolbar svg {
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    stroke-width: 2;
-}
-
 /* --------------------------------------------------------- */
 /*                  Custom Scrollbar Styling                 */
 /*  - Scoped to the scroll containers used by the MD view    */
@@ -1112,7 +967,6 @@ body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar {
 
 .markdown-preview,
 .markdown-editor,
-.toolbar,
 #content {
     /* Firefox */
     scrollbar-width: thin;
@@ -1124,8 +978,7 @@ body::-webkit-scrollbar,
 html::-webkit-scrollbar,
 #content::-webkit-scrollbar,
 .markdown-preview::-webkit-scrollbar,
-.markdown-editor::-webkit-scrollbar,
-.toolbar::-webkit-scrollbar {
+.markdown-editor::-webkit-scrollbar {
     width: 10px;
     height: 10px;
 }
@@ -1134,8 +987,7 @@ body::-webkit-scrollbar-track,
 html::-webkit-scrollbar-track,
 #content::-webkit-scrollbar-track,
 .markdown-preview::-webkit-scrollbar-track,
-.markdown-editor::-webkit-scrollbar-track,
-.toolbar::-webkit-scrollbar-track {
+.markdown-editor::-webkit-scrollbar-track {
     background: var(--scrollbar-track);
 }
 
@@ -1143,25 +995,18 @@ body::-webkit-scrollbar-thumb,
 html::-webkit-scrollbar-thumb,
 #content::-webkit-scrollbar-thumb,
 .markdown-preview::-webkit-scrollbar-thumb,
-.markdown-editor::-webkit-scrollbar-thumb,
-.toolbar::-webkit-scrollbar-thumb {
+.markdown-editor::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
     border: 3px solid transparent;
     background-clip: content-box;
     border-radius: 10px;
 }
 
-/* Slightly smaller radius for toolbar horizontal thumb */
-.toolbar::-webkit-scrollbar-thumb {
-    border-radius: 6px;
-}
-
 body::-webkit-scrollbar-thumb:hover,
 html::-webkit-scrollbar-thumb:hover,
 #content::-webkit-scrollbar-thumb:hover,
 .markdown-preview::-webkit-scrollbar-thumb:hover,
-.markdown-editor::-webkit-scrollbar-thumb:hover,
-.toolbar::-webkit-scrollbar-thumb:hover {
+.markdown-editor::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
 }
 
@@ -1170,13 +1015,11 @@ html::-webkit-scrollbar-button,
 #content::-webkit-scrollbar-button,
 .markdown-preview::-webkit-scrollbar-button,
 .markdown-editor::-webkit-scrollbar-button,
-.toolbar::-webkit-scrollbar-button,
 body::-webkit-scrollbar-corner,
 html::-webkit-scrollbar-corner,
 #content::-webkit-scrollbar-corner,
 .markdown-preview::-webkit-scrollbar-corner,
-.markdown-editor::-webkit-scrollbar-corner,
-.toolbar::-webkit-scrollbar-corner {
+.markdown-editor::-webkit-scrollbar-corner {
     display: none;
     background: transparent;
 }
@@ -1482,101 +1325,6 @@ body.lightbox-open {
     border-left: 2px solid var(--accent-color);
     margin-left: -2px;
     transition: all 0.2s ease;
-}
-
-/* ===== Search Overlay ===== */
-.search-overlay {
-    position: fixed;
-    top: calc(var(--header-height, 40px) + 8px);
-    right: 16px;
-    z-index: 100000;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(-10px);
-    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
-}
-
-.search-overlay.active {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-}
-
-body:not(.sticky-toolbar-enabled) .search-overlay {
-    top: calc(var(--header-height, 40px) + 8px);
-}
-
-.search-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--glass-bg-heavy);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    padding: 6px 10px;
-    box-shadow: var(--shadow-lg);
-}
-
-.search-input {
-    border: none;
-    outline: none;
-    background: transparent;
-    color: var(--text-color);
-    font-size: 13px;
-    font-family: var(--font-family);
-    width: 220px;
-    padding: 4px 8px;
-}
-
-.search-input::placeholder {
-    color: var(--text-muted);
-}
-
-.search-count {
-    font-size: 11px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    min-width: 65px;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-}
-
-.search-nav-btn {
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-muted);
-    width: 26px;
-    height: 26px;
-    border-radius: 6px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    transition: all 0.15s ease;
-}
-
-.search-nav-btn:hover {
-    color: var(--text-color);
-    border-color: var(--accent-color);
-    background: var(--accent-bg);
-}
-
-.search-close-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 18px;
-    cursor: pointer;
-    padding: 0 4px;
-    line-height: 1;
-    transition: color 0.15s ease;
-}
-
-.search-close-btn:hover {
-    color: var(--error-color);
 }
 
 /* Search Highlights */

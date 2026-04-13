@@ -141,40 +141,6 @@ thead th:first-child {
     background-color: var(--header-bg);
 }
 
-.toolbar.not-sticky {
-    position: relative;
-}
-
-.toolbar.settings-open {
-    flex-wrap: nowrap;
-    align-items: center;
-    overflow-x: auto;
-    white-space: nowrap;
-}
-
-.settings-panel.floating {
-    position: fixed;
-    left: 12px;
-    right: 12px;
-    z-index: 10001;
-    flex-wrap: wrap;
-}
-
-.toggle-button.small {
-    height: 30px;
-    padding: 0 10px;
-    font-size: 12px;
-    max-width: 120px;
-    min-width: 72px;
-    flex-shrink: 0;
-}
-
-@media (max-width: 640px) {
-    .settings-panel {
-        flex-direction: row;
-    }
-}
-
 body.first-row-as-header tbody tr.header-row td {
     font-weight: 700;
     background-color: var(--header-bg);
@@ -208,62 +174,6 @@ body.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
     left: 0;
     z-index: 20;
     background-color: var(--header-bg);
-}
-
-.toolbar.expanded-toolbar {
-    padding: 12px 18px;
-    gap: 16px;
-    overflow-x: auto;
-    white-space: nowrap;
-    align-items: center;
-}
-
-.toolbar.expanded-toolbar .settings-panel {
-    width: 100%;
-    position: sticky;
-}
-
-/* Reduce vertical padding when toolbar is sticky so header-height stays compact */
-body.sticky-toolbar-enabled .toolbar {
-    padding: 4px 12px;
-    background-color: var(--toolbar-bg);
-}
-
-/* Slightly tighter expanded toolbar when sticky */
-body.sticky-toolbar-enabled .toolbar.expanded-toolbar {
-    padding: 4px 18px;
-    gap: 12px;
-}
-
-/* Safety cap for header height when toolbar is sticky */
-:root {
-    --header-height-max: 96px;
-}
-
-body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar {
-    position: relative;
-}
-
-body:not(.sticky-toolbar-enabled) .toolbar {
-    position: static;
-    width: 100%;
-    background-color: var(--toolbar-bg);
-    border-bottom: 1px solid var(--border-color);
-}
-
-.toolbar img {
-    flex-shrink: 0;
-    max-width: none !important;
-    width: 120px;
-    height: auto;
-    display: inline-block;
-}
-
-.toolbar svg {
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    stroke-width: 2;
 }
 
 td {
@@ -508,24 +418,6 @@ td[contenteditable="true"] {
     white-space: nowrap;
 }
 
-/* Toolbar */
-.toolbar {
-    min-height: var(--header-height);
-    height: auto;
-    margin-top: 0;
-    margin-bottom: 0;
-    gap: 12px;
-    top: auto;
-    left: auto;
-    width: 100%;
-    box-sizing: border-box;
-    overflow-x: auto;
-    overflow-y: visible;
-    white-space: nowrap;
-    padding: 4px 12px;
-    align-items: center;
-} 
-
 .version-preview-banner {
     display: flex;
     align-items: center;
@@ -556,71 +448,6 @@ td[contenteditable="true"] {
 
 body.preview-mode td {
     cursor: default;
-}
-
-
-/* --- Settings Button (Icon Only) --- */
-/* Container for checkboxes */
-.settings-group {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-}
-
-.setting-item {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 13px;
-    font-weight: 400;
-    cursor: pointer;
-}
-
-/* Cancel Button */
-#settingsCancelButton {
-    max-width: 70px;
-    background-color: var(--button-bg);
-    color: var(--button-text);
-    box-shadow: var(--shadow-sm);
-    border: none;
-    font-weight: 500;
-    padding: 0 10px;
-    height: 30px;
-    border-radius: 6px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
-}
-
-#settingsCancelButton:hover {
-    background-color: var(--button-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-}
-
-#settingsCancelButton:active {
-    transform: translateY(0);
-    box-shadow: none;
-}
-
-@media (max-width: 500px) {
-    .settings-panel {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .settings-group {
-        width: 100%;
-        margin-bottom: 8px;
-    }
-
-    #settingsCancelButton {
-        width: 100%;
-        max-width: none;
-        justify-content: center;
-    }
 }
 
 /* Interactive theme tooltip */
@@ -675,8 +502,20 @@ body.preview-mode td {
     margin: 0;
 }
 
-.toolbar img:not(#vscodeIcon) {
-    max-width: none;
+#csv-table td.find-hit-cell .find-text-highlight {
+    background: color-mix(in srgb, #ffd54f 58%, transparent);
+    border-radius: 3px;
+    padding: 0 1px;
+}
+
+#csv-table td.find-active-cell .find-text-highlight,
+#csv-table td.find-hit-cell .find-text-highlight-active {
+    background: #ffd54f;
+    color: #1f1f1f;
+}
+
+#csv-table td.find-active-cell {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-color) 62%, transparent);
 }
 
 /* Virtual scrolling styles */
@@ -783,8 +622,7 @@ body.spacious-cells #csv-table tbody tr:not(.virtual-spacer) th {
 /* --------------------------------------------------------- */
 
 #tableContainer,
-.table-scroll,
-.toolbar {
+.table-scroll {
     /* Firefox */
     scrollbar-width: thin; /* small thumb */
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); /* thumb track */
@@ -792,44 +630,33 @@ body.spacious-cells #csv-table tbody tr:not(.virtual-spacer) th {
 
 /* WebKit-based browsers (Chrome, Edge, Safari) */
 #tableContainer::-webkit-scrollbar,
-.table-scroll::-webkit-scrollbar,
-.toolbar::-webkit-scrollbar {
+.table-scroll::-webkit-scrollbar {
     width: 10px;   /* vertical scrollbar clickable area */
     height: 10px;  /* horizontal scrollbar height */
 }
 
 #tableContainer::-webkit-scrollbar-track,
-.table-scroll::-webkit-scrollbar-track,
-.toolbar::-webkit-scrollbar-track {
+.table-scroll::-webkit-scrollbar-track {
     background: var(--scrollbar-track);
 }
 
 #tableContainer::-webkit-scrollbar-thumb,
-.table-scroll::-webkit-scrollbar-thumb,
-.toolbar::-webkit-scrollbar-thumb {
+.table-scroll::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
     border: 3px solid transparent; /* keeps hit area large while making thumb visually thin */
     background-clip: content-box;
     border-radius: 10px;
 }
 
-/* Slightly smaller radius for toolbar horizontal thumb for better fit */
-.toolbar::-webkit-scrollbar-thumb {
-    border-radius: 6px;
-}
-
 #tableContainer::-webkit-scrollbar-thumb:hover,
-.table-scroll::-webkit-scrollbar-thumb:hover,
-.toolbar::-webkit-scrollbar-thumb:hover {
+.table-scroll::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
 }
 
 #tableContainer::-webkit-scrollbar-button,
 .table-scroll::-webkit-scrollbar-button,
-.toolbar::-webkit-scrollbar-button,
 #tableContainer::-webkit-scrollbar-corner,
-.table-scroll::-webkit-scrollbar-corner,
-.toolbar::-webkit-scrollbar-corner {
+.table-scroll::-webkit-scrollbar-corner {
     display: none;
     background: transparent;
 }
@@ -845,7 +672,4 @@ body:not(.sticky-toolbar-enabled) #content {
 }
 body:not(.sticky-toolbar-enabled) .table-scroll {
     height: 100vh;
-}
-body:not(.sticky-toolbar-enabled) .toolbar {
-    background-color: var(--toolbar-bg);
 }

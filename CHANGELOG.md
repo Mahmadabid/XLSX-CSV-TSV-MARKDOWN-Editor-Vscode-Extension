@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.8.4 - Google Sheets-Style Editing Features
+- Added Find in the toolbar for CSV, TSV, and XLSX.
+- Added text alignment (horizontal and vertical), borders, font size, font family, wrap text strikethrough, painter, clear formatting, and merge cell controls in XLSX edit mode.
+
 ## v1.8.3 - Cross-Format File Conversion
 - Added centralized file conversion system to convert between CSV, TSV, and XLSX.
 - Added a "Convert" action directly in CSV/TSV/XLSX toolbars for supported formats.

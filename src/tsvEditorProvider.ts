@@ -305,7 +305,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         const parsed = parseTsvChunk(leftover + chunk);
                         leftover = parsed.leftover;
                         for (const row of parsed.rows) {
-                            if (allRows.length === 0 && row.length > 0) {
+                            if (row.length > columnCount) {
                                 columnCount = row.length;
                             }
                             allRows.push(row);
@@ -316,7 +316,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         // Handle final partial row
                         if (leftover && leftover.length > 0) {
                             const row = parseRowString(leftover);
-                            if (allRows.length === 0 && row.length > 0) {
+                            if (row.length > columnCount) {
                                 columnCount = row.length;
                             }
                             allRows.push(row);

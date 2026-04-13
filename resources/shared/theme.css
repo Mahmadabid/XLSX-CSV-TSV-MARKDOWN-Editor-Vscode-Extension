@@ -517,6 +517,7 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     gap: 12px;
     align-items: center;
     justify-content: flex-start;
+    flex: 0 1 auto;
 }
 
 .setting-item {
@@ -545,6 +546,10 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     flex-shrink: 0;
 }
 
+.setting-item input[type="checkbox"]:hover {
+    cursor: pointer;
+}
+
 .setting-item input[type="checkbox"]:checked {
     background: var(--accent-color);
     border-color: var(--accent-color);
@@ -569,6 +574,19 @@ body:not(.sticky-toolbar-enabled) .toolbar {
 .setting-item input[type="checkbox"]:disabled {
     cursor: not-allowed;
     opacity: 0.6;
+    background-color: transparent;
+    border-color: var(--border-color);
+    box-shadow: none;
+}
+
+.setting-item input[type="checkbox"]:disabled::after {
+    content: none !important;
+}
+
+.setting-item input[type="checkbox"]:disabled + span {
+    opacity: 0.65;
+    cursor: not-allowed;
+    color: var(--text-color);
 }
 
 /* Cancel Button */
@@ -585,6 +603,10 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     align-items: center;
     justify-content: center;
     gap: 6px;
+    min-width: 64px;
+    max-width: 88px;
+    width: auto;
+    flex: 0 0 auto;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
@@ -600,14 +622,31 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     box-shadow: none;
 }
 
+@media (max-width: 500px) {
+    .settings-panel {
+        gap: 12px;
+    }
+
+    .settings-group {
+        width: auto;
+        margin-bottom: 0;
+        max-width: 100%;
+    }
+
+    #settingsCancelButton {
+        width: auto;
+        max-width: 88px;
+    }
+}
+
 .toolbar.not-sticky { position: relative; }
 .toolbar.expanded-toolbar { padding: 12px 18px; gap: 16px; overflow-x: auto; white-space: nowrap; align-items: center; }
 .toolbar.expanded-toolbar .settings-panel { width: 100%; position: sticky; }
 .toolbar.settings-open { flex-wrap: nowrap; align-items: center; overflow-x: auto; white-space: nowrap; }
 body.sticky-toolbar-enabled .toolbar { padding: 4px 12px; background-color: var(--toolbar-bg); }
 body.sticky-toolbar-enabled .toolbar.expanded-toolbar { padding: 4px 18px; gap: 12px; }
-body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar { position: relative; }
-body:not(.sticky-toolbar-enabled) .toolbar { position: static; width: 100%; background-color: var(--toolbar-bg); border-bottom: 1px solid var(--border-color); }
+body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar { padding: 4px 12px; position: relative; }
+body:not(.sticky-toolbar-enabled) .toolbar { padding: 4px 12px; position: static; width: 100%; background-color: var(--toolbar-bg); border-bottom: 1px solid var(--border-color); }
 .toolbar img { flex-shrink: 0; max-width: none !important; width: 120px; height: auto; display: inline-block; }
 .toolbar svg { flex-shrink: 0; width: 16px; height: 16px; stroke-width: 2; }
 .toolbar { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
@@ -618,5 +657,115 @@ body:not(.sticky-toolbar-enabled) .toolbar { position: static; width: 100%; back
 .toolbar::-webkit-scrollbar-button, .toolbar::-webkit-scrollbar-corner { display: none; background: transparent; }
 .toggle-button.small { height: 30px; padding: 0 10px; font-size: 12px; max-width: 120px; min-width: 72px; flex-shrink: 0; }
 :root { --header-height-max: 96px; }
+
+/* Shared Search Overlay */
+.search-overlay,
+.sheet-find-overlay {
+    position: fixed;
+    top: calc(var(--header-height, 40px) + 8px);
+    right: 16px;
+    z-index: 200100;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+}
+
+.search-overlay.active,
+.sheet-find-overlay.active,
+.sheet-find-overlay:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+body:not(.sticky-toolbar-enabled) .search-overlay,
+body:not(.sticky-toolbar-enabled) .sheet-find-overlay {
+    top: calc(var(--header-height, 40px) + 8px);
+}
+
+.search-bar,
+.sheet-find-shell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: color-mix(in srgb, var(--overlay-bg) 92%, var(--bg-color) 8%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 32%, var(--border-color));
+    border-radius: 10px;
+    padding: 6px 10px;
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--accent-color) 18%, transparent), var(--shadow-lg);
+}
+
+.search-input,
+.sheet-find-input {
+    border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+    border-radius: 6px;
+    outline: none;
+    background: transparent;
+    color: var(--text-color);
+    font-size: 13px;
+    font-family: var(--font-family);
+    width: 220px;
+    padding: 4px 8px;
+}
+
+.search-input:focus,
+.sheet-find-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent);
+}
+
+.search-input::placeholder,
+.sheet-find-input::placeholder {
+    color: var(--text-muted);
+}
+
+.search-count,
+.sheet-find-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    min-width: 65px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.search-nav-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    transition: all 0.15s ease;
+}
+
+.search-nav-btn:hover {
+    color: var(--text-color);
+    border-color: var(--accent-color);
+    background: var(--accent-bg);
+}
+
+.search-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: color 0.15s ease;
+}
+
+.search-close-btn:hover {
+    color: var(--error-color);
+}
 body:not(.sticky-toolbar-enabled) #content { height: 100vh; }
 body:not(.sticky-toolbar-enabled) .table-scroll { height: 100vh; }

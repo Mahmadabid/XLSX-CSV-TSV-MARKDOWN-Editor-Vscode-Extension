@@ -9,6 +9,8 @@ import { Icons } from '../shared/icons';
 import { vscode, VirtualScrollConfig, debounce } from '../shared/common';
 import { VirtualLoader } from '../shared/virtualLoader';
 import { InfoTooltip } from '../shared/infoTooltip';
+import { createTableToolbarButtons } from './components/tableToolbarComponent';
+import { TableFindManager } from './components/tableFindComponent';
 
 (function () {
     // ===== Configuration =====
@@ -36,6 +38,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
     let endCell: { row: number, col: number } | null = null;
     const selectedCells = new Set<HTMLElement>();
     let activeCell: HTMLElement | null = null;
+    let pendingEditCell: HTMLElement | null = null;
+    let pendingEditDrag = false;
     const selectedRows = new Set<number>();
     const selectedColumns = new Set<number>();
     let lastSelectedRow: number | null = null;
@@ -77,6 +81,9 @@ import { InfoTooltip } from '../shared/infoTooltip';
     // Toolbar manager (global for settings access)
     let toolbarManager: ToolbarManager | null = null;
 
+    // Find manager
+    let findManager: TableFindManager | null = null;
+
     // ===== Utilities =====
     const $ = Utils.$;
     const normalizeCellText = Utils.normalizeCellText;
@@ -98,6 +105,96 @@ import { InfoTooltip } from '../shared/infoTooltip';
             const el = $(id) as HTMLButtonElement;
             if (el) el.disabled = !enabled;
         });
+    }
+
+    function getFindManager() {
+        if (!findManager) {
+            findManager = new TableFindManager({
+                normalizeCellText,
+                requestAllRows,
+                getFallbackRows: () => Array.from(rowCache.entries()).sort((a, b) => a[0] - b[0]).map((entry) => entry[1]),
+                focusCellByPosition,
+                isCellEditing: () => isCellEditing,
+                tableSelector: '#csv-table'
+            });
+        }
+        return findManager;
+    }
+
+    function applyFindHighlightsInVisibleCells() {
+        getFindManager().reapplyHighlights();
+    }
+
+    function ensureTableHeaderVisible() {
+        const thead = document.querySelector('#csv-table thead') as HTMLElement | null;
+        if (thead) {
+            thead.style.display = 'table-header-group';
+        }
+    }
+
+    async function focusCellByPosition(row: number, col: number) {
+        const boundedRow = Math.max(0, Math.min(totalRows - 1, row));
+        const boundedCol = Math.max(0, Math.min(columnCount - 1, col));
+
+        let cell = document.querySelector(`td[data-row="${boundedRow}"][data-col="${boundedCol}"]`) as HTMLElement | null;
+
+        if (!cell) {
+            const container = getTableContainer();
+            if (container) {
+                container.scrollTop = Math.max(0, (boundedRow * ROW_HEIGHT) - Math.floor(container.clientHeight / 2));
+                await updateVisibleRows();
+                cell = document.querySelector(`td[data-row="${boundedRow}"][data-col="${boundedCol}"]`) as HTMLElement | null;
+            }
+        }
+
+        if (!cell) {
+            showToast('Match is outside current view');
+            return;
+        }
+
+        clearSelection();
+        cell.classList.add('selected', 'active-cell');
+        selectedCells.add(cell);
+        activeCell = cell;
+        startCell = { row: boundedRow, col: boundedCol };
+        endCell = { row: boundedRow, col: boundedCol };
+
+        const thRow = document.querySelector(`th.row-header[data-row="${boundedRow}"]`) as HTMLElement | null;
+        if (thRow) thRow.classList.add('row-selected');
+        const thCol = document.querySelector(`th.col-header[data-col="${boundedCol}"]`) as HTMLElement | null;
+        if (thCol) thCol.classList.add('column-selected');
+
+        const container = getTableContainer();
+        if (container) {
+            const rect = cell.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            if (rect.bottom > containerRect.bottom) container.scrollTop += rect.bottom - containerRect.bottom + 20;
+            if (rect.top < containerRect.top) container.scrollTop -= containerRect.top - rect.top + 20;
+            if (rect.right > containerRect.right) container.scrollLeft += rect.right - containerRect.right + 20;
+            if (rect.left < containerRect.left) container.scrollLeft -= containerRect.left - rect.left + 20;
+        }
+
+        updateSelectionInfo();
+    }
+
+    async function runFind(query: string) {
+        await getFindManager().run(query);
+    }
+
+    async function navigateFind(direction: 'next' | 'prev') {
+        await getFindManager().navigate(direction);
+    }
+
+    function openFindOverlay() {
+        getFindManager().open();
+    }
+
+    function toggleFindOverlay() {
+        getFindManager().toggle();
+    }
+
+    function closeFindOverlay() {
+        getFindManager().close();
     }
 
     // ===== Virtual Scrolling Core =====
@@ -161,8 +258,10 @@ import { InfoTooltip } from '../shared/infoTooltip';
         }
 
         tbody.innerHTML = html;
+        ensureTableHeaderVisible();
 
         reapplySelection();
+        applyFindHighlightsInVisibleCells();
     }
 
     async function updateVisibleRows(force = false) {
@@ -1385,12 +1484,15 @@ import { InfoTooltip } from '../shared/infoTooltip';
             if (target.tagName === 'TD') {
                 const coords = getCellCoordinates(target);
                 if (!coords) return;
+                const wasSingleActiveCell = activeCell === target && selectedCells.size === 1;
 
                 // Clear column/row selection when selecting individual cells
                 selectedColumnIndices.clear();
                 selectedRowIndices.clear();
 
                 if (e.ctrlKey || e.metaKey) {
+                    pendingEditCell = null;
+                    pendingEditDrag = false;
                     e.stopPropagation();
                     if (target.classList.contains('selected')) {
                         target.classList.remove('selected');
@@ -1405,6 +1507,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
                         startCell = coords;
                     }
                 } else if (e.shiftKey && startCell) {
+                    pendingEditCell = null;
+                    pendingEditDrag = false;
                     e.stopPropagation();
                     selectCellsInRange(startCell, coords);
                 } else {
@@ -1420,6 +1524,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
                     if (thRow) thRow.classList.add('row-selected');
                     const thCol = document.querySelector(`th.col-header[data-col="${coords.col}"]`) as HTMLElement;
                     if (thCol) thCol.classList.add('column-selected');
+                    pendingEditCell = wasSingleActiveCell ? target : null;
+                    pendingEditDrag = false;
                 }
                 updateSelectionInfo();
             }
@@ -1449,13 +1555,40 @@ import { InfoTooltip } from '../shared/infoTooltip';
             const coords = getCellCoordinates(target);
             if (!coords || (endCell && coords.row === endCell.row && coords.col === endCell.col)) return;
             endCell = coords;
+            pendingEditDrag = true;
             selectCellsInRange(startCell, endCell);
         });
 
-        document.addEventListener('mouseup', () => { isSelecting = false; });
+        document.addEventListener('mouseup', () => {
+            const shouldStartEdit = !!pendingEditCell && !pendingEditDrag;
+            const targetToEdit = pendingEditCell;
+            pendingEditCell = null;
+            pendingEditDrag = false;
+            isSelecting = false;
+            if (shouldStartEdit && targetToEdit && !isCellEditing) {
+                startEditing(targetToEdit);
+            }
+        });
 
         document.addEventListener('keydown', (e) => {
             const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+            const target = e.target as HTMLElement | null;
+
+            if (isCmdOrCtrl && e.key.toLowerCase() === 'f') {
+                e.preventDefault();
+                toggleFindOverlay();
+                return;
+            }
+
+            if (e.key === 'F3') {
+                e.preventDefault();
+                void navigateFind(e.shiftKey ? 'prev' : 'next');
+                return;
+            }
+
+            if (target && target.closest('#sheetFindOverlay')) {
+                return;
+            }
 
             if (isVersionPreviewMode) {
                 const key = e.key.toLowerCase();
@@ -1928,6 +2061,8 @@ import { InfoTooltip } from '../shared/infoTooltip';
                 isSaving = false;
                 setButtonsEnabled(true);
                 if (m.ok) {
+                    const thead = document.querySelector('#csv-table thead') as HTMLElement | null;
+                    if (thead) thead.style.display = 'table-header-group';
                     showToast('Saved', m.isAutosave);
                     (window as any)._originalCacheSnapshot = null;
                     captureOriginalCellValues();
@@ -1957,97 +2092,49 @@ import { InfoTooltip } from '../shared/infoTooltip';
 
     function wireButtons() {
         toolbarManager = new ToolbarManager('toolbar');
-        
-        toolbarManager.setButtons([
-            {
-                id: 'toggleViewButton',
-                icon: Icons.EditFile,
-                label: 'Edit File',
-                tooltip: 'Edit File in Vscode Default Editor',
-                onClick: () => {
-                    isTableView = !isTableView;
-                    vscode.postMessage({ command: 'toggleView', isTableView });
+
+        toolbarManager.setButtons(createTableToolbarButtons({
+            fileFormat,
+            onToggleView: () => {
+                isTableView = !isTableView;
+                vscode.postMessage({ command: 'toggleView', isTableView });
+            },
+            onToggleExpand: () => {
+                const btn = $('toggleExpandButton');
+                const state = btn?.getAttribute('data-state') || 'default';
+                if (state === 'default') {
+                    btn?.setAttribute('data-state', 'expanded');
+                    document.body.classList.add('expanded-mode');
+                    if (btn) btn.innerHTML = Icons.Collapse + ' <span class="btn-label">Default</span>';
+                    adjustColumnWidths('expand');
+                } else {
+                    btn?.setAttribute('data-state', 'default');
+                    document.body.classList.remove('expanded-mode');
+                    if (btn) btn.innerHTML = Icons.Expand + ' <span class="btn-label">Expand</span>';
+                    adjustColumnWidths('default');
                 }
             },
-            {
-                id: 'toggleExpandButton',
-                icon: Icons.Expand,
-                label: 'Expand',
-                tooltip: 'Toggle Column Widths (Default / Expand All)',
-                cls: 'edit-mode-hide',
-                onClick: () => {
-                    const btn = $('toggleExpandButton');
-                    const state = btn?.getAttribute('data-state') || 'default';
-                    if (state === 'default') {
-                        btn?.setAttribute('data-state', 'expanded');
-                        document.body.classList.add('expanded-mode');
-                        if(btn) btn.innerHTML = Icons.Collapse + ' <span class="btn-label">Default</span>';
-                        adjustColumnWidths('expand');
-                    } else {
-                        btn?.setAttribute('data-state', 'default');
-                        document.body.classList.remove('expanded-mode');
-                        if(btn) btn.innerHTML = Icons.Expand + ' <span class="btn-label">Expand</span>';
-                        adjustColumnWidths('default');
-                    }
-                }
+            onFind: () => {
+                toggleFindOverlay();
             },
-            {
-                id: 'openSettingsButton',
-                icon: Icons.Settings,
-                tooltip: 'CSV Settings',
-                cls: 'icon-only',
-                onClick: () => {}
+            onOpenSettings: () => {},
+            onToggleBackground: () => {},
+            onVersionHistory: () => {
+                vscode.postMessage({ command: 'showVersionHistory' });
             },
-            {
-                id: 'toggleBackgroundButton',
-                icon: Icons.ThemeLight + Icons.ThemeDark + Icons.ThemeVSCode,
-                tooltip: 'Toggle Theme',
-                cls: 'edit-mode-hide',
-                onClick: () => {}
+            onHelp: () => {
+                vscode.postMessage({
+                    command: 'openExternal',
+                    url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
+                });
             },
-            {
-                id: 'versionHistoryButton',
-                icon: Icons.VersionHistory,
-                tooltip: 'Version history',
-                cls: 'edit-mode-hide icon-only',
-                onClick: () => {
-                    vscode.postMessage({ command: 'showVersionHistory' });
-                }
+            onConvertFile: () => {
+                vscode.postMessage({ command: 'convertFile' });
             },
-            {
-                id: 'helpButton',
-                icon: Icons.Help,
-                tooltip: 'Help & Feedback',
-                cls: 'icon-only',
-                onClick: () => {
-                    vscode.postMessage({
-                        command: 'openExternal',
-                        url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
-                    });
-                }
-            },
-            {
-                id: 'convertFileButton',
-                icon: Icons.Convert,
-                label: 'Convert',
-                tooltip: `Convert this ${fileFormat.toUpperCase()} file`,
-                cls: 'edit-mode-hide',
-                onClick: () => {
-                    vscode.postMessage({ command: 'convertFile' });
-                }
-            },
-            {
-                id: 'enableAsDefaultButton',
-                icon: Icons.Zap,
-                label: 'Set as Default',
-                tooltip: `Make XLSX Viewer the default editor for ${fileFormat.toUpperCase()} files`,
-                cls: 'edit-mode-hide',
-                hidden: true,
-                onClick: () => {
-                    vscode.postMessage({ command: 'enableAsDefault' });
-                }
+            onEnableAsDefault: () => {
+                vscode.postMessage({ command: 'enableAsDefault' });
             }
-        ]);
+        }));
 
         // Inject tooltip if variables are present
         InfoTooltip.inject('toolbar', (window as any).viewImgUri, (window as any).logoSvgUri, 'table view');
