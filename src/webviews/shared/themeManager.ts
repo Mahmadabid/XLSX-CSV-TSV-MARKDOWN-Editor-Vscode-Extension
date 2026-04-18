@@ -9,7 +9,8 @@ export class ThemeManager {
     private button: HTMLElement | null;
     private vscodeApi: any;
     private options: ThemeManagerOptions;
-    private themes: string[];
+    private themes: Array<'light' | 'dark' | 'vscode'>;
+    private selectedIconOnLeft: boolean = true;
 
     constructor(buttonId: string, options: ThemeManagerOptions = {}, vscodeApi: any = null) {
         this.button = document.getElementById(buttonId);
@@ -18,15 +19,20 @@ export class ThemeManager {
             persistKey: 'last_used_theme',
             ...options
         };
+        this.themes = ['vscode', 'light', 'dark'];
 
-        this.themes = ['light', 'dark', 'vscode'];
         this.init();
     }
 
     private init() {
-        if (!this.button) return;
+        if (!this.button) {
+            return;
+        }
 
-        // Listen for theme messages from VS Code
+        this.button.classList.add('theme-toggle-pill');
+        this.button.classList.remove('theme-pill-animating');
+
+        // Listen for theme messages from VS Code so vscode-theme mode follows host changes.
         window.addEventListener('message', event => {
             const msg = event.data;
             if (msg && msg.type === 'setTheme') {
@@ -35,46 +41,59 @@ export class ThemeManager {
         });
 
         this.button.addEventListener('click', () => {
+            if (typeof this.options.onBeforeCycle === 'function' && this.options.onBeforeCycle() === false) {
+                return;
+            }
             this.cycleTheme();
         });
-        
-        // Initial apply
+
         this.applyTheme(this.getStoredTheme(), false);
     }
 
-    private getStoredTheme(): string {
-        // 1. Try to get from vscode state if available (per-file persistence for current session)
+    private normalizeTheme(value: string): 'light' | 'dark' | 'vscode' {
+        if (value === 'dark' || value === 'light' || value === 'vscode') {
+            return value;
+        }
+        return 'vscode';
+    }
+
+    private getStoredTheme(): 'light' | 'dark' | 'vscode' {
         if (this.vscodeApi && typeof this.vscodeApi.getState === 'function') {
             const state = this.vscodeApi.getState();
-            if (state && state.theme) return state.theme;
+            if (state && typeof state.theme === 'string') {
+                return this.normalizeTheme(state.theme);
+            }
         }
 
-        // 2. Fallback to global localStorage (last used theme)
         try {
             const lastUsed = localStorage.getItem(this.options.persistKey!);
-            if (lastUsed && this.themes.includes(lastUsed)) return lastUsed;
-        } catch (e) { /* ignore */ }
+            if (lastUsed) {
+                return this.normalizeTheme(lastUsed);
+            }
+        } catch {
+            // ignore
+        }
 
         return 'vscode';
     }
 
-    private setStoredTheme(theme: string) {
-        // Always update vscode state for per-file consistency if available
+    private setStoredTheme(theme: 'light' | 'dark' | 'vscode') {
         if (this.vscodeApi && typeof this.vscodeApi.getState === 'function') {
             const state = this.vscodeApi.getState() || {};
             state.theme = theme;
             this.vscodeApi.setState(state);
         }
 
-        // Update global localStorage (last used theme)
         try {
             localStorage.setItem(this.options.persistKey!, theme);
-        } catch (e) { /* ignore */ }
+        } catch {
+            // ignore
+        }
     }
 
-    private applyTheme(theme: string, save = true) {
+    private applyTheme(theme: 'light' | 'dark' | 'vscode', save = true) {
         document.body.classList.remove('dark-mode', 'vscode-theme');
-        
+
         if (theme === 'dark') {
             document.body.classList.add('dark-mode');
         } else if (theme === 'vscode') {
@@ -89,19 +108,27 @@ export class ThemeManager {
     }
 
     private cycleTheme() {
-        if (typeof this.options.onBeforeCycle === 'function') {
-            if (this.options.onBeforeCycle() === false) return;
+        if (!this.button) {
+            return;
         }
+
         const current = this.getStoredTheme();
         const currentIndex = this.themes.indexOf(current);
-        const nextIndex = (currentIndex + 1) % this.themes.length;
-        const nextTheme = this.themes[nextIndex];
-        this.applyTheme(nextTheme);
+        const next = this.themes[(currentIndex + 1) % this.themes.length];
+        this.selectedIconOnLeft = !this.selectedIconOnLeft;
+
+        this.applyTheme(next);
     }
 
-    private updateIcons(currentTheme: string) {
-        const nextIndex = (this.themes.indexOf(currentTheme) + 1) % this.themes.length;
+    private updateIcons(currentTheme: 'light' | 'dark' | 'vscode') {
+        if (!this.button) {
+            return;
+        }
+
+        const currentIndex = this.themes.indexOf(currentTheme);
+        const nextIndex = (currentIndex + 1) % this.themes.length;
         const nextTheme = this.themes[nextIndex];
+        const secondaryTheme = nextTheme;
 
         const icons = {
             light: document.getElementById('lightIcon'),
@@ -109,41 +136,60 @@ export class ThemeManager {
             vscode: document.getElementById('vscodeIcon')
         };
 
-        // Hide all first
         Object.values(icons).forEach(icon => {
-            if (icon) icon.style.display = 'none';
+            if (icon) {
+                (icon as HTMLElement).style.display = 'none';
+                (icon as HTMLElement).classList.remove(
+                    'theme-icon-current',
+                    'theme-icon-next',
+                    'theme-icon-selected',
+                    'theme-icon-secondary',
+                    'theme-slot-left',
+                    'theme-slot-right'
+                );
+            }
         });
 
-        // Show the icon representing the *next* state (standard toggle behavior)
-        // or show the current state? 
-        // The original code showed the icon for the *next* theme to indicate what clicking does.
-        // Let's check the original code logic.
-        // Original: const nextTheme = this.themes[nextIndex]; ... if (icons[nextTheme]) icons[nextTheme].style.display = 'block';
-        
-        if (icons[nextTheme as keyof typeof icons]) {
-            (icons[nextTheme as keyof typeof icons] as HTMLElement).style.display = 'block';
+        const currentIcon = icons[currentTheme];
+        if (currentIcon) {
+            (currentIcon as HTMLElement).style.display = 'block';
+            (currentIcon as HTMLElement).classList.add(
+                'theme-icon-current',
+                'theme-icon-selected',
+                this.selectedIconOnLeft ? 'theme-slot-left' : 'theme-slot-right'
+            );
         }
-        
-        // Update title/tooltip
-        const currentName = currentTheme.charAt(0).toUpperCase() + currentTheme.slice(1);
-        const nextName = nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1);
-        const tooltipText = `Switch to <b>${nextName} theme</b> from ${currentName} theme`;
-        
-        const wrapper = this.button!.closest('.tooltip');
+
+        const secondaryIcon = icons[secondaryTheme];
+        if (secondaryIcon) {
+            (secondaryIcon as HTMLElement).style.display = 'block';
+            (secondaryIcon as HTMLElement).classList.add(
+                'theme-icon-next',
+                'theme-icon-secondary',
+                this.selectedIconOnLeft ? 'theme-slot-right' : 'theme-slot-left'
+            );
+        }
+
+        this.button.setAttribute('data-current-theme', currentTheme);
+        this.button.setAttribute('data-next-theme', nextTheme);
+        this.button.setAttribute('data-selected-side', this.selectedIconOnLeft ? 'left' : 'right');
+
+        const label = nextTheme === 'vscode' ? 'VS Code' : (nextTheme === 'dark' ? 'Dark' : 'Light');
+        const tooltipText = `Switch to <b>${label} theme</b>`;
+        const wrapper = this.button.closest('.tooltip');
         if (wrapper) {
             const tip = wrapper.querySelector('.tooltiptext');
-            if (tip) tip.innerHTML = tooltipText;
+            if (tip) {
+                tip.innerHTML = tooltipText;
+            }
         } else {
-            this.button!.title = tooltipText;
+            this.button.title = `Switch to ${label} theme`;
         }
     }
 
-    private handleVsCodeThemeChange(kind: number) {
-        // kind: 1 = Light, 2 = Dark, 3 = High Contrast
-        // Only relevant if we are in 'vscode' mode
+    private handleVsCodeThemeChange(_kind: number) {
         if (this.getStoredTheme() === 'vscode') {
-            // We don't need to do anything because CSS handles .vscode-theme
-            // But we might want to update internal state if we were tracking it
+            this.applyTheme('vscode', false);
         }
     }
 }

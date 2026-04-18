@@ -1,0 +1,206 @@
+/* Shared grid structure for CSV/TSV/XLSX webviews */
+#csv-table,
+#xlsxTable {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+#csv-table th,
+#csv-table td,
+#xlsxTable th,
+#xlsxTable td {
+    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    border-left: none;
+    border-top: none;
+    padding: 0 6px;
+    box-sizing: border-box;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    position: relative;
+    cursor: cell;
+    font-family: var(--font-family);
+    font-size: 12px;
+    line-height: 24px;
+    height: 24px;
+    max-width: 200px;
+    color: var(--text-color);
+}
+
+tbody th:first-child,
+tbody td:first-child,
+thead th:first-child {
+    width: auto !important;
+    min-width: var(--row-header-width, 40px) !important;
+    max-width: none !important;
+    background-color: var(--header-bg);
+    text-align: center;
+    color: var(--text-muted);
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+    position: sticky;
+    left: 0 !important;
+    z-index: 20;
+    border-right: 1px solid var(--border-color);
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+th.row-header {
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 20;
+    width: auto !important;
+    max-width: none !important;
+}
+
+th.col-header {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 10;
+    background-color: var(--header-bg);
+}
+
+th.corner-cell,
+thead th:first-child {
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    z-index: 40 !important;
+    background-color: var(--header-bg);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.table-scroll {
+    position: relative;
+    isolation: isolate;
+}
+
+/* Shared interaction visuals for CSV/TSV/XLSX */
+/* Create a pseudo-element for selection overlay and borders so we don't clobber inline styles */
+td.selected::before,
+td.column-selected::before,
+td.row-selected::before,
+td:hover::before,
+td.selection-top::before,
+td.selection-bottom::before,
+td.selection-left::before,
+td.selection-right::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 0;
+    pointer-events: none;
+    box-sizing: border-box;
+    z-index: 5;
+}
+
+/* Background overlays */
+td.selected::before,
+td.column-selected::before,
+td.row-selected::before {
+    background-color: var(--cell-selection-overlay, color-mix(in srgb, var(--accent-color) 14%, transparent));
+}
+
+td:hover::before {
+    background-color: var(--cell-hover-overlay, color-mix(in srgb, var(--row-hover-bg) 70%, transparent));
+}
+
+td.selected:hover::before,
+td.column-selected:hover::before,
+td.row-selected:hover::before {
+    background-color: var(--cell-selection-overlay, color-mix(in srgb, var(--accent-color) 14%, transparent));
+}
+
+/* VS Code webview host may inject list hover foreground; keep table text color stable on hover. */
+body.vscode-theme #csv-table tbody tr:hover td {
+    color: var(--text-color) !important;
+}
+
+/* Active cell selection outline and background exception */
+td.active-cell::before {
+    background-color: transparent !important;
+}
+
+td.active-cell {
+    outline: 2px solid var(--accent-color) !important;
+    outline-offset: -2px;
+    z-index: 6;
+}
+
+th.col-header,
+th.row-header {
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease;
+}
+
+th.col-header:hover,
+th.row-header:hover {
+    background-color: var(--header-hover-bg);
+}
+
+th.column-selected,
+th.row-selected,
+th.corner-cell.column-selected,
+th.corner-cell.row-selected,
+th.corner-cell.selected {
+    background-color: var(--accent-color) !important;
+    color: var(--contrast-text) !important;
+}
+
+th.column-selected-implied,
+th.row-selected-implied {
+    background-color: color-mix(in srgb, var(--accent-color) 20%, var(--header-bg)) !important;
+    color: var(--text-color) !important;
+}
+
+@keyframes sharedCopyFlash {
+    0% {
+        box-shadow: inset 0 0 0 0 transparent;
+    }
+
+    50% {
+        box-shadow: inset 0 0 0 9999px var(--copy-flash-overlay, color-mix(in srgb, var(--accent-color) 18%, transparent));
+    }
+
+    100% {
+        box-shadow: inset 0 0 0 0 transparent;
+    }
+}
+
+td.copying {
+    animation: sharedCopyFlash 0.28s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+td.selection-top::before {
+    border-top: 1px solid var(--accent-color) !important;
+}
+
+td.selection-bottom::before {
+    border-bottom: 1px solid var(--accent-color) !important;
+}
+
+td.selection-left::before {
+    border-left: 1px solid var(--accent-color) !important;
+}
+
+td.selection-right::before {
+    border-right: 1px solid var(--accent-color) !important;
+}
+
+td.selected.selection-bottom.selection-right::after {
+    content: '';
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    width: 6px;
+    height: 6px;
+    background: var(--accent-color);
+    border: 1px solid var(--bg-color);
+    border-radius: 0;
+    cursor: crosshair;
+    z-index: 10;
+}

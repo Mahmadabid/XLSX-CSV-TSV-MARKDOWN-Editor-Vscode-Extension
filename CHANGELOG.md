@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.8.5 - UI Polish & New Features
+- Changed the theme toggle button to a pill-shaped toggle.
+- Added support for checkbox, dropdown, rating and date in xlsx.
+- Repolished the table UI.
+- Added autosave in settings for csv, tsv and xlsx.
+- Fixed the bug where the toolbar wouldn't occupy full width of the editor when the window is scrolled.
+- Added support for images in xlsx.
+
 ## v1.8.4 - Google Sheets-Style Editing Features
 - Added Find in the toolbar for CSV, TSV, and XLSX.
 - Added text alignment (horizontal and vertical), borders, font size, font family, wrap text strikethrough, painter, clear formatting, and merge cell controls in XLSX edit mode.

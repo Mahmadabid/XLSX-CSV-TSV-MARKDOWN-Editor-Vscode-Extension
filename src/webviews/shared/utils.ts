@@ -1,5 +1,7 @@
 
 export class Utils {
+    private static toastHideTimer: ReturnType<typeof setTimeout> | null = null;
+
     static $(id: string): HTMLElement | null {
         return document.getElementById(id);
     }
@@ -15,7 +17,7 @@ export class Utils {
         return div.innerHTML;
     }
 
-    static showToast(message: string, isAutosave = false) {
+    static showToast(message: string, isAutosave = false, durationMs?: number) {
         let toast = document.getElementById('saveToast');
         if (!toast) {
             toast = document.createElement('div');
@@ -42,9 +44,13 @@ export class Utils {
         }
         
         toast.classList.add('show');
-        setTimeout(() => {
+        if (Utils.toastHideTimer) {
+            clearTimeout(Utils.toastHideTimer);
+        }
+        Utils.toastHideTimer = setTimeout(() => {
             toast?.classList.remove('show');
-        }, isAutosave ? 1000 : 3000);
+            Utils.toastHideTimer = null;
+        }, typeof durationMs === 'number' ? durationMs : (isAutosave ? 1000 : 3000));
     }
 
     static async writeToClipboardAsync(text: string): Promise<boolean> {

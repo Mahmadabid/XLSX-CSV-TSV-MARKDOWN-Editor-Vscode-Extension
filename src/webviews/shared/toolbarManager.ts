@@ -25,19 +25,29 @@ export class ToolbarManager {
     applyStickyLayout(stickyToolbar: boolean, contentId: string = 'content', scrollQuery: string = '.table-scroll') {
         this.isSticky = stickyToolbar;
         const container = this.container;
+        const wrapper = container.parentElement && container.parentElement.classList.contains('toolbar-wrapper')
+            ? container.parentElement as HTMLElement
+            : null;
+        const layoutHost = wrapper || container;
         const content = document.getElementById(contentId);
         const scrollArea = document.querySelector(scrollQuery);
         const headerBg = document.querySelector('.header-background') as HTMLElement | null;
 
+        container.classList.remove('hidden');
+        container.style.removeProperty('display');
+        if (!container.style.display) {
+            container.style.display = 'flex';
+        }
+
         if (stickyToolbar) {
             document.body.classList.add('sticky-toolbar-enabled');
-            if (container.parentNode !== document.body) {
+            if (layoutHost.parentNode !== document.body) {
                 if (content && content.parentNode === document.body) {
-                    document.body.insertBefore(container, content);
+                    document.body.insertBefore(layoutHost, content);
                 } else if (document.body.firstChild) {
-                    document.body.insertBefore(container, document.body.firstChild);
+                    document.body.insertBefore(layoutHost, document.body.firstChild);
                 } else {
-                    document.body.appendChild(container);
+                    document.body.appendChild(layoutHost);
                 }
             }
             container.classList.remove('not-sticky');
@@ -50,9 +60,16 @@ export class ToolbarManager {
             }
         } else {
             document.body.classList.remove('sticky-toolbar-enabled');
-            const target = scrollArea || content || document.body;
-            if (target && container.parentNode !== target) {
-                target.insertBefore(container, target.firstChild);
+            const targetParent = content || document.body;
+            const scrollElement = scrollArea instanceof HTMLElement ? scrollArea : null;
+            if (targetParent) {
+                if (scrollElement && scrollElement.parentElement === targetParent) {
+                    if (layoutHost.parentNode !== targetParent || layoutHost.nextSibling !== scrollElement) {
+                        targetParent.insertBefore(layoutHost, scrollElement);
+                    }
+                } else if (layoutHost.parentNode !== targetParent) {
+                    targetParent.insertBefore(layoutHost, targetParent.firstChild);
+                }
             }
             container.classList.add('not-sticky');
             container.classList.remove('expanded-toolbar');

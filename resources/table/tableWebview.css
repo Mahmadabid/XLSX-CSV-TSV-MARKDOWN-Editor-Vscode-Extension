@@ -1,3 +1,5 @@
+@import url("../shared/tableStructure.css");
+
 * {
     box-sizing: border-box;
 }
@@ -29,7 +31,6 @@ body.edit-mode #content {
     outline-offset: -2px;
     border-radius: 8px;
     margin: 4px;
-    overflow: visible;
     position: relative;
     z-index: 1;
 }
@@ -37,7 +38,12 @@ body.edit-mode #content {
 #content {
     position: relative;
     z-index: 1;
-    height: calc(100vh - var(--header-height));
+    height: calc(100vh - var(--header-height) - 8px);
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    margin: 4px;
+    box-sizing: border-box;
 }
 
 table {
@@ -56,23 +62,6 @@ table {
     background-color: var(--bg-color);
 } 
 
-#csv-table th,
-#csv-table td {
-    border: 1px solid var(--border-color);
-    padding: 2px 6px;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    position: relative;
-    cursor: cell;
-    font-family: Arial, sans-serif;
-    font-size: 10pt;
-    line-height: normal;
-    height: 21px;
-    max-width: 200px;
-}
-
 body.spacious-cells th,
 body.spacious-cells td {
     padding: 2px 6px;
@@ -87,59 +76,18 @@ body.expanded-mode td {
 
 th {
     background-color: var(--header-bg);
-    font-weight: normal;
-    color: var(--text-color);
+    font-weight: 500;
+    color: var(--text-muted);
     text-align: center;
 }
 
-th.col-header {
-    position: sticky !important;
-    top: 0;
-    z-index: 10;
-    background-color: var(--header-bg);
-}
-
 .table-scroll {
-    height: calc(100vh - var(--header-height));
+    height: 100%;
     max-height: none;
     overflow: auto;
     position: relative;
     -webkit-overflow-scrolling: touch;
 } 
-
-tbody th:first-child,
-tbody td:first-child,
-thead th:first-child {
-    /* Allow the row header to grow with content but keep a sensible minimum */
-    width: auto !important;
-    min-width: 30px !important;
-    background-color: var(--header-bg);
-    text-align: center;
-    color: var(--text-color);
-    font-feature-settings: "tnum";
-    font-variant-numeric: tabular-nums;
-    position: sticky;
-    left: 0;
-    z-index: 20;
-    border-right: 2px solid var(--border-color);
-    white-space: nowrap;
-    overflow: visible;
-    text-overflow: clip;
-} 
-
-th.row-header {
-    position: sticky !important;
-    left: 0;
-    z-index: 20;
-}
-
-thead th:first-child {
-    position: sticky;
-    top: 0;
-    left: 0;
-    z-index: 30;
-    background-color: var(--header-bg);
-}
 
 body.first-row-as-header tbody tr.header-row td {
     font-weight: 700;
@@ -191,30 +139,6 @@ td span.cell-content {
 }
 
 /* Tooltip Styling */
-/* Selection Styles */
-td.selected {
-    background-color: var(--selection-bg) !important;
-    z-index: 5;
-}
-
-td.active-cell {
-    border: 2px solid var(--selection-border) !important;
-    background-color: transparent !important;
-    z-index: 6;
-}
-
-td.active-cell::after {
-    content: '';
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    width: 6px;
-    height: 6px;
-    background: var(--accent-color);
-    border: 1px solid var(--vscode-editor-background);
-    border-radius: 0;
-    cursor: crosshair;
-}
 
 td.history-flash {
     animation: historyFlash 0.7s ease;
@@ -228,37 +152,6 @@ td.history-flash {
     100% {
         box-shadow: inset 0 0 0 2px var(--selection-border), 0 0 0 12px rgba(0, 127, 212, 0);
     }
-}
-
-/* Row/Column Selection */
-td.column-selected {
-    background-color: var(--selection-bg) !important;
-}
-
-th.column-selected {
-    background-color: var(--accent-color) !important;
-    color: var(--contrast-text) !important;
-}
-
-td.row-selected {
-    background-color: var(--selection-bg) !important;
-}
-
-th.row-selected {
-    background-color: var(--accent-color) !important;
-    color: var(--contrast-text) !important;
-}
-
-th.col-header,
-th.row-header {
-    cursor: pointer;
-    user-select: none;
-    transition: background-color 0.15s ease;
-}
-
-th.col-header:hover,
-th.row-header:hover {
-    background-color: var(--header-hover-bg);
 }
 
 .col-resize-handle {
@@ -275,32 +168,8 @@ th.row-header:hover {
     background-color: var(--vscode-focusBorder, #007fd4);
 }
 
-/* Copy Animation */
-td.copying {
-    animation: copyFlash 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-
-@keyframes copyFlash {
-    0% {
-        background-color: inherit;
-    }
-
-    50% {
-        background-color: var(--accent-bg);
-        opacity: 0.8;
-    }
-
-    100% {
-        background-color: inherit;
-    }
-}
-
 ::selection {
     background-color: var(--selection-bg);
-}
-
-td:hover {
-    background-color: var(--row-hover-bg) !important;
 }
 
 /* Selection Info Overlay */
@@ -333,7 +202,7 @@ body.edit-mode td {
 }
 
 body.edit-mode .table-scroll {
-    height: calc(100vh - 56px);
+    height: 100%;
 }
 
 td[contenteditable="true"] {
@@ -518,14 +387,6 @@ body.preview-mode td {
     box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-color) 62%, transparent);
 }
 
-/* Virtual scrolling styles */
-.table-scroll {
-    height: calc(100vh - var(--header-height)); /* Adjust based on toolbar height */
-    overflow-y: auto;
-    overflow-x: auto;
-    position: relative;
-}
-
 .virtual-spacer td {
     padding: 0 !important;
     border: none !important;
@@ -615,61 +476,3 @@ body.spacious-cells #csv-table tbody tr:not(.virtual-spacer) th {
     margin: 4px 0;
 }
 
-/* --------------------------------------------------------- */
-/*                  Custom Scrollbar Styling                 */
-/*  - Scoped to the scroll containers used by the CSV view    */
-/*  - Adds Firefox-compatible rules and uses theme variables  */
-/* --------------------------------------------------------- */
-
-#tableContainer,
-.table-scroll {
-    /* Firefox */
-    scrollbar-width: thin; /* small thumb */
-    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); /* thumb track */
-}
-
-/* WebKit-based browsers (Chrome, Edge, Safari) */
-#tableContainer::-webkit-scrollbar,
-.table-scroll::-webkit-scrollbar {
-    width: 10px;   /* vertical scrollbar clickable area */
-    height: 10px;  /* horizontal scrollbar height */
-}
-
-#tableContainer::-webkit-scrollbar-track,
-.table-scroll::-webkit-scrollbar-track {
-    background: var(--scrollbar-track);
-}
-
-#tableContainer::-webkit-scrollbar-thumb,
-.table-scroll::-webkit-scrollbar-thumb {
-    background-color: var(--scrollbar-thumb);
-    border: 3px solid transparent; /* keeps hit area large while making thumb visually thin */
-    background-clip: content-box;
-    border-radius: 10px;
-}
-
-#tableContainer::-webkit-scrollbar-thumb:hover,
-.table-scroll::-webkit-scrollbar-thumb:hover {
-    background-color: var(--scrollbar-thumb-hover);
-}
-
-#tableContainer::-webkit-scrollbar-button,
-.table-scroll::-webkit-scrollbar-button,
-#tableContainer::-webkit-scrollbar-corner,
-.table-scroll::-webkit-scrollbar-corner {
-    display: none;
-    background: transparent;
-}
-
-/* Notes:
-   - macOS may hide scrollbars by system preference (they still exist but auto-hide).
-   - Make sure the scrolling element has the class `table-scroll` or id `tableContainer`; toolbar should be `.toolbar`.
-*/
-
-/* Fix non-sticky toolbar gap at bottom */
-body:not(.sticky-toolbar-enabled) #content {
-    height: 100vh;
-}
-body:not(.sticky-toolbar-enabled) .table-scroll {
-    height: 100vh;
-}

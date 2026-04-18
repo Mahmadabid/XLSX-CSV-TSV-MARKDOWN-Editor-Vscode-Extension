@@ -379,6 +379,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 firstRowIsHeader: cfg.get('csv.firstRowIsHeader', false),
                                 stickyHeader: cfg.get('csv.stickyHeader', false),
                                 stickyToolbar: cfg.get('csv.stickyToolbar', true),
+                                autoSave: cfg.get('csv.autoSave', true),
                                 spaciousCells: cfg.get('csv.spaciousCells', false),
                                 isDefaultEditor: isDefault
                             };
@@ -427,6 +428,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('csv.firstRowIsHeader', !!s.firstRowIsHeader, vscode.ConfigurationTarget.Global);
                             await cfg.update('csv.stickyHeader', !!s.stickyHeader, vscode.ConfigurationTarget.Global);
                             await cfg.update('csv.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
+                            await cfg.update('csv.autoSave', s.autoSave !== false, vscode.ConfigurationTarget.Global);
                             await cfg.update('csv.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
@@ -444,6 +446,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 firstRowIsHeader: cfg_e.get('csv.firstRowIsHeader', false),
                                 stickyHeader: cfg_e.get('csv.stickyHeader', false),
                                 stickyToolbar: cfg_e.get('csv.stickyToolbar', true),
+                                autoSave: cfg_e.get('csv.autoSave', true),
                                 spaciousCells: cfg_e.get('csv.spaciousCells', false),
                                 isDefaultEditor: true
                             }
@@ -759,6 +762,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         firstRowIsHeader: cfg.get('csv.firstRowIsHeader', false),
                         stickyHeader: cfg.get('csv.stickyHeader', false),
                         stickyToolbar: cfg.get('csv.stickyToolbar', true),
+                        autoSave: cfg.get('csv.autoSave', true),
                         spaciousCells: cfg.get('csv.spaciousCells', false),
                         isDefaultEditor: isDefault
                     };
@@ -819,7 +823,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
         </head>
         <body>
             <div class="header-background"></div>
-            <div class="toolbar" id="toolbar"></div>
+            <div class="toolbar-wrapper"><div class="toolbar" id="toolbar"></div></div>
             <div id="content">
                 <div id="loadingIndicator" class="loading-indicator">Loading CSV...</div>
                 <div class="table-scroll" id="tableContainer">

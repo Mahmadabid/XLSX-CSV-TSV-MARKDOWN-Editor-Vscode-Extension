@@ -1,3 +1,5 @@
+@import url("../shared/tableStructure.css");
+
 * {
     box-sizing: border-box;
 }
@@ -21,22 +23,6 @@ body {
 
 body.sticky-toolbar-enabled {
     padding-top: var(--header-height);
-}
-
-/* Sticky toolbar parity with CSV */
-body:not(.sticky-toolbar-enabled),
-body.sticky-toolbar-disabled {
-    padding-top: 0;
-}
-
-body:not(.sticky-toolbar-enabled) .header-background,
-body.sticky-toolbar-disabled .header-background {
-    display: none;
-}
-
-body:not(.sticky-toolbar-enabled) .table-scroll,
-body.sticky-toolbar-disabled .table-scroll {
-    max-height: calc(100vh);
 }
 
 .sheet-selector {
@@ -281,6 +267,21 @@ td[data-hyperlink] {
     transform: translate(-50%, -50%) scale(1);
 }
 
+.toast-notification.autosave-toast {
+    top: auto;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) scale(0.9);
+}
+
+.toast-notification.autosave-toast.show {
+    transform: translateX(-50%) scale(1);
+}
+
+.toast-notification:not(.autosave-toast).show {
+    transform: translate(-50%, -50%) scale(1);
+}
+
 .version-preview-banner {
     display: flex;
     align-items: center;
@@ -344,8 +345,7 @@ body.edit-mode #content {
     outline: 3px solid var(--accent-color);
     outline-offset: -2px;
     border-radius: 8px;
-    margin: 4px 4px 12px 4px;
-    overflow: visible;
+    margin: 4px;
     position: relative;
     z-index: 1;
 }
@@ -382,46 +382,25 @@ body.edit-mode #xlsxTable td[contenteditable="true"] .cell-content {
 #content {
     position: relative;
     z-index: 1;
-    height: calc(100vh - var(--header-height));
+    height: calc(100vh - var(--header-height) - 8px);
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    margin: 4px;
+    box-sizing: border-box;
+}
+
+#tableContainer {
+    height: 100%;
+    min-height: 0;
 }
 
 .table-scroll {
-    height: calc(100vh - var(--header-height));
+    height: 100%;
     width: 100%;
     overflow: auto;
     position: relative;
     -webkit-overflow-scrolling: touch;
-}
-
-.table-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-}
-
-.table-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-}
-
-.table-scroll::-webkit-scrollbar-track {
-    background: var(--scrollbar-track);
-}
-
-.table-scroll::-webkit-scrollbar-thumb {
-    background-color: var(--scrollbar-thumb);
-    border: 3px solid transparent;
-    background-clip: content-box;
-    border-radius: 10px;
-}
-
-.table-scroll::-webkit-scrollbar-thumb:hover {
-    background-color: var(--scrollbar-thumb-hover);
-}
-
-.table-scroll::-webkit-scrollbar-button,
-.table-scroll::-webkit-scrollbar-corner {
-    display: none;
-    background: transparent;
 }
 
 /* Table */
@@ -439,33 +418,18 @@ table {
     background-color: var(--bg-color);
 }
 
-#xlsxTable th,
-#xlsxTable td {
-    border: 1px solid var(--border-color);
-    padding: 2px 6px;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    position: relative;
-    cursor: cell;
-    font-family: Arial, sans-serif;
-    font-size: 10pt;
-    line-height: normal;
-    height: 21px;
-    max-width: 200px;
-}
-
 body.spacious-cells #xlsxTable td {
     padding: 2px 6px;
-    height: 32px !important;
-    font-size: 10.5pt;
+    height: 28px !important;
+    line-height: 24px;
+    font-size: 12.5px;
 }
 
 body.spacious-cells #xlsxTable th {
     padding: 2px 6px;
-    height: 26px !important;
-    font-size: 10.5pt;
+    height: 28px !important;
+    line-height: 24px;
+    font-size: 12.5px;
 }
 
 body.expanded-mode table {
@@ -481,61 +445,22 @@ body.expanded-mode td {
 
 th {
     background-color: var(--header-bg);
-    font-weight: normal;
-    color: var(--text-color);
+    font-weight: 500;
+    color: var(--text-muted);
     text-align: center;
-}
-
-tbody th:first-child,
-tbody td:first-child,
-thead th:first-child {
-    width: auto !important;
-    min-width: 30px !important;
-    background-color: var(--header-bg);
-    text-align: center;
-    color: var(--text-color);
-    font-feature-settings: "tnum";
-    font-variant-numeric: tabular-nums;
-    position: sticky;
-    left: 0;
-    z-index: 20;
-    border-right: 2px solid var(--border-color);
-    white-space: nowrap;
-    overflow: visible;
-    text-overflow: clip;
-}
-
-thead th:first-child {
-    position: sticky;
-    top: 0;
-    left: 0;
-    z-index: 30;
-    background-color: var(--header-bg);
 }
 
 /* Excel-like headers */
 th.row-header,
 th.col-header {
     background-color: var(--header-bg);
-    color: var(--text-color);
-    font-weight: normal;
-    font-size: 10pt;
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 12px;
     text-align: center;
     user-select: none;
     cursor: pointer;
-}
-
-th.row-header {
-    position: sticky !important;
-    left: 0;
-    z-index: 20;
-}
-
-th.col-header {
-    position: sticky !important;
-    top: 0;
-    z-index: 10;
-    background-color: var(--header-bg);
+    max-width: 200px;
 }
 
 th.row-header:hover,
@@ -546,7 +471,7 @@ th.col-header:hover {
 /* Resize handles */
 .col-resize-handle {
     position: absolute;
-    top: 0;
+    top: 0 !important;
     right: -2px;
     width: 4px;
     height: 100%;
@@ -562,7 +487,7 @@ th.col-header:hover {
 .row-resize-handle {
     position: absolute;
     bottom: -2px;
-    left: 0;
+    left: 0 !important;
     width: 100%;
     height: 4px;
     cursor: row-resize;
@@ -580,14 +505,20 @@ td {
     color: var(--text-color);
     padding: 2px 6px;
     vertical-align: top;
-}
-
-th.col-header,
-td {
     max-width: 200px;
 }
 
 td[style*="border"] {
+    z-index: 2;
+}
+
+/* Keep shared hover/selection tint under XLSX content so text color stays visually stable. */
+#xlsxTable td::before {
+    z-index: 1 !important;
+}
+
+#xlsxTable td > .cell-content {
+    position: relative;
     z-index: 2;
 }
 
@@ -597,7 +528,7 @@ body.dark-mode td[data-default-bg="true"] {
     background-color: var(--bg-color) !important;
 }
 
-body.dark-mode td[data-default-color="true"] {
+body.dark-mode td[data-default-color="true"][data-default-bg="true"] {
     color: var(--text-color) !important;
 }
 
@@ -629,6 +560,10 @@ body.vscode-theme td[data-default-bg="true"] {
 }
 
 body.vscode-theme td[data-default-color="true"] {
+    color: var(--text-color) !important;
+}
+
+body.vscode-theme #xlsxTable tbody tr:hover td[data-default-color="true"] {
     color: var(--text-color) !important;
 }
 
@@ -681,82 +616,6 @@ td[style*="text-align: center"] .cell-content {
     text-align: center;
 }
 
-/* Selection styles (Styled Mode - Preserves inline background colors using translucent overlays) */
-td.selected {
-    box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--selection-bg) 55%, transparent) !important;
-    background-color: transparent; /* fallback if inline bg isn't set */
-    z-index: 5;
-}
-
-td.active-cell {
-    outline: 2px solid var(--selection-border);
-    outline-offset: -2px;
-    z-index: 6;
-}
-
-td.active-cell::after {
-    content: '';
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    width: 6px;
-    height: 6px;
-    background: var(--accent-color);
-    border: 1px solid var(--vscode-editor-background);
-    border-radius: 0;
-    cursor: crosshair;
-}
-
-/* Row/Column selection */
-td.column-selected,
-td.row-selected {
-    box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--selection-bg) 55%, transparent) !important;
-    background-color: transparent;
-}
-
-td:hover {
-    box-shadow: inset 0 0 0 1000px color-mix(in srgb, var(--row-hover-bg) 45%, transparent) !important;
-    background-color: transparent;
-}
-
-/* Header cells: make selected headers darker and readable (match CSV behavior) */
-th.column-selected {
-    background-color: var(--accent-color) !important;
-    color: var(--contrast-text) !important;
-}
-
-th.row-selected {
-    background-color: var(--accent-color) !important;
-    color: var(--contrast-text) !important;
-}
-
-/* Corner cell when selected */
-th.corner-cell.column-selected,
-th.corner-cell.row-selected,
-th.corner-cell.selected {
-    background-color: var(--accent-color) !important;
-    color: var(--contrast-text) !important;
-}
-
-/* Copy animation */
-@keyframes copyFlash {
-    0% {
-        box-shadow: none;
-    }
-
-    50% {
-        box-shadow: inset 0 0 0 1000px var(--copy-flash-bg) !important;
-    }
-
-    100% {
-        box-shadow: none;
-    }
-}
-
-td.copying {
-    animation: copyFlash 0.2s ease-in-out;
-}
-
 /* Selection info */
 .selection-info {
     position: fixed;
@@ -779,9 +638,6 @@ td.copying {
 th.corner-cell {
     background-color: var(--header-bg);
     cursor: pointer;
-    width: var(--row-header-width);
-    min-width: var(--row-header-width);
-    max-width: var(--row-header-width);
 }
 
 /* Cell content wrapper */
@@ -800,12 +656,316 @@ th.corner-cell {
     z-index: 2;
 }
 
+.cell-content.cell-checkbox-content,
+.cell-content.cell-dropdown-content,
+.cell-content.cell-image-content,
+.cell-content.cell-rating-content,
+.cell-content.cell-date-content {
+    pointer-events: auto;
+    align-items: center;
+    gap: 6px;
+}
+
+.cell-content.cell-image-content {
+    justify-content: flex-start;
+}
+
+.xlsx-cell-checkbox {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent-color);
+    pointer-events: auto;
+}
+
+.checkbox-value {
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+}
+
+.xlsx-cell-dropdown {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    height: 22px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    font-size: 11px;
+    padding: 0 4px;
+    pointer-events: auto;
+}
+
+.xlsx-cell-dropdown:focus {
+    outline: 1px solid var(--accent-color);
+}
+
+.xlsx-dropdown-edit-button {
+    flex: 0 0 auto;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color);
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.xlsx-dropdown-edit-button:hover {
+    color: var(--text-color);
+    border-color: var(--accent-color);
+    background: var(--accent-bg);
+}
+
+.xlsx-dropdown-edit-button:focus {
+    outline: 1px solid var(--accent-color);
+}
+
+body:not(.edit-mode) .xlsx-dropdown-edit-button {
+    display: none;
+}
+
+.cell-content.cell-rating-content {
+    gap: 4px;
+}
+
+.xlsx-rating-star {
+    border: none;
+    background: transparent;
+    color: color-mix(in srgb, var(--text-muted) 70%, transparent);
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.xlsx-rating-star.active {
+    color: #f2b200;
+}
+
+.rating-value {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 10px;
+    text-align: left;
+}
+
+.xlsx-cell-date {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    height: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    font-size: 11px;
+    padding: 0 1px;
+}
+
+.xlsx-cell-date:focus {
+    outline: 1px solid var(--accent-color);
+}
+
+.xlsx-cell-image {
+    max-width: 100%;
+    max-height: 46px;
+    object-fit: contain;
+    border-radius: 3px;
+    pointer-events: auto;
+    cursor: zoom-in;
+}
+
+.cell-image-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body:not(.edit-mode):not(.controls-editable-outside-edit-mode) .xlsx-cell-checkbox,
+body:not(.edit-mode):not(.controls-editable-outside-edit-mode) .xlsx-cell-dropdown,
+body:not(.edit-mode):not(.controls-editable-outside-edit-mode) .xlsx-rating-star,
+body:not(.edit-mode):not(.controls-editable-outside-edit-mode) .xlsx-cell-date {
+    pointer-events: none;
+}
+
+body:not(.edit-mode):not(.controls-editable-outside-edit-mode) .xlsx-cell-date,
+body:not(.edit-mode):not(.controls-editable-outside-edit-mode) .xlsx-cell-dropdown {
+    border-color: transparent;
+    background: transparent;
+    padding: 0;
+    appearance: none;
+}
+
+.xlsx-image-preview-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200220;
+    background: color-mix(in srgb, var(--vscode-editor-background) 24%, rgba(0, 0, 0, 0.76));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+}
+
+.xlsx-image-preview-dialog {
+    width: min(1100px, calc(100vw - 36px));
+    max-height: calc(100vh - 36px);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--overlay-bg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.xlsx-image-preview-close {
+    align-self: flex-end;
+    margin: 8px 10px 0 0;
+    padding: 5px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.xlsx-image-preview-image {
+    width: 100%;
+    height: auto;
+    max-height: calc(100vh - 96px);
+    object-fit: contain;
+    display: block;
+    padding: 10px 16px 16px;
+}
+
+body.image-preview-open {
+    overflow: hidden;
+}
+
 body:not(.edit-mode) #xlsxTable td .cell-content {
     display: block;
     max-width: 100%;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
+}
+
+body:not(.edit-mode) #xlsxTable td .cell-content.cell-checkbox-content,
+body:not(.edit-mode) #xlsxTable td .cell-content.cell-dropdown-content,
+body:not(.edit-mode) #xlsxTable td .cell-content.cell-image-content,
+body:not(.edit-mode) #xlsxTable td .cell-content.cell-rating-content,
+body:not(.edit-mode) #xlsxTable td .cell-content.cell-date-content {
+    display: flex;
+}
+
+.xlsx-insert-control-popup {
+    position: fixed;
+    z-index: 10040;
+    min-width: 220px;
+    padding: 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--glass-bg-strong);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+.insert-control-title {
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 2px 6px 8px;
+}
+
+.insert-control-item {
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--text-color);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.insert-control-item:hover {
+    background: var(--row-hover-bg);
+}
+
+.xlsx-dropdown-options-popup {
+    position: fixed;
+    inset: 0;
+    z-index: 10060;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.28);
+}
+
+.xlsx-dropdown-options-dialog {
+    width: min(420px, calc(100vw - 28px));
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    box-shadow: var(--shadow-lg);
+    padding: 14px;
+}
+
+.dropdown-options-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 4px;
+}
+
+.dropdown-options-message {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+.dropdown-options-input {
+    width: 100%;
+    min-height: 140px;
+    max-height: 240px;
+    resize: vertical;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--input-bg);
+    color: var(--text-color);
+    padding: 8px 10px;
+    font-family: var(--font-family);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.dropdown-options-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 44%, transparent);
+}
+
+.dropdown-options-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
 body:not(.edit-mode) #xlsxTable td {
@@ -1011,7 +1171,7 @@ body.spacious-cells.sticky-header-enabled tbody tr.header-row th {
 body.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky !important;
     top: 21px;
-    left: 0;
+    left: 0 !important;
     z-index: 20;
     background-color: var(--header-bg);
 }
@@ -1019,7 +1179,7 @@ body.sticky-header-enabled tbody tr.header-row th.row-header {
 body.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky !important;
     top: 21px;
-    left: 0;
+    left: 0 !important;
     z-index: 20;
     background-color: var(--header-bg);
 }
@@ -1027,8 +1187,8 @@ body.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
 /* Loading overlay */
 .loading-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
+    top: 0 !important;
+    left: 0 !important;
     width: 100%;
     height: 100%;
     background-color: var(--glass-bg-strong);
@@ -1151,27 +1311,10 @@ body.plain-view table {
     background-color: var(--bg-color);
 }
 
-body.plain-view th,
-body.plain-view td {
-    border: 1px solid var(--border-color);
-    padding: 2px 6px;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    position: relative;
-    cursor: cell;
-    font-family: Arial, sans-serif;
-    font-size: 10pt;
-    line-height: normal;
-    height: 21px;
-    max-width: 200px;
-}
-
 body.plain-view.spacious-cells #xlsxTable th,
 body.plain-view.spacious-cells #xlsxTable td {
-    height: 28px;
-    line-height: 28px;
+    height: 24px;
+    line-height: 24px;
     padding: 2px 6px;
     box-sizing: border-box;
     font-size: 10.5pt;
@@ -1179,49 +1322,9 @@ body.plain-view.spacious-cells #xlsxTable td {
 
 body.plain-view th {
     background-color: var(--header-bg);
-    font-weight: normal;
-    color: var(--text-color);
+    font-weight: 500;
+    color: var(--text-muted);
     text-align: center;
-}
-
-body.plain-view th.col-header {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    background-color: var(--header-bg);
-}
-
-tbody th:first-child,
-tbody td:first-child,
-thead th:first-child {
-    width: auto;
-    min-width: 30px;
-    background-color: var(--header-bg);
-    text-align: center;
-    color: var(--text-color);
-    font-feature-settings: "tnum";
-    font-variant-numeric: tabular-nums;
-    position: sticky;
-    left: 0;
-    z-index: 20;
-    border-right: 2px solid var(--border-color);
-    white-space: nowrap;
-    overflow: visible;
-    text-overflow: clip;
-}
-
-body.plain-view th.row-header {
-    position: sticky;
-    left: 0;
-    z-index: 20;
-}
-
-body.plain-view thead th:first-child {
-    position: sticky;
-    top: 0;
-    left: 0;
-    z-index: 30;
-    background-color: var(--header-bg);
 }
 
 body.plain-view td {
@@ -1244,40 +1347,6 @@ body.plain-view td span.cell-content {
     pointer-events: none;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-body.plain-view td.selected {
-    background-color: var(--selection-bg) !important;
-    z-index: 5;
-}
-
-body.plain-view td.active-cell {
-    outline: 2px solid var(--selection-border);
-    outline-offset: -2px;
-    background-color: transparent !important;
-    z-index: 6;
-}
-
-body.plain-view td.active-cell::after {
-    content: "";
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    width: 6px;
-    height: 6px;
-    background: var(--accent-color);
-    border: 1px solid var(--vscode-editor-background);
-    border-radius: 0;
-    cursor: crosshair;
-}
-
-body.plain-view td.column-selected,
-body.plain-view td.row-selected {
-    background-color: var(--selection-bg) !important;
-}
-
-body.plain-view td:hover {
-    background-color: var(--row-hover-bg) !important;
 }
 
 body.plain-view.first-row-as-header tbody tr.header-row td {
@@ -1304,7 +1373,7 @@ body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row th {
 body.plain-view.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky;
     top: 21px;
-    left: 0;
+    left: 0 !important;
     z-index: 20;
     background-color: var(--header-bg);
 }
@@ -1312,7 +1381,7 @@ body.plain-view.sticky-header-enabled tbody tr.header-row th.row-header {
 body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky;
     top: 21px;
-    left: 0;
+    left: 0 !important;
     z-index: 20;
     background-color: var(--header-bg);
 }

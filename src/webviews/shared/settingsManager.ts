@@ -3,8 +3,13 @@
 export interface SettingDefinition {
     id: string;
     label: string;
-    onChange: (value: boolean) => void;
+    onChange: (value: any) => void;
     defaultValue?: boolean;
+    tooltip?: string;
+    inputType?: 'checkbox' | 'radio';
+    groupName?: string;
+    value?: string;
+    className?: string;
 }
 
 export class SettingsManager {
@@ -27,6 +32,15 @@ export class SettingsManager {
         this.init();
     }
 
+    private static escapeHtml(input: string): string {
+        return input
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     static renderPanel(container: HTMLElement, panelId: string, cancelId: string, settings: SettingDefinition[]) {
         const panel = document.createElement('div');
         panel.id = panelId;
@@ -36,7 +50,18 @@ export class SettingsManager {
         
         let html = '<div class="settings-group">';
         settings.forEach(s => {
-            html += `<label class="setting-item"><input type="checkbox" id="${s.id}"/> <span>${s.label}</span></label>`;
+            const safeId = this.escapeHtml(s.id);
+            const safeLabel = this.escapeHtml(s.label);
+            const tooltip = s.tooltip && s.tooltip.trim().length > 0 ? s.tooltip : s.label;
+            const safeTooltip = this.escapeHtml(tooltip);
+            const inputType = s.inputType === 'radio' ? 'radio' : 'checkbox';
+            const safeGroupName = this.escapeHtml(s.groupName || '');
+            const safeValue = this.escapeHtml(s.value || '');
+            const safeClassName = this.escapeHtml((s.className || '').trim());
+            const groupAttr = inputType === 'radio' && safeGroupName ? ` name="${safeGroupName}"` : '';
+            const valueAttr = inputType === 'radio' ? ` value="${safeValue}"` : '';
+            const extraClass = safeClassName ? ` ${safeClassName}` : '';
+            html += `<label class="setting-item tooltip${extraClass}"><input type="${inputType}" id="${safeId}"${groupAttr}${valueAttr}/> <span>${safeLabel}</span><span class="tooltiptext hidden">${safeTooltip}</span></label>`;
         });
         html += '</div>';
         html += `<button id="${cancelId}" class="toggle-button" title="Close">Close</button>`;
@@ -68,7 +93,13 @@ export class SettingsManager {
                     el.checked = setting.defaultValue;
                 }
                 el.addEventListener('change', () => {
-                    setting.onChange(el.checked);
+                    if (setting.inputType === 'radio') {
+                        if (el.checked) {
+                            setting.onChange(el.value);
+                        }
+                    } else {
+                        setting.onChange(el.checked);
+                    }
                 });
             }
         });

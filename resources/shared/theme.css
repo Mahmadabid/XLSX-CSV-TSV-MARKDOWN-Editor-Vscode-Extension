@@ -3,35 +3,37 @@
     /* System fonts only - cleanest look */
     --font-family: system-ui, -apple-system, sans-serif;
     --font-mono: Consolas, 'Courier New', monospace;
-    --header-height: 40px; /* Compact */
-    --row-header-width: 50px;
-    
+    --header-height: 40px;
+    --header-height-max: 96px;
+    /* Compact */
+    --row-header-width: 40px;
+
     /* --- Base Colors (Light Mode: Modern & Refined) --- */
     --bg-color: #fbfbfd;
     --text-color: #1d1d1f;
     --text-muted: #86868b;
-    
+
     /* Soft, subtle borders */
     --border-color: #d2d2d7;
-    
+
     /* Surface colors - Glassmorphism ready */
     --header-bg: #f5f5f7;
     --toolbar-bg: #f5f5f7;
     --row-hover-bg: rgba(0, 113, 227, 0.05);
     --panel-bg: rgba(255, 255, 255, 0.8);
     --overlay-bg: rgba(255, 255, 255, 0.95);
-    
-    /* Accent: Royal Blue (Elegant & Professional) */
-    --accent-color: #0071e3; 
-    --accent-rgb: 0, 113, 227;
-    --accent-bg: rgba(0, 113, 227, 0.1);
-    --accent-hover: #0077ed;
-    --accent-shadow: 0 4px 12px rgba(0, 113, 227, 0.2);
-    
-    /* Selection - Soft blue */
-    --selection-border: #0071e3;
-    --selection-bg: rgba(0, 113, 227, 0.15);
-    
+
+    /* Accent: Green */
+    --accent-color: #10b981;
+    --accent-rgb: 16, 185, 129;
+    --accent-bg: rgba(16, 185, 129, 0.1);
+    --accent-hover: #059669;
+    --accent-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+
+    /* Selection - Soft green */
+    --selection-border: #10b981;
+    --selection-bg: rgba(16, 185, 129, 0.15);
+
     /* Semantic Colors - Refined Palette */
     --success-color: #24a148;
     --success-bg: #e5f6ed;
@@ -41,29 +43,29 @@
     --error-bg: #fff1f1;
     --info-color: #0043ce;
     --info-bg: #edf5ff;
-    
+
     /* Interactive */
     --button-bg: #0071e3;
     --button-text: #ffffff;
     --button-hover: #0077ed;
     --header-hover-bg: #e8e8ed;
-    
+
     /* Tooltip - Refined */
     --tooltip-bg: #ffffff;
     --tooltip-text: #1d1d1f;
     --tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    
+
     /* Shadows - Restored for depth */
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-    --shadow-lg: 0 12px 24px rgba(0,0,0,0.12);
-    
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.12);
+
     /* Code */
     --code-bg: #f5f5f7;
     --code-text: #0071e3;
     --pre-bg: #f5f5f7;
     --pre-border: #d2d2d7;
-    
+
     /* Misc */
     --focus-ring: rgba(0, 113, 227, 0.4);
     --contrast-text: #ffffff;
@@ -96,11 +98,11 @@
     --progress-bar-start: color-mix(in srgb, var(--accent-color) 88%, var(--text-color) 12%);
     --progress-bar-end: var(--accent-hover);
     --progress-bar-glow: color-mix(in srgb, var(--accent-color) 42%, transparent);
-    
+
     /* Button Shadows */
     --button-shadow: 0 1px 3px rgba(0, 113, 227, 0.2);
     --button-shadow-hover: 0 4px 8px rgba(0, 113, 227, 0.3);
-    
+
     /* Interactive states */
     --hover-bg: rgba(0, 0, 0, 0.06);
     --active-bg: rgba(0, 0, 0, 0.1);
@@ -118,28 +120,28 @@ body.dark-mode {
     --bg-color: #161617;
     --text-color: #f5f5f7;
     --text-muted: #86868b;
-    
+
     /* Borders - Subtle depth */
-    --border-color: #424245;
-    
+    --border-color: #525252;
+
     /* Surface colors */
     --header-bg: #1d1d1f;
     --toolbar-bg: #1d1d1f;
     --row-hover-bg: rgba(41, 151, 255, 0.1);
     --panel-bg: rgba(29, 29, 31, 0.8);
     --overlay-bg: rgba(22, 22, 23, 0.95);
-    
+
     /* Accent: Azure Blue (Modern & Vibrant) */
-    --accent-color: #2997ff;
-    --accent-rgb: 41, 151, 255;
-    --accent-bg: rgba(41, 151, 255, 0.15);
-    --accent-hover: #3ea1ff;
-    --accent-shadow: 0 4px 15px rgba(41, 151, 255, 0.3);
-    
+    --accent-color: #10b981;
+    --accent-rgb: 16, 185, 129;
+    --accent-bg: rgba(16, 185, 129, 0.15);
+    --accent-hover: #34d399;
+    --accent-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+
     /* Selection */
-    --selection-border: #2997ff;
-    --selection-bg: rgba(41, 151, 255, 0.2);
-    
+    --selection-border: #10b981;
+    --selection-bg: rgba(16, 185, 129, 0.2);
+
     /* Semantic Colors - Balanced for Dark Mode */
     --success-color: #34c759;
     --success-bg: rgba(52, 199, 89, 0.15);
@@ -149,29 +151,29 @@ body.dark-mode {
     --error-bg: rgba(255, 69, 58, 0.2);
     --info-color: #0a84ff;
     --info-bg: rgba(10, 132, 255, 0.15);
-    
+
     /* Interactive */
     --button-bg: #2997ff;
     --button-text: #ffffff;
     --button-hover: #3ea1ff;
-    --header-hover-bg: #2c2c2e;
-    
+    --header-hover-bg: #3e3e3e;
+
     /* Tooltip */
     --tooltip-bg: #2c2c2e;
     --tooltip-text: #f5f5f7;
     --tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    
+
     /* Shadows - Subtle depth for dark mode */
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-    --shadow-lg: 0 12px 24px rgba(0,0,0,0.5);
-    
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.5);
+
     /* Code */
     --code-bg: #1d1d1f;
     --code-text: #2997ff;
     --pre-bg: #1d1d1f;
     --pre-border: #424245;
-    
+
     /* Misc */
     --focus-ring: rgba(41, 151, 255, 0.5);
     --contrast-text: #ffffff;
@@ -219,7 +221,7 @@ body.dark-mode {
     --inverted-bg: #f5f5f7;
     --inverted-text: #1d1d1f;
     --inverted-border: #d2d2d7;
-    
+
     --button-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     --button-shadow-hover: 0 4px 8px rgba(0, 0, 0, 0.4);
 }
@@ -235,6 +237,8 @@ body.vscode-theme {
     --header-bg: var(--vscode-editorWidget-background, #f5f5f7);
     --toolbar-bg: var(--vscode-editorWidget-background, var(--vscode-editor-background, #f5f5f7));
     --row-hover-bg: var(--vscode-list-hoverBackground, rgba(0, 132, 255, 0.076));
+    /* Keep hover text stable; avoid host list hover foreground from recoloring table cells. */
+    --vscode-list-hoverForeground: var(--text-color);
     --panel-bg: var(--vscode-editorWidget-background, rgba(245, 245, 247, 0.9));
     --overlay-bg: var(--vscode-notifications-background, rgba(255, 255, 255, 0.95));
 
@@ -330,7 +334,7 @@ body.vscode-theme {
     --inverted-bg: var(--vscode-editor-foreground, #000000);
     --inverted-text: var(--vscode-editor-background, #f5f5f7);
     --inverted-border: var(--vscode-editor-foreground, #ffffff);
-    
+
     /* Button shadows */
     --button-shadow: 0 1px 3px color-mix(in srgb, var(--button-bg) 25%, transparent);
     --button-shadow-hover: 0 3px 6px color-mix(in srgb, var(--button-bg) 30%, transparent);
@@ -418,13 +422,17 @@ body.sticky-toolbar-enabled .header-background {
     padding: 8px 16px;
     align-items: center;
     z-index: 10000;
-    position: relative;
+    position: relative;    
     overflow-x: auto;
     overflow-y: visible;
     white-space: nowrap;
+    width: 100%;
+    min-width: 0;
     min-height: var(--header-height);
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-color);
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 body.sticky-toolbar-enabled .toolbar {
@@ -432,14 +440,13 @@ body.sticky-toolbar-enabled .toolbar {
     top: 0;
     left: 0;
     right: 0;
+    width: 100%;
+    min-width: 100%;
+    padding: 4px 12px;
     z-index: 10000;
-    background: var(--panel-bg);
+    background-color: var(--toolbar-bg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-}
-
-body:not(.sticky-toolbar-enabled) .toolbar {
-    border-bottom: 1px solid var(--border-color);
 }
 
 /* Toggle Button */
@@ -481,6 +488,51 @@ body:not(.sticky-toolbar-enabled) .toolbar {
 
 .toggle-button.icon-only svg {
     margin: 0;
+}
+
+.toggle-button.theme-toggle-pill {
+    border-radius: 999px;
+    min-width: 62px;
+    padding: 0 12px;
+    justify-content: center;
+    gap: 8px;
+}
+
+.toggle-button.theme-toggle-pill svg {
+    display: none;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    opacity: 0.55;
+    transform: scale(0.9);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.toggle-button.theme-toggle-pill .theme-slot-left {
+    order: 1;
+}
+
+.toggle-button.theme-toggle-pill .theme-slot-right {
+    order: 2;
+}
+
+.toggle-button.theme-toggle-pill .theme-icon-selected,
+.toggle-button.theme-toggle-pill .theme-icon-current {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.toggle-button.theme-toggle-pill .theme-icon-secondary,
+.toggle-button.theme-toggle-pill .theme-icon-next {
+    opacity: 0.6;
+    transform: scale(0.9);
+}
+
+.toggle-button.theme-toggle-pill #vscodeIcon.theme-icon-current,
+.toggle-button.theme-toggle-pill #vscodeIcon.theme-icon-next {
+    width: 15px !important;
+    height: 15px !important;
+    object-fit: contain;
 }
 
 /* Settings Panel */
@@ -528,6 +580,17 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     color: var(--text-color);
     user-select: none;
     cursor: pointer;
+}
+
+.setting-item.setting-dependent {
+    margin-left: 24px;
+    padding-left: 10px;
+    border-left: 2px solid color-mix(in srgb, var(--accent-color) 32%, var(--border-color));
+    min-height: 24px;
+}
+
+.setting-item.setting-autosave-dependent {
+    font-size: 12px;
 }
 
 .setting-item input[type="checkbox"] {
@@ -583,7 +646,7 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     content: none !important;
 }
 
-.setting-item input[type="checkbox"]:disabled + span {
+.setting-item input[type="checkbox"]:disabled+span {
     opacity: 0.65;
     cursor: not-allowed;
     color: var(--text-color);
@@ -639,24 +702,165 @@ body:not(.sticky-toolbar-enabled) .toolbar {
     }
 }
 
-.toolbar.not-sticky { position: relative; }
-.toolbar.expanded-toolbar { padding: 12px 18px; gap: 16px; overflow-x: auto; white-space: nowrap; align-items: center; }
-.toolbar.expanded-toolbar .settings-panel { width: 100%; position: sticky; }
-.toolbar.settings-open { flex-wrap: nowrap; align-items: center; overflow-x: auto; white-space: nowrap; }
-body.sticky-toolbar-enabled .toolbar { padding: 4px 12px; background-color: var(--toolbar-bg); }
-body.sticky-toolbar-enabled .toolbar.expanded-toolbar { padding: 4px 18px; gap: 12px; }
-body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar { padding: 4px 12px; position: relative; }
-body:not(.sticky-toolbar-enabled) .toolbar { padding: 4px 12px; position: static; width: 100%; background-color: var(--toolbar-bg); border-bottom: 1px solid var(--border-color); }
-.toolbar img { flex-shrink: 0; max-width: none !important; width: 120px; height: auto; display: inline-block; }
-.toolbar svg { flex-shrink: 0; width: 16px; height: 16px; stroke-width: 2; }
-.toolbar { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
-.toolbar::-webkit-scrollbar { width: 10px; height: 10px; }
-.toolbar::-webkit-scrollbar-track { background: var(--scrollbar-track); }
-.toolbar::-webkit-scrollbar-thumb { background-color: var(--scrollbar-thumb); border: 3px solid transparent; background-clip: content-box; border-radius: 6px; }
-.toolbar::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-hover); }
-.toolbar::-webkit-scrollbar-button, .toolbar::-webkit-scrollbar-corner { display: none; background: transparent; }
-.toggle-button.small { height: 30px; padding: 0 10px; font-size: 12px; max-width: 120px; min-width: 72px; flex-shrink: 0; }
-:root { --header-height-max: 96px; }
+.toolbar.not-sticky {
+    position: relative;
+}
+
+.toolbar.expanded-toolbar {
+    padding: 12px 18px;
+    gap: 16px;
+    overflow-x: auto;
+    white-space: nowrap;
+    align-items: center;
+    width: 100%;
+    min-width: 100%;
+}
+
+.toolbar.expanded-toolbar .settings-panel {
+    width: 100%;
+    position: sticky;
+}
+
+.toolbar.settings-open {
+    flex-wrap: nowrap;
+    align-items: center;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+body.sticky-toolbar-enabled .toolbar.expanded-toolbar {
+    padding: 4px 18px;
+    gap: 12px;
+}
+
+body:not(.sticky-toolbar-enabled) .toolbar.expanded-toolbar {
+    padding: 4px 12px;
+    position: relative;
+    width: 100%;
+    min-width: 0;
+}
+
+.toolbar-wrapper {
+    overflow: hidden;
+    width: 100%;
+    min-width: 100%;
+    flex-shrink: 0;
+}
+
+/* Update the existing .toolbar rule and add a .toolbar-wrapper rule */
+
+body:not(.sticky-toolbar-enabled) .toolbar-wrapper {
+    position: sticky;
+    left: 0;
+    width: 100vw; /* Locks the background to the viewport width */
+    z-index: 10000;
+}
+
+body:not(.sticky-toolbar-enabled) .toolbar {
+    padding: 4px 12px;
+    position: relative; /* Changed from static */
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--toolbar-bg);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.toolbar img {
+    flex-shrink: 0;
+    max-width: none !important;
+    width: 120px;
+    height: auto;
+    display: inline-block;
+}
+
+.toolbar svg {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    stroke-width: 2;
+}
+
+.toolbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.toolbar::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+
+.toolbar::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 6px;
+}
+
+.toolbar::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+}
+
+.toolbar::-webkit-scrollbar-button,
+.toolbar::-webkit-scrollbar-corner {
+    display: none;
+    background: transparent;
+}
+
+/* Shared scroller styling for all editors: sticky mode uses table scrollers,
+   non-sticky mode uses #content (matching Markdown behavior). */
+#content,
+#tableContainer,
+.table-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+#content::-webkit-scrollbar,
+#tableContainer::-webkit-scrollbar,
+.table-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+#content::-webkit-scrollbar-track,
+#tableContainer::-webkit-scrollbar-track,
+.table-scroll::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+
+#content::-webkit-scrollbar-thumb,
+#tableContainer::-webkit-scrollbar-thumb,
+.table-scroll::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 10px;
+}
+
+#content::-webkit-scrollbar-thumb:hover,
+#tableContainer::-webkit-scrollbar-thumb:hover,
+.table-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+}
+
+#content::-webkit-scrollbar-button,
+#tableContainer::-webkit-scrollbar-button,
+.table-scroll::-webkit-scrollbar-button,
+#content::-webkit-scrollbar-corner,
+#tableContainer::-webkit-scrollbar-corner,
+.table-scroll::-webkit-scrollbar-corner {
+    display: none;
+    background: transparent;
+}
+
+.toggle-button.small {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+    max-width: 120px;
+    min-width: 72px;
+    flex-shrink: 0;
+}
 
 /* Shared Search Overlay */
 .search-overlay,
@@ -767,5 +971,15 @@ body:not(.sticky-toolbar-enabled) .sheet-find-overlay {
 .search-close-btn:hover {
     color: var(--error-color);
 }
-body:not(.sticky-toolbar-enabled) #content { height: 100vh; }
-body:not(.sticky-toolbar-enabled) .table-scroll { height: 100vh; }
+
+body:not(.sticky-toolbar-enabled) #content {
+    height: calc(100vh - 8px);
+    overflow: auto;
+}
+
+body:not(.sticky-toolbar-enabled) .table-scroll,
+body:not(.sticky-toolbar-enabled) #tableContainer {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+}

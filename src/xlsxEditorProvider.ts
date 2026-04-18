@@ -39,7 +39,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
         let isWebviewReady = false;
         // Store parsed worksheet data for virtualization
         let worksheetsData: any[] = [];
-        let rowHeaderWidth = 60;
+        let rowHeaderWidth = 40;
         const filePath = document.uri.fsPath;
 
         type VersionHistoryEntry = {
@@ -173,6 +173,10 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', false),
                 stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
+                autoSave: cfg.get('xlsx.autoSave', false),
+                autoSaveMode: cfg.get('xlsx.autoSaveMode', 'all'),
+                showManualSavePopup: cfg.get('xlsx.showManualSavePopup', true),
+                allowInteractiveControlsOutsideEditMode: cfg.get('xlsx.allowInteractiveControlsOutsideEditMode', true),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
                 mergeWarningEnabled: cfg.get('xlsx.mergeWarningEnabled', true),
@@ -231,7 +235,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             await workbook.xlsx.readFile(sourcePath);
 
             worksheetsData = workbook.worksheets.map((worksheet, index) => {
-                const data = this.extractWorksheetData(worksheet);
+                const data = this.extractWorksheetData(worksheet, workbook);
                 return {
                     name: worksheet.name,
                     index,
@@ -239,8 +243,8 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 };
             });
 
-            const maxRows = worksheetsData.length ? Math.max(...worksheetsData.map(ws => ws.data.maxRow)) : 0;
-            rowHeaderWidth = Math.max(60, Math.ceil(Math.log10(maxRows + 1)) * 12 + 20);
+            // Start compact and let the webview grow row header width only when needed for visible rows.
+            rowHeaderWidth = 40;
         };
 
         // Listen for messages
@@ -355,6 +359,10 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     await cfg.update('xlsx.firstRowIsHeader', !!s.firstRowIsHeader, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.stickyHeader', !!s.stickyHeader, vscode.ConfigurationTarget.Global);
+                    await cfg.update('xlsx.autoSave', !!s.autoSave, vscode.ConfigurationTarget.Global);
+                    await cfg.update('xlsx.autoSaveMode', s.autoSaveMode === 'controlsOnly' ? 'controlsOnly' : 'all', vscode.ConfigurationTarget.Global);
+                    await cfg.update('xlsx.showManualSavePopup', !!s.showManualSavePopup, vscode.ConfigurationTarget.Global);
+                    await cfg.update('xlsx.allowInteractiveControlsOutsideEditMode', !!s.allowInteractiveControlsOutsideEditMode, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.hyperlinkPreview', !!s.hyperlinkPreview, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
                     await cfg.update('xlsx.mergeWarningEnabled', !!s.mergeWarningEnabled, vscode.ConfigurationTarget.Global);
@@ -459,9 +467,10 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     const styleEdits = Array.isArray(message.styleEdits) ? message.styleEdits : [];
                     const operations = Array.isArray(message.operations) ? message.operations : [];
                     const sheetIndex = typeof message.sheetIndex === 'number' ? message.sheetIndex : 0;
+                    const isAutosave = !!message.isAutosave;
 
                     if (!edits.length && !operations.length && !styleEdits.length && !richEdits.length) {
-                        try { webview.postMessage({ command: 'saveResult', ok: true }); } catch { }
+                        try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave }); } catch { }
                         return;
                     }
 
@@ -554,6 +563,75 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 }
                                 break;
                             }
+                            case 'insertControl': {
+                                const row = typeof op?.row === 'number' ? op.row : 0;
+                                const col = typeof op?.col === 'number' ? op.col : 0;
+                                const controlType = typeof op?.controlType === 'string' ? op.controlType : '';
+                                const defaultValue = typeof op?.defaultValue === 'string' ? op.defaultValue : '';
+                                const dropdownOptions = Array.isArray(op?.dropdownOptions)
+                                    ? op.dropdownOptions.map((v: any) => String(v ?? '').trim()).filter((v: string) => !!v)
+                                    : [];
+
+                                if (!row || !col || !controlType) break;
+
+                                const cell = ws.getRow(row).getCell(col);
+
+                                if (controlType === 'checkbox') {
+                                    const normalized = defaultValue.trim().toLowerCase();
+                                    const next = normalized === 'true' || normalized === 'yes' || normalized === '1' || normalized === 'y';
+                                    cell.dataValidation = {
+                                        type: 'list',
+                                        allowBlank: true,
+                                        formulae: ['"TRUE,FALSE"']
+                                    } as any;
+                                    cell.value = next;
+                                    break;
+                                }
+
+                                if (controlType === 'dropdown') {
+                                    const options = dropdownOptions
+                                        .map((item: string) => item.replace(/[\r\n,]/g, ' ').trim())
+                                        .filter((item: string, idx: number, arr: string[]) => !!item && arr.indexOf(item) === idx)
+                                        .slice(0, 80);
+                                    if (!options.length) break;
+
+                                    const first = options[0];
+                                    const inline = options.join(',');
+                                    cell.dataValidation = {
+                                        type: 'list',
+                                        allowBlank: true,
+                                        formulae: [`"${inline}"`]
+                                    } as any;
+                                    cell.value = defaultValue && options.includes(defaultValue) ? defaultValue : first;
+                                    break;
+                                }
+
+                                if (controlType === 'rating') {
+                                    const parsed = parseInt(defaultValue, 10);
+                                    const rating = Number.isFinite(parsed) ? Math.max(0, Math.min(5, parsed)) : 3;
+                                    cell.dataValidation = {
+                                        type: 'list',
+                                        allowBlank: true,
+                                        formulae: ['"1,2,3,4,5"']
+                                    } as any;
+                                    cell.value = rating;
+                                    break;
+                                }
+
+                                if (controlType === 'date') {
+                                    const parsed = new Date(defaultValue || Date.now());
+                                    const nextDate = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+                                    cell.dataValidation = {
+                                        type: 'date',
+                                        operator: 'between',
+                                        allowBlank: true,
+                                        formulae: [new Date(1900, 0, 1), new Date(2199, 11, 31)]
+                                    } as any;
+                                    cell.numFmt = 'yyyy-mm-dd';
+                                    cell.value = nextDate;
+                                }
+                                break;
+                            }
                         }
                     }
 
@@ -587,6 +665,44 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         richEditedKeys.add(row + ':' + col);
                     }
 
+                    const parseBooleanText = (value: string): boolean | null => {
+                        const normalized = value.trim().toLowerCase();
+                        if (normalized === 'true' || normalized === 'yes' || normalized === '1' || normalized === 'y') return true;
+                        if (normalized === 'false' || normalized === 'no' || normalized === '0' || normalized === 'n') return false;
+                        return null;
+                    };
+
+                    const isBooleanValidationCell = (cell: Excel.Cell): boolean => {
+                        const dv = (cell as any)?.dataValidation;
+                        if (!dv || dv.type !== 'list') return false;
+                        const formula = Array.isArray(dv.formulae) ? String(dv.formulae[0] || '').trim() : '';
+                        const direct = formula.startsWith('=') ? formula.slice(1) : formula;
+                        const inlineMatch = direct.match(/^"([\s\S]*)"$/);
+                        if (!inlineMatch) return false;
+                        const options = inlineMatch[1]
+                            .split(',')
+                            .map((item) => parseBooleanText(item))
+                            .filter((item): item is boolean => item !== null);
+                        return options.length >= 2 && new Set(options).size === 2;
+                    };
+
+                    const isRatingValidationCell = (cell: Excel.Cell): boolean => {
+                        const options = this.getDropdownOptions(cell, ws, workbook);
+                        return this.isRatingOptionList(options);
+                    };
+
+                    const parseDateInput = (value: string): Date | null => {
+                        const raw = String(value || '').trim();
+                        if (!raw) return null;
+
+                        const parsed = new Date(raw);
+                        if (Number.isNaN(parsed.getTime())) {
+                            return null;
+                        }
+
+                        return parsed;
+                    };
+
                     for (const edit of edits) {
                         const row = typeof edit.row === 'number' ? edit.row : undefined;
                         const col = typeof edit.col === 'number' ? edit.col : undefined;
@@ -598,6 +714,12 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                         const newText = typeof edit.value === 'string' ? edit.value : '';
                         const cell = ws.getRow(row).getCell(col);
+                        const asBool = parseBooleanText(newText);
+                        const shouldStoreBoolean = asBool !== null && (typeof cell.value === 'boolean' || isBooleanValidationCell(cell));
+                        const shouldStoreRating = isRatingValidationCell(cell);
+                        const ratingValue = this.normalizeRatingValue(newText);
+                        const shouldStoreDate = this.isDateValidationCell(cell) || cell.type === Excel.ValueType.Date || cell.value instanceof Date;
+                        const parsedDate = parseDateInput(newText);
 
                         if (cell.type === Excel.ValueType.Hyperlink) {
                             const hyperlinkValue = cell.value as Excel.CellHyperlinkValue;
@@ -605,6 +727,19 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 text: newText,
                                 hyperlink: hyperlinkValue.hyperlink
                             } as Excel.CellHyperlinkValue;
+                        } else if (shouldStoreBoolean) {
+                            cell.value = asBool;
+                        } else if (shouldStoreRating) {
+                            cell.value = ratingValue > 0 ? ratingValue : null;
+                        } else if (shouldStoreDate) {
+                            if (!newText.trim()) {
+                                cell.value = null;
+                            } else if (parsedDate) {
+                                cell.numFmt = 'yyyy-mm-dd';
+                                cell.value = parsedDate;
+                            } else {
+                                cell.value = newText;
+                            }
                         } else {
                             cell.value = newText;
                         }
@@ -762,16 +897,23 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     previewVersionTimestamp = null;
 
                     if (operations.length > 0) {
-                        // Refresh the rendered payload after structural operations
+                        const requiresFullRefresh = operations.some((op: any) => {
+                            const type = typeof op?.type === 'string' ? op.type : '';
+                            return type !== 'insertControl';
+                        });
+
+                        // Keep insert-control autosave smooth by avoiding a full webview re-init.
                         await loadWorkbookPayload();
-                        trySendInit();
+                        if (requiresFullRefresh) {
+                            trySendInit();
+                        }
                     } else {
                         // For pure text/style edits, update worksheetsData internally but don't force a full webview re-render
                         await loadWorkbookPayload(); 
                     }
-                    try { webview.postMessage({ command: 'saveResult', ok: true }); } catch { }
+                    try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave }); } catch { }
                 } catch (err) {
-                    try { webview.postMessage({ command: 'saveResult', ok: false, error: String(err) }); } catch { }
+                    try { webview.postMessage({ command: 'saveResult', ok: false, error: String(err), isAutosave: !!message?.isAutosave }); } catch { }
                 }
             }
         });
@@ -858,13 +1000,14 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 </html>`;
     }
 
-    private extractWorksheetData(worksheet: Excel.Worksheet): any {
+    private extractWorksheetData(worksheet: Excel.Worksheet, workbook: Excel.Workbook): any {
         const data: any = {
             rows: [],
             maxRow: 0,
             maxCol: 0,
             mergedCells: []
         };
+        const imageMap = this.getWorksheetImageMap(workbook, worksheet);
 
         // Extract merged cell ranges
         try {
@@ -1010,6 +1153,36 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 const cellStyle = this.getCellStyle(cell);
                 let cellValue = this.getCellValue(cell);
                 const hyperlinkUrl = this.getCellHyperlink(cell);
+                const dropdownOptions = this.getDropdownOptions(cell, worksheet, workbook);
+                const imageSrc = imageMap.get(`${r}:${c}`) || '';
+                const booleanFromValue = this.parseBooleanLike(cell.value);
+                const booleanFromText = this.parseBooleanLike(cellValue);
+                const isRating = this.isRatingOptionList(dropdownOptions);
+                const dateInputValue = this.toIsoDateInputValue(cell.value) || this.toIsoDateInputValue(cellValue);
+                const isDate = this.isDateValidationCell(cell) || !!dateInputValue;
+                const isCheckbox = !isRating && (this.isBooleanOptionList(dropdownOptions)
+                    || booleanFromValue !== null
+                    || (booleanFromText !== null && dropdownOptions.length === 0));
+
+                const checkboxChecked = booleanFromValue ?? booleanFromText ?? false;
+                const cellType = imageSrc
+                    ? 'image'
+                    : (isCheckbox
+                        ? 'checkbox'
+                        : (isRating
+                            ? 'rating'
+                            : (dropdownOptions.length > 0
+                                ? 'dropdown'
+                                : (isDate ? 'date' : 'text'))));
+
+                if (cellType === 'checkbox') {
+                    cellValue = checkboxChecked ? 'TRUE' : 'FALSE';
+                } else if (cellType === 'rating') {
+                    const rating = this.normalizeRatingValue(cellValue);
+                    cellValue = rating > 0 ? String(rating) : '';
+                } else if (cellType === 'date') {
+                    cellValue = dateInputValue || '';
+                }
 
                 // For merged master cells, ensure we get the value
                 if (mergeInfo && mergeInfo.isMaster && !cellValue) {
@@ -1031,6 +1204,10 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     value: cellValue,
                     hyperlink: hyperlinkUrl,
                     style: cellStyle,
+                    cellType,
+                    dropdownOptions,
+                    checkboxChecked,
+                    imageSrc,
                     colNumber: c,
                     rowNumber: r,
                     // Add data attributes for proper color handling
@@ -1073,38 +1250,60 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
 
     private parseRange(rangeStr: string): any {
-        // Parse range like "A1:B2" to coordinates
         try {
-            const [start, end] = rangeStr.split(':');
+            const clean = String(rangeStr || '').trim().replace(/\$/g, '').toUpperCase();
+            if (!clean) return null;
+
+            const parts = clean.split(':');
+            const start = parts[0];
+            const end = parts[1] || parts[0];
+
             const startCoord = this.parseCell(start);
             const endCoord = this.parseCell(end);
 
             if (startCoord && endCoord) {
                 return {
-                    startRow: startCoord.row,
-                    startCol: startCoord.col,
-                    endRow: endCoord.row,
-                    endCol: endCoord.col
+                    startRow: Math.min(startCoord.row, endCoord.row),
+                    startCol: Math.min(startCoord.col, endCoord.col),
+                    endRow: Math.max(startCoord.row, endCoord.row),
+                    endCol: Math.max(startCoord.col, endCoord.col)
+                };
+            }
+
+            const colOnly = start.match(/^([A-Z]+)$/);
+            const endColOnly = end.match(/^([A-Z]+)$/);
+            if (colOnly && endColOnly) {
+                const startCol = this.columnLettersToIndex(colOnly[1]);
+                const endCol = this.columnLettersToIndex(endColOnly[1]);
+                return {
+                    startRow: 1,
+                    startCol: Math.min(startCol, endCol),
+                    endRow: 1048576,
+                    endCol: Math.max(startCol, endCol)
                 };
             }
         } catch {
-            // Silently continue if parsing fails
+            // ignore parse failures
         }
         return null;
     }
 
+    private columnLettersToIndex(colStr: string): number {
+        let col = 0;
+        for (let i = 0; i < colStr.length; i++) {
+            col = col * 26 + (colStr.charCodeAt(i) - 64);
+        }
+        return col;
+    }
+
     private parseCell(cellStr: string): any {
-        // Parse cell like "A1" to {row: 1, col: 1}
         try {
-            const match = cellStr.match(/^([A-Z]+)(\d+)$/);
+            const match = String(cellStr || '').trim().toUpperCase().match(/^([A-Z]+)(\d+)$/);
             if (match) {
                 const colStr = match[1];
                 const rowStr = match[2];
 
-                let col = 0;
-                for (let i = 0; i < colStr.length; i++) {
-                    col = col * 26 + (colStr.charCodeAt(i) - 64);
-                }
+                const col = this.columnLettersToIndex(colStr);
 
                 return {
                     row: parseInt(rowStr, 10),
@@ -1112,9 +1311,277 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 };
             }
         } catch {
-            // Silently continue if parsing fails
+            // ignore parse failures
         }
         return null;
+    }
+
+    private parseBooleanLike(value: unknown): boolean | null {
+        if (typeof value === 'boolean') {
+            return value;
+        }
+
+        if (value === null || value === undefined) {
+            return null;
+        }
+
+        const normalized = String(value).trim().toLowerCase();
+        if (normalized === 'true' || normalized === 'yes' || normalized === '1' || normalized === 'y') {
+            return true;
+        }
+        if (normalized === 'false' || normalized === 'no' || normalized === '0' || normalized === 'n') {
+            return false;
+        }
+
+        return null;
+    }
+
+    private isBooleanOptionList(options: string[]): boolean {
+        if (!Array.isArray(options) || options.length < 2) {
+            return false;
+        }
+
+        const parsed = options
+            .map((item) => this.parseBooleanLike(item))
+            .filter((item): item is boolean => item !== null);
+
+        if (parsed.length < 2) {
+            return false;
+        }
+
+        return new Set(parsed).size === 2;
+    }
+
+    private normalizeRatingValue(value: unknown): number {
+        const parsed = parseInt(String(value ?? ''), 10);
+        if (!Number.isFinite(parsed)) {
+            return 0;
+        }
+        return Math.max(0, Math.min(5, parsed));
+    }
+
+    private isRatingOptionList(options: string[]): boolean {
+        if (!Array.isArray(options) || options.length < 5) {
+            return false;
+        }
+
+        const parsed = options
+            .map((item) => this.normalizeRatingValue(item))
+            .filter((item) => item >= 1 && item <= 5);
+
+        if (!parsed.length) {
+            return false;
+        }
+
+        const unique = new Set(parsed);
+        return unique.size === 5 && [1, 2, 3, 4, 5].every((v) => unique.has(v));
+    }
+
+    private isDateValidationCell(cell: Excel.Cell): boolean {
+        const dv = (cell as any)?.dataValidation;
+        return !!dv && dv.type === 'date';
+    }
+
+    private toIsoDateInputValue(value: unknown): string {
+        if (!value) return '';
+
+        let asDate: Date | null = null;
+        if (value instanceof Date) {
+            asDate = value;
+        } else if (typeof value === 'string') {
+            const raw = value.trim();
+            if (!raw) return '';
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) && !/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(raw)) {
+                return '';
+            }
+            const parsed = new Date(raw);
+            if (!Number.isNaN(parsed.getTime())) {
+                asDate = parsed;
+            }
+        }
+
+        if (!asDate) {
+            return '';
+        }
+
+        if (Number.isNaN(asDate.getTime())) {
+            return '';
+        }
+
+        const yyyy = asDate.getFullYear();
+        const mm = String(asDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(asDate.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    private getInlineListOptions(formula: string): string[] {
+        const trimmed = formula.trim();
+        const unwrapped = trimmed.startsWith('=') ? trimmed.slice(1).trim() : trimmed;
+        const quoted = unwrapped.match(/^"([\s\S]*)"$/);
+        if (!quoted) {
+            return [];
+        }
+
+        return quoted[1]
+            .split(',')
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0);
+    }
+
+    private getDropdownOptions(cell: Excel.Cell, worksheet: Excel.Worksheet, workbook: Excel.Workbook): string[] {
+        try {
+            const dataValidation = (cell as any)?.dataValidation;
+            if (!dataValidation || dataValidation.type !== 'list') {
+                return [];
+            }
+
+            const formula = Array.isArray(dataValidation.formulae) ? String(dataValidation.formulae[0] || '').trim() : '';
+            if (!formula) {
+                return [];
+            }
+
+            const inline = this.getInlineListOptions(formula);
+            if (inline.length > 0) {
+                return inline;
+            }
+
+            const normalized = formula.startsWith('=') ? formula.slice(1).trim() : formula.trim();
+            const sheetRef = normalized.match(/^'([^']+)'!(.+)$/) || normalized.match(/^([A-Za-z0-9_]+)!(.+)$/);
+
+            let targetWorksheet = worksheet;
+            let rangeExpr = normalized;
+
+            if (sheetRef) {
+                const sheetName = sheetRef[1];
+                const target = workbook.getWorksheet(sheetName);
+                if (!target) return [];
+                targetWorksheet = target;
+                rangeExpr = sheetRef[2];
+            }
+
+            const cleanRange = rangeExpr.replace(/\$/g, '').replace(/^=/, '');
+            const parsed = this.parseRange(cleanRange);
+            if (!parsed) {
+                return [];
+            }
+
+            const options: string[] = [];
+            const seen = new Set<string>();
+
+            const MAX_OPTIONS = 80;
+            const MAX_ROWS = 5000;
+            const maxRow = Math.min(parsed.endRow, Math.max(parsed.startRow, parsed.startRow + MAX_ROWS - 1));
+            let blankStreak = 0;
+            let hasStarted = false;
+
+            for (let row = parsed.startRow; row <= maxRow; row++) {
+                for (let col = parsed.startCol; col <= parsed.endCol; col++) {
+                    const value = this.getCellValue(targetWorksheet.getRow(row).getCell(col))
+                        .replace(/<[^>]*>/g, '')
+                        .trim();
+                    if (!value) {
+                        if (hasStarted) {
+                            blankStreak++;
+                            if (blankStreak >= 20) {
+                                return options;
+                            }
+                        }
+                        continue;
+                    }
+
+                    blankStreak = 0;
+                    hasStarted = true;
+                    if (seen.has(value)) continue;
+                    seen.add(value);
+                    options.push(value);
+
+                    if (options.length >= MAX_OPTIONS) {
+                        return options;
+                    }
+                }
+            }
+
+            return options;
+        } catch {
+            return [];
+        }
+    }
+
+    private getImageDataUri(image: any): string {
+        try {
+            if (!image) return '';
+
+            const extRaw = typeof image.extension === 'string' ? image.extension.toLowerCase() : 'png';
+            const ext = extRaw === 'jpg' ? 'jpeg' : extRaw;
+            const mime = ext === 'png' || ext === 'jpeg' || ext === 'gif' || ext === 'webp'
+                ? `image/${ext}`
+                : 'image/png';
+
+            if (typeof image.base64 === 'string' && image.base64.trim().length > 0) {
+                const trimmed = image.base64.trim();
+                if (trimmed.startsWith('data:')) {
+                    return trimmed;
+                }
+                return `data:${mime};base64,${trimmed}`;
+            }
+
+            if (image.buffer) {
+                const buffer: Buffer = Buffer.isBuffer(image.buffer)
+                    ? image.buffer
+                    : Buffer.from(image.buffer);
+                return `data:${mime};base64,${buffer.toString('base64')}`;
+            }
+        } catch {
+            // ignore image conversion errors
+        }
+        return '';
+    }
+
+    private getWorksheetImageMap(workbook: Excel.Workbook, worksheet: Excel.Worksheet): Map<string, string> {
+        const map = new Map<string, string>();
+
+        try {
+            const images = typeof (worksheet as any).getImages === 'function'
+                ? (worksheet as any).getImages()
+                : [];
+
+            if (!Array.isArray(images)) {
+                return map;
+            }
+
+            images.forEach((imgRef: any) => {
+                try {
+                    const image = workbook.getImage(imgRef.imageId);
+                    const uri = this.getImageDataUri(image);
+                    if (!uri) return;
+
+                    const range = imgRef.range;
+                    let row = 0;
+                    let col = 0;
+
+                    if (range && typeof range === 'object' && range.tl) {
+                        row = Math.floor(Number(range.tl.nativeRow ?? range.tl.row ?? 0)) + 1;
+                        col = Math.floor(Number(range.tl.nativeCol ?? range.tl.col ?? 0)) + 1;
+                    } else if (range && typeof range === 'string') {
+                        const parsed = this.parseRange(range.replace(/\$/g, ''));
+                        if (parsed) {
+                            row = parsed.startRow;
+                            col = parsed.startCol;
+                        }
+                    }
+
+                    if (row > 0 && col > 0) {
+                        map.set(`${row}:${col}`, uri);
+                    }
+                } catch {
+                    // ignore invalid image anchors
+                }
+            });
+        } catch {
+            // ignore image extraction errors
+        }
+
+        return map;
     }
 
     private getCellValue(cell: Excel.Cell): string {
@@ -1163,6 +1630,8 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
         } else if (cell.value instanceof Date) {
             // Additional check for Date objects
             return cell.value.toLocaleDateString();
+        } else if (typeof cell.value === 'boolean') {
+            return cell.value ? 'TRUE' : 'FALSE';
         } else {
             return cell.value.toString();
         }

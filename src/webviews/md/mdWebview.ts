@@ -24,6 +24,7 @@ import hljs from 'highlight.js';
 import { ThemeManager } from '../shared/themeManager';
 import { SettingsManager } from '../shared/settingsManager';
 import { ToolbarManager } from '../shared/toolbarManager';
+import { applyToolbarLayout } from '../shared/toolbarLayout';
 import { Utils } from '../shared/utils';
 import { Icons } from '../shared/icons';
 import { vscode, debounce } from '../shared/common';
@@ -1360,9 +1361,12 @@ function applySettings(settings: any, persist = false) {
     refreshSyncMetrics();
 
     // Sticky toolbar
+    applyToolbarLayout(toolbarManager, {
+        stickyToolbar: currentSettings.stickyToolbar,
+        scrollTarget: '#content'
+    });
+
     if (toolbarManager) {
-        toolbarManager.applyStickyLayout(currentSettings.stickyToolbar, 'content', '#content');
-        
         // Handle formatting toolbar specifically for MD so it scrolls with the content
         const fmtToolbar = $('formattingToolbar');
         const contentArea = $('content');
@@ -1435,6 +1439,7 @@ function initializeSettings() {
         {
             id: 'chkWordWrap',
             label: 'Word Wrap',
+            tooltip: 'Wrap long lines in the Markdown preview/editor instead of horizontal scrolling.',
             defaultValue: currentSettings.wordWrap,
             onChange: (val: boolean) => {
                 currentSettings.wordWrap = val;
@@ -1444,6 +1449,7 @@ function initializeSettings() {
         {
             id: 'chkStickyToolbar',
             label: 'Sticky Toolbar',
+            tooltip: 'Keep the Markdown toolbar pinned at the top while you scroll.',
             defaultValue: currentSettings.stickyToolbar,
             onChange: (val: boolean) => {
                 currentSettings.stickyToolbar = val;
@@ -1453,6 +1459,7 @@ function initializeSettings() {
         {
             id: 'chkSyncScroll',
             label: 'Sync Scrolling',
+            tooltip: 'Synchronize editor and preview scroll positions in split mode.',
             defaultValue: currentSettings.syncScroll,
             onChange: (val: boolean) => {
                 currentSettings.syncScroll = val;
@@ -1462,6 +1469,7 @@ function initializeSettings() {
         {
             id: 'chkPreviewLeft',
             label: 'Preview on Left',
+            tooltip: 'Show preview on the left side instead of the right in split mode.',
             defaultValue: currentSettings.previewPosition === 'left',
             onChange: (val: boolean) => {
                 currentSettings.previewPosition = val ? 'left' : 'right';
@@ -1471,6 +1479,7 @@ function initializeSettings() {
         {
             id: 'chkShowOutline',
             label: 'Show Outline',
+            tooltip: 'Display the document outline panel for heading navigation.',
             defaultValue: currentSettings.showOutline,
             onChange: (val: boolean) => {
                 currentSettings.showOutline = val;
@@ -1480,6 +1489,7 @@ function initializeSettings() {
         {
             id: 'chkShowLineNumbers',
             label: 'Line Numbers',
+            tooltip: 'Show line numbers in fenced code block previews.',
             defaultValue: currentSettings.showLineNumbers,
             onChange: (val: boolean) => {
                 currentSettings.showLineNumbers = val;

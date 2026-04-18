@@ -4,12 +4,13 @@
 import { ThemeManager } from '../shared/themeManager';
 import { SettingsManager } from '../shared/settingsManager';
 import { ToolbarManager } from '../shared/toolbarManager';
+import { applyToolbarLayout } from '../shared/toolbarLayout';
 import { Utils } from '../shared/utils';
 import { Icons } from '../shared/icons';
 import { vscode, VirtualScrollConfig, debounce } from '../shared/common';
 import { VirtualLoader } from '../shared/virtualLoader';
 import { InfoTooltip } from '../shared/infoTooltip';
-import { createXlsxRowHtml, getExcelColumnLabel } from './components/xlsxRenderComponent';
+import { createXlsxRowHtml, getExcelColumnLabel, renderDropdownCellContent } from './components/xlsxRenderComponent';
 import { XlsxSelectionManager } from './components/xlsxSelectionComponent';
 import { createXlsxToolbarButtons } from './components/xlsxToolbarComponent';
 import {
@@ -34,6 +35,7 @@ import {
 import type {
     StructuralOpType,
     WorksheetOpType,
+    InsertControlType,
     HorizontalAlign,
     VerticalAlign,
     WrapMode,
@@ -77,8 +79,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     let mergedCells: any[] = [];
     let allRowHeights: number[] = []; // Pre-loaded row heights from extension
     let totalContentHeight = 0; // Pre-calculated total height
+    let rowOffsetPrefix: number[] = [0]; // Prefix sum: offset at row i
+    let rowMetricsVersion = 0;
+    let rowOffsetPrefixVersion = -1;
     let rowCache = new Map<number, any>();
     const virtualLoader = new VirtualLoader<any[]>('getRows');
+    const MIN_ROW_HEADER_WIDTH = 40;
+    let currentRowHeaderWidth = MIN_ROW_HEADER_WIDTH;
     let currentVisibleStart = 0;
     let currentVisibleEnd = 0;
     let isRequestingRows = false;
@@ -146,6 +153,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     // Table edit mode (text-only)
     let isEditMode = false;
     let isCellEditing = false;
+    let activeTextEditBeforeState: CellUndoState | null = null;
     let lastEditRange: Range | null = null;
     let lastFocusedEditableCell: HTMLElement | null = null;
 
@@ -163,6 +171,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     let selectedBorderMode: BorderMode = 'all';
     let editFormattingStripEl: HTMLElement | null = null;
     let borderPopupEl: HTMLElement | null = null;
+    let insertControlPopupEl: HTMLElement | null = null;
+    let dropdownOptionsPopupEl: HTMLElement | null = null;
+    let dropdownOptionsResolver: ((options: string[] | null) => void) | null = null;
     let mergeWarningPopupEl: HTMLElement | null = null;
     let mergeWarningResolver: ((confirmed: boolean) => void) | null = null;
     let formatPainterStyle: Partial<CellStyleEdit> | null = null;
@@ -172,14 +183,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     const editUndoStack: EditUndoEntry[] = [];
     const editRedoStack: EditUndoEntry[] = [];
+    const pendingControlUndoState = new WeakMap<HTMLElement, CellUndoState>();
+    const DEFAULT_DROPDOWN_OPTIONS_TEMPLATE = 'Option 1\nOption 2\nOption 3';
 
     let findManager: XlsxFindManager | null = null;
 
     // Save state (CSV-parity)
     let isSaving = false;
     let exitAfterSave = false;
+    let autoSaveTimer: any = null;
+    let manualSaveReminderUntil = 0;
+    let pendingOutsideControlEdits: Array<{ row: number; col: number; value: string }> = [];
     let isVersionPreviewMode = false;
     let previewVersionId: string | null = null;
+    let imagePreviewOverlayEl: HTMLElement | null = null;
 
     // Plain view mode (removes all XLSX styling)
     let isPlainView = false;
@@ -193,6 +210,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     // Copy state (CSV-parity: avoid concurrent copies)
     let isCopying = false;
+
+    type XlsxAutoSaveChangeKind = 'text' | 'control' | 'format' | 'structure';
 
     function setButtonsEnabled(enabled: boolean) {
         const saveBtn = document.getElementById('saveTableEditsButton') as HTMLButtonElement;
@@ -336,6 +355,457 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         popup.style.top = top + 'px';
     }
 
+    function ensureInsertControlPopup() {
+        if (insertControlPopupEl) {
+            return insertControlPopupEl;
+        }
+
+        const popup = document.createElement('div');
+        popup.id = 'xlsxInsertControlPopup';
+        popup.className = 'xlsx-insert-control-popup hidden';
+        popup.innerHTML = `
+            <div class="insert-control-title">Insert into selected cells</div>
+            <button type="button" class="insert-control-item" data-control-type="checkbox">Checkbox</button>
+            <button type="button" class="insert-control-item" data-control-type="dropdown">Dropdown</button>
+            <button type="button" class="insert-control-item" data-control-type="rating">Stars (Rating)</button>
+            <button type="button" class="insert-control-item" data-control-type="date">Date</button>
+        `;
+
+        popup.querySelectorAll('.insert-control-item').forEach((item) => {
+            item.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                const btn = item as HTMLButtonElement;
+                const type = (btn.getAttribute('data-control-type') || '') as InsertControlType;
+                if (!type) return;
+                await insertControlIntoSelection(type);
+            });
+        });
+
+        document.body.appendChild(popup);
+        insertControlPopupEl = popup;
+        return popup;
+    }
+
+    function hideInsertControlPopup() {
+        if (!insertControlPopupEl) return;
+        insertControlPopupEl.classList.add('hidden');
+    }
+
+    function showInsertControlPopup(anchor: HTMLElement) {
+        if (!isEditMode) {
+            showToast('Enter edit mode to insert controls');
+            return;
+        }
+
+        const popup = ensureInsertControlPopup();
+        popup.classList.remove('hidden');
+
+        const rect = anchor.getBoundingClientRect();
+        const popupRect = popup.getBoundingClientRect();
+        const left = Math.min(Math.max(8, rect.left), window.innerWidth - popupRect.width - 8);
+        const top = Math.min(rect.bottom + 6, window.innerHeight - popupRect.height - 8);
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+    }
+
+    function parseDropdownOptionsInput(raw: string): string[] {
+        return raw
+            .split(/[\n,;|]+/)
+            .map((item) => item.trim())
+            .filter((item, idx, arr) => item.length > 0 && arr.indexOf(item) === idx)
+            .slice(0, 80);
+    }
+
+    function hideDropdownOptionsPopup(options: string[] | null = null) {
+        if (!dropdownOptionsPopupEl) return;
+        dropdownOptionsPopupEl.classList.add('hidden');
+
+        const resolver = dropdownOptionsResolver;
+        dropdownOptionsResolver = null;
+        if (resolver) {
+            resolver(options);
+        }
+    }
+
+    function ensureDropdownOptionsPopup() {
+        if (dropdownOptionsPopupEl) {
+            return dropdownOptionsPopupEl;
+        }
+
+        const popup = document.createElement('div');
+        popup.id = 'xlsxDropdownOptionsPopup';
+        popup.className = 'xlsx-dropdown-options-popup hidden';
+        popup.innerHTML = `
+            <div class="xlsx-dropdown-options-dialog" role="dialog" aria-modal="true" aria-labelledby="dropdownOptionsTitle">
+                <div id="dropdownOptionsTitle" class="dropdown-options-title">Dropdown options</div>
+                <div class="dropdown-options-message">Enter one option per line. Comma, semicolon, and | are also supported.</div>
+                <textarea id="dropdownOptionsInput" class="dropdown-options-input" spellcheck="false"></textarea>
+                <div class="dropdown-options-actions">
+                    <button id="dropdownOptionsCancel" type="button" class="toggle-button">Cancel</button>
+                    <button id="dropdownOptionsInsert" type="button" class="toggle-button">Insert</button>
+                </div>
+            </div>
+        `;
+
+        popup.addEventListener('click', (event) => {
+            if (event.target === popup) {
+                hideDropdownOptionsPopup(null);
+            }
+        });
+
+        const cancelBtn = popup.querySelector('#dropdownOptionsCancel') as HTMLButtonElement | null;
+        const insertBtn = popup.querySelector('#dropdownOptionsInsert') as HTMLButtonElement | null;
+        const input = popup.querySelector('#dropdownOptionsInput') as HTMLTextAreaElement | null;
+
+        cancelBtn?.addEventListener('click', () => {
+            hideDropdownOptionsPopup(null);
+        });
+
+        insertBtn?.addEventListener('click', () => {
+            const options = parseDropdownOptionsInput(input?.value || '');
+            if (!options.length) {
+                showToast('Add at least one dropdown option');
+                input?.focus();
+                return;
+            }
+            hideDropdownOptionsPopup(options);
+        });
+
+        input?.addEventListener('keydown', (event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                insertBtn?.click();
+            }
+        });
+
+        document.body.appendChild(popup);
+        dropdownOptionsPopupEl = popup;
+        return popup;
+    }
+
+    async function promptDropdownOptions(initialOptions: string[] = [], confirmLabel: string = 'Insert'): Promise<string[] | null> {
+        if (dropdownOptionsResolver) {
+            dropdownOptionsResolver(null);
+            dropdownOptionsResolver = null;
+        }
+
+        const popup = ensureDropdownOptionsPopup();
+        const input = popup.querySelector('#dropdownOptionsInput') as HTMLTextAreaElement | null;
+        const confirmButton = popup.querySelector('#dropdownOptionsInsert') as HTMLButtonElement | null;
+        if (input) {
+            const seed = initialOptions
+                .map((item) => String(item || '').trim())
+                .filter((item, idx, arr) => item.length > 0 && arr.indexOf(item) === idx)
+                .slice(0, 80);
+            input.value = seed.length ? seed.join('\n') : DEFAULT_DROPDOWN_OPTIONS_TEMPLATE;
+        }
+
+        if (confirmButton) {
+            confirmButton.textContent = confirmLabel;
+        }
+
+        popup.classList.remove('hidden');
+
+        requestAnimationFrame(() => {
+            input?.focus();
+            input?.select();
+        });
+
+        return await new Promise<string[] | null>((resolve) => {
+            dropdownOptionsResolver = resolve;
+        });
+    }
+
+    function getDropdownOptionsFromCell(cell: HTMLElement): string[] {
+        const select = cell.querySelector('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+        if (!select) {
+            return [];
+        }
+
+        const unique = new Set<string>();
+        Array.from(select.options).forEach((opt) => {
+            const text = String(opt.value || '').trim();
+            if (text) {
+                unique.add(text);
+            }
+        });
+        return Array.from(unique.values()).slice(0, 80);
+    }
+
+    async function editDropdownOptionsForCell(cell: HTMLElement) {
+        if (!isEditMode) {
+            showToast('Enter edit mode to edit dropdown options');
+            return;
+        }
+
+        if (getCellType(cell) !== 'dropdown') {
+            return;
+        }
+
+        const row = parseInt(cell.getAttribute('data-row') || '-1', 10);
+        const col = parseInt(cell.getAttribute('data-col') || '-1', 10);
+        if (row < 0 || col < 0) {
+            return;
+        }
+
+        const cellData = getOrCreateRowCellData(row, col);
+        const existingOptions = Array.isArray(cellData.dropdownOptions) && cellData.dropdownOptions.length
+            ? cellData.dropdownOptions.map((item: any) => String(item || '').trim()).filter((item: string) => !!item)
+            : getDropdownOptionsFromCell(cell);
+
+        const configuredOptions = await promptDropdownOptions(existingOptions, 'Apply');
+        if (!configuredOptions || !configuredOptions.length) {
+            return;
+        }
+
+        const beforeSnapshot = captureWorksheetStateSnapshot();
+        const currentValue = getCellNormalizedValue(cell);
+        const nextValue = configuredOptions.includes(currentValue) ? currentValue : configuredOptions[0];
+
+        cellData.cellType = 'dropdown';
+        cellData.dropdownOptions = [...configuredOptions];
+        cellData.value = nextValue;
+
+        const rowNumber = row + 1;
+        const colNumber = col + 1;
+
+        pendingWorksheetOps.push({
+            type: 'insertControl',
+            row: rowNumber,
+            col: colNumber,
+            controlType: 'dropdown',
+            dropdownOptions: [...configuredOptions],
+            defaultValue: nextValue
+        });
+
+        cell.innerHTML = renderDropdownCellContent({
+            options: configuredOptions,
+            selectedValue: nextValue,
+            allowInteractiveControls: areInteractiveControlsEnabled(),
+            showEditButton: isEditMode
+        });
+        updateDropdownCellPresentation(cell, nextValue);
+        applyInteractiveControlState(cell);
+
+        const afterSnapshot = captureWorksheetStateSnapshot();
+        pushSheetUndoEntry(beforeSnapshot, afterSnapshot);
+        scheduleAutoSave('control');
+        showToast('Dropdown options updated');
+    }
+
+    function getOrCreateRowCellData(rowIndex: number, colIndex: number): any {
+        const rowNumber = rowIndex + 1;
+        const colNumber = colIndex + 1;
+
+        const rowData = rowCache.get(rowIndex) || {
+            rowNumber,
+            cells: [],
+            height: allRowHeights[rowIndex] || ROW_HEIGHT
+        };
+
+        if (!Array.isArray(rowData.cells)) {
+            rowData.cells = [];
+        }
+
+        let cellData = rowData.cells.find((cell: any) => cell.colNumber === colNumber);
+        if (!cellData) {
+            cellData = {
+                value: '',
+                hyperlink: '',
+                style: {},
+                colNumber,
+                rowNumber,
+                isDefaultColor: true,
+                hasDefaultBg: true,
+                hasWhiteBackground: false,
+                hasBlackBorder: false,
+                hasWhiteBorder: false,
+                hasBlackBackground: false,
+                hasDefaultBorder: true,
+                originalColor: 'rgb(0, 0, 0)',
+                isEmpty: false,
+                rowspan: 1,
+                colspan: 1,
+                isMerged: false,
+                isMaster: false,
+                isMergeCovered: false,
+                masterRow: rowNumber,
+                masterCol: colNumber
+            };
+            rowData.cells.push(cellData);
+            rowData.cells.sort((a: any, b: any) => (a.colNumber || 0) - (b.colNumber || 0));
+        }
+
+        rowCache.set(rowIndex, rowData);
+        return cellData;
+    }
+
+    function getTodayIsoDate(): string {
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function createInsertedControlInnerHtml(controlType: InsertControlType, defaultValue: string, dropdownOptions: string[]): string {
+        if (controlType === 'checkbox') {
+            const checked = parseBooleanCellValue(defaultValue);
+            return `<span class="cell-content cell-checkbox-content"><input type="checkbox" class="xlsx-cell-checkbox" aria-label="Cell checkbox"${checked ? ' checked' : ''} /><span class="checkbox-value">${checked ? 'TRUE' : 'FALSE'}</span></span>`;
+        }
+
+        if (controlType === 'dropdown') {
+            const safeDefault = defaultValue || (dropdownOptions[0] || '');
+            return renderDropdownCellContent({
+                options: dropdownOptions,
+                selectedValue: safeDefault,
+                allowInteractiveControls: true,
+                showEditButton: isEditMode
+            });
+        }
+
+        if (controlType === 'rating') {
+            const rating = normalizeRatingValue(defaultValue);
+            let stars = '';
+            for (let i = 1; i <= 5; i++) {
+                stars += `<button type="button" class="xlsx-rating-star${i <= rating ? ' active' : ''}" data-rating-value="${i}" aria-label="Rate ${i} of 5">★</button>`;
+            }
+            return `<span class="cell-content cell-rating-content" data-rating-value="${rating}">${stars}<span class="rating-value">${rating || ''}</span></span>`;
+        }
+
+        const normalized = normalizeDateInputValue(defaultValue);
+        const valueAttr = normalized ? ` value="${Utils.escapeHtml(normalized)}"` : '';
+        return `<span class="cell-content cell-date-content"><input type="date" class="xlsx-cell-date" aria-label="Cell date"${valueAttr} /></span>`;
+    }
+
+    function applyInsertedControlToDomCell(cell: HTMLElement, controlType: InsertControlType, defaultValue: string, dropdownOptions: string[]) {
+        cell.setAttribute('data-cell-type', controlType);
+        cell.removeAttribute('data-checkbox-checked');
+        cell.removeAttribute('data-dropdown-value');
+        cell.removeAttribute('data-rating-value');
+        cell.removeAttribute('data-date-value');
+
+        cell.innerHTML = createInsertedControlInnerHtml(controlType, defaultValue, dropdownOptions);
+
+        if (controlType === 'checkbox') {
+            cell.setAttribute('data-checkbox-checked', parseBooleanCellValue(defaultValue) ? 'true' : 'false');
+        }
+
+        if (controlType === 'dropdown') {
+            const nextValue = defaultValue || (dropdownOptions[0] || '');
+            cell.setAttribute('data-dropdown-value', nextValue);
+            const select = cell.querySelector('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+            if (select) {
+                select.value = nextValue;
+            }
+        }
+
+        if (controlType === 'rating') {
+            cell.setAttribute('data-rating-value', String(normalizeRatingValue(defaultValue)));
+        }
+
+        if (controlType === 'date') {
+            cell.setAttribute('data-date-value', normalizeDateInputValue(defaultValue));
+        }
+    }
+
+    async function insertControlIntoSelection(controlType: InsertControlType) {
+        hideInsertControlPopup();
+
+        if (!isEditMode) {
+            showToast('Enter edit mode to insert controls');
+            return;
+        }
+
+        const bounds = getLogicalSelectionBounds();
+        if (!bounds) {
+            showToast('Select one or more cells first');
+            return;
+        }
+
+        const cellCount = (bounds.maxRow - bounds.minRow + 1) * (bounds.maxCol - bounds.minCol + 1);
+        if (cellCount > 50000) {
+            showToast('Selection is too large for control insertion');
+            return;
+        }
+
+        let dropdownOptions: string[] = [];
+        let defaultValue = '';
+
+        if (controlType === 'dropdown') {
+            const configuredOptions = await promptDropdownOptions();
+            if (!configuredOptions) {
+                return;
+            }
+
+            dropdownOptions = configuredOptions;
+            defaultValue = dropdownOptions[0];
+        } else if (controlType === 'checkbox') {
+            defaultValue = 'FALSE';
+        } else if (controlType === 'rating') {
+            defaultValue = '3';
+        } else if (controlType === 'date') {
+            defaultValue = getTodayIsoDate();
+        }
+
+        const loaded = await ensureAllRowsLoadedForStructureEdits(false);
+        if (!loaded) {
+            return;
+        }
+
+        const beforeSnapshot = captureWorksheetStateSnapshot();
+
+        for (let r = bounds.minRow; r <= bounds.maxRow; r++) {
+            for (let c = bounds.minCol; c <= bounds.maxCol; c++) {
+                const rowNumber = r + 1;
+                const colNumber = c + 1;
+
+                const cellData = getOrCreateRowCellData(r, c);
+                cellData.hyperlink = '';
+                cellData.cellType = controlType;
+
+                if (controlType === 'checkbox') {
+                    cellData.dropdownOptions = ['TRUE', 'FALSE'];
+                    cellData.checkboxChecked = false;
+                    cellData.value = 'FALSE';
+                } else if (controlType === 'dropdown') {
+                    cellData.dropdownOptions = [...dropdownOptions];
+                    cellData.value = defaultValue;
+                } else if (controlType === 'rating') {
+                    cellData.dropdownOptions = ['1', '2', '3', '4', '5'];
+                    cellData.value = defaultValue;
+                } else if (controlType === 'date') {
+                    cellData.dropdownOptions = [];
+                    cellData.value = defaultValue;
+                }
+
+                pendingWorksheetOps.push({
+                    type: 'insertControl',
+                    row: rowNumber,
+                    col: colNumber,
+                    controlType,
+                    dropdownOptions: dropdownOptions.length ? [...dropdownOptions] : undefined,
+                    defaultValue
+                });
+            }
+        }
+
+        for (let r = bounds.minRow; r <= bounds.maxRow; r++) {
+            for (let c = bounds.minCol; c <= bounds.maxCol; c++) {
+                const domCell = document.querySelector(`td[data-row="${r}"][data-col="${c}"]`) as HTMLElement | null;
+                if (!domCell) continue;
+                applyInsertedControlToDomCell(domCell, controlType, defaultValue, dropdownOptions);
+            }
+        }
+
+        const afterSnapshot = captureWorksheetStateSnapshot();
+        pushSheetUndoEntry(beforeSnapshot, afterSnapshot);
+
+        applyInteractiveControlState();
+        showToast('Inserted control');
+        scheduleAutoSave('control');
+    }
+
     function isMergeWarningSuppressedForToday() {
         try {
             const raw = window.localStorage.getItem(MERGE_WARNING_SUPPRESS_UNTIL_KEY);
@@ -460,10 +930,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!cell) {
             const container = getTableContainer();
             if (container) {
-                let top = 0;
-                for (let i = 0; i < boundedRow; i++) {
-                    top += getEffectiveRowHeightByIndex(i);
-                }
+                const top = getRowTopOffset(boundedRow);
                 container.scrollTop = Math.max(0, top - Math.floor(container.clientHeight / 2));
                 await updateVisibleRows();
                 cell = document.querySelector(`td[data-row="${boundedRow}"][data-col="${boundedCol}"]`) as HTMLElement | null;
@@ -510,11 +977,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         getFindManager().close();
     }
 
-    async function ensureAllRowsLoadedForStructureEdits() {
+    async function ensureAllRowsLoadedForStructureEdits(withOverlay = true) {
         if (rowCache.size >= totalRows && totalRows > 0) return true;
 
-        setLoadingText('Preparing full sheet for structure changes...');
-        showLoading();
+        if (withOverlay) {
+            setLoadingText('Preparing full sheet for structure changes...');
+            showLoading();
+        }
 
         try {
             const allRows = await requestAllRows();
@@ -534,8 +1003,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
             return true;
         } finally {
-            hideLoading();
-            setLoadingText('Rendering worksheet...');
+            if (withOverlay) {
+                hideLoading();
+                setLoadingText('Rendering worksheet...');
+            }
         }
     }
 
@@ -548,13 +1019,81 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function getEffectiveRowHeightFromValue(height: number): number {
-        if (!currentSettings.spaciousCells) return height;
-        return Math.max(height + 8, 28);
+        const normalized = Number.isFinite(height) && height > 0 ? height : ROW_HEIGHT;
+
+        // Plain view follows CSV/TSV row metrics exactly.
+        if (isPlainView) {
+            return 24;
+        }
+
+        if (!currentSettings.spaciousCells) {
+            return Math.max(normalized, 24);
+        }
+
+        return Math.max(normalized + 8, 28);
     }
 
     function getEffectiveRowHeightByIndex(rowIndex: number): number {
         const base = allRowHeights[rowIndex] || ROW_HEIGHT;
         return getEffectiveRowHeightFromValue(base);
+    }
+
+    function invalidateRowMetrics() {
+        rowMetricsVersion += 1;
+        rowOffsetPrefixVersion = -1;
+        rowOffsetPrefix = [0];
+        totalContentHeight = 0;
+    }
+
+    function ensureRowOffsetPrefix() {
+        if (rowOffsetPrefixVersion === rowMetricsVersion && rowOffsetPrefix.length === totalRows + 1) {
+            return;
+        }
+
+        rowOffsetPrefix = new Array(totalRows + 1);
+        rowOffsetPrefix[0] = 0;
+
+        for (let i = 0; i < totalRows; i++) {
+            rowOffsetPrefix[i + 1] = rowOffsetPrefix[i] + getEffectiveRowHeightByIndex(i);
+        }
+
+        totalContentHeight = rowOffsetPrefix[totalRows] || 0;
+        rowOffsetPrefixVersion = rowMetricsVersion;
+    }
+
+    function getRowTopOffset(rowIndex: number): number {
+        if (totalRows <= 0) return 0;
+        ensureRowOffsetPrefix();
+        const clamped = Math.max(0, Math.min(rowIndex, totalRows));
+        return rowOffsetPrefix[clamped] || 0;
+    }
+
+    function getRowHeightRange(startIndex: number, endIndex: number): number {
+        if (totalRows <= 0) return 0;
+        ensureRowOffsetPrefix();
+        const safeStart = Math.max(0, Math.min(startIndex, totalRows));
+        const safeEnd = Math.max(safeStart, Math.min(endIndex, totalRows));
+        return Math.max(0, (rowOffsetPrefix[safeEnd] || 0) - (rowOffsetPrefix[safeStart] || 0));
+    }
+
+    function findRowIndexByOffset(offset: number): number {
+        if (totalRows <= 0) return 0;
+        ensureRowOffsetPrefix();
+
+        const target = Math.max(0, Math.min(offset, totalContentHeight));
+        let low = 0;
+        let high = totalRows;
+
+        while (low < high) {
+            const mid = Math.floor((low + high + 1) / 2);
+            if ((rowOffsetPrefix[mid] || 0) <= target) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        return Math.min(Math.max(low, 0), Math.max(totalRows - 1, 0));
     }
 
     function rerenderCurrentSheetFromLocalState() {
@@ -570,6 +1109,14 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         initializeResize();
         initializeHyperlinkHover();
         initializeVirtualScrolling();
+
+        if (toolbarManager) {
+            applyToolbarLayout(toolbarManager, {
+                stickyToolbar: !!currentSettings.stickyToolbar,
+                scrollTarget: '#content',
+                onLayoutApplied: initializeVirtualScrolling
+            });
+        }
     }
 
     async function applyStructureOperation(op: StructuralOp) {
@@ -600,6 +1147,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 allRowHeights.splice(Math.max(0, target - 1), 1);
                 totalRows = Math.max(1, totalRows - 1);
             }
+
+            invalidateRowMetrics();
         } else {
             if (op.type === 'deleteColumn' && columnCount <= 1) {
                 showToast('Cannot delete the last column');
@@ -1102,6 +1651,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const existing = pendingCellStyleEdits.get(key) || { row: rowNum, col: colNum };
         const merged: CellStyleEdit = { ...existing, ...style, row: rowNum, col: colNum };
         pendingCellStyleEdits.set(key, merged);
+        scheduleAutoSave('format');
     }
 
     function recordCellStyleEdit(cell: HTMLElement, style: Partial<CellStyleEdit>) {
@@ -1113,6 +1663,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const existing = pendingCellStyleEdits.get(key) || { row: rowNum, col: colNum };
         const merged: CellStyleEdit = { ...existing, ...style, row: rowNum, col: colNum };
         pendingCellStyleEdits.set(key, merged);
+        scheduleAutoSave('format');
     }
 
     function cloneCellStyleEdit(style: CellStyleEdit | null | undefined): CellStyleEdit | null {
@@ -1130,6 +1681,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const pendingStyle = pendingCellStyleEdits.has(key)
             ? cloneCellStyleEdit(pendingCellStyleEdits.get(key) || null)
             : null;
+        const dropdown = cell.querySelector('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+        const dropdownValue = dropdown
+            ? normalizeCellText(dropdown.value || '')
+            : (cell.getAttribute('data-dropdown-value') || '');
 
         return {
             row,
@@ -1137,6 +1692,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             key,
             styleAttr: cell.getAttribute('style') || '',
             innerHtml: cell.innerHTML,
+            dataCellType: cell.getAttribute('data-cell-type') || 'text',
+            dataCheckboxChecked: cell.getAttribute('data-checkbox-checked') || '',
+            dataDropdownValue: dropdownValue,
+            dataRatingValue: cell.getAttribute('data-rating-value') || '',
+            dataDateValue: cell.getAttribute('data-date-value') || '',
             pendingStyle
         };
     }
@@ -1150,6 +1710,35 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 cell.removeAttribute('style');
             }
             cell.innerHTML = state.innerHtml;
+
+            cell.setAttribute('data-cell-type', state.dataCellType || 'text');
+            if (state.dataCheckboxChecked) {
+                cell.setAttribute('data-checkbox-checked', state.dataCheckboxChecked);
+            } else {
+                cell.removeAttribute('data-checkbox-checked');
+            }
+            if (state.dataDropdownValue) {
+                cell.setAttribute('data-dropdown-value', state.dataDropdownValue);
+            } else {
+                cell.removeAttribute('data-dropdown-value');
+            }
+            if (state.dataRatingValue) {
+                cell.setAttribute('data-rating-value', state.dataRatingValue);
+            } else {
+                cell.removeAttribute('data-rating-value');
+            }
+            if (state.dataDateValue) {
+                cell.setAttribute('data-date-value', state.dataDateValue);
+            } else {
+                cell.removeAttribute('data-date-value');
+            }
+
+            const select = cell.querySelector('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+            if (select) {
+                select.value = state.dataDropdownValue || '';
+            }
+
+            applyInteractiveControlState(cell);
         }
 
         if (state.pendingStyle) {
@@ -1176,6 +1765,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         columnCount = snapshot.columnCount;
         columnWidths = cloneCellData(snapshot.columnWidths || []);
         allRowHeights = cloneCellData(snapshot.allRowHeights || []);
+        invalidateRowMetrics();
         mergedCells = cloneCellData(snapshot.mergedCells || []);
         pendingWorksheetOps = cloneWorksheetOps(snapshot.pendingWorksheetOps || []);
 
@@ -1214,6 +1804,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         editRedoStack.push(entry);
         applyFindHighlightsInVisibleCells();
+
+        if (!isEditMode && entry.kind === 'style') {
+            syncControlEditsAfterUndoRedo(entry.before);
+        }
+
         return true;
     }
 
@@ -1229,7 +1824,30 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         editUndoStack.push(entry);
         applyFindHighlightsInVisibleCells();
+
+        if (!isEditMode && entry.kind === 'style') {
+            syncControlEditsAfterUndoRedo(entry.after);
+        }
+
         return true;
+    }
+
+    function syncControlEditsAfterUndoRedo(states: CellUndoState[]) {
+        if (isEditMode || isVersionPreviewMode || !Array.isArray(states) || !states.length) {
+            return;
+        }
+
+        states.forEach((state) => {
+            const cell = document.querySelector(`td[data-row="${state.row}"][data-col="${state.col}"]`) as HTMLElement | null;
+            if (!cell) {
+                return;
+            }
+
+            const cellType = getCellType(cell);
+            if (cellType === 'checkbox' || cellType === 'dropdown' || cellType === 'rating' || cellType === 'date') {
+                persistInteractiveControlEdit(cell);
+            }
+        });
     }
 
     function getEditableCellsOrToast(message: string): HTMLElement[] {
@@ -1760,6 +2378,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             endRow,
             endCol
         });
+        scheduleAutoSave('structure');
 
         const afterSnapshot = captureWorksheetStateSnapshot();
         pushSheetUndoEntry(beforeSnapshot, afterSnapshot);
@@ -1886,7 +2505,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             }
         }
         if ('textColor' in style) {
-            cell.style.color = style.textColor || '';
+            if (style.textColor) {
+                cell.style.setProperty('color', style.textColor, 'important');
+            } else {
+                cell.style.removeProperty('color');
+            }
             if (style.textColor) {
                 cell.removeAttribute('data-default-color');
             }
@@ -2397,11 +3020,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         const findButton = document.getElementById('findButton');
         const settingsButton = document.getElementById('openSettingsButton');
+        const insertButton = document.getElementById('insertControlButton');
         const plainButton = document.getElementById('togglePlainViewButton');
         const strip = document.getElementById('xlsxEditFormattingStrip');
 
         const findWrapper = findButton ? findButton.closest('.tooltip') as HTMLElement | null : null;
         const settingsWrapper = settingsButton ? settingsButton.closest('.tooltip') as HTMLElement | null : null;
+        const insertWrapper = insertButton ? insertButton.closest('.tooltip') as HTMLElement | null : null;
         const plainWrapper = plainButton ? plainButton.closest('.tooltip') as HTMLElement | null : null;
 
         if (!findWrapper || !settingsWrapper || findWrapper.parentElement !== toolbar || settingsWrapper.parentElement !== toolbar) {
@@ -2413,14 +3038,25 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 findWrapper.insertAdjacentElement('afterend', settingsWrapper);
             }
 
-            if (strip && strip.parentElement === toolbar && settingsWrapper.nextElementSibling !== strip) {
-                settingsWrapper.insertAdjacentElement('afterend', strip);
+            if (insertWrapper && insertWrapper.parentElement === toolbar && settingsWrapper.nextElementSibling !== insertWrapper) {
+                settingsWrapper.insertAdjacentElement('afterend', insertWrapper);
+            }
+
+            if (strip && strip.parentElement === toolbar) {
+                const anchor = insertWrapper && insertWrapper.parentElement === toolbar ? insertWrapper : settingsWrapper;
+                if (anchor.nextElementSibling !== strip) {
+                    anchor.insertAdjacentElement('afterend', strip);
+                }
             }
             return;
         }
 
         if (plainWrapper && plainWrapper.parentElement === toolbar && plainWrapper.nextElementSibling !== settingsWrapper) {
             plainWrapper.insertAdjacentElement('afterend', settingsWrapper);
+        }
+
+        if (insertWrapper && insertWrapper.parentElement === toolbar && settingsWrapper.nextElementSibling !== insertWrapper) {
+            settingsWrapper.insertAdjacentElement('afterend', insertWrapper);
         }
     }
 
@@ -2429,10 +3065,314 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         return String(text).replace(/\u00a0/g, '').replace(/\r?\n/g, ' ').trimEnd();
     }
 
+    function getCellType(cell: HTMLElement | null): string {
+        if (!cell) return 'text';
+        const raw = (cell.getAttribute('data-cell-type') || 'text').trim().toLowerCase();
+        if (raw === 'checkbox' || raw === 'dropdown' || raw === 'image' || raw === 'rating' || raw === 'date') {
+            return raw;
+        }
+        return 'text';
+    }
+
+    function normalizeDateInputValue(value: string | null | undefined): string {
+        const raw = (value || '').trim();
+        if (!raw) return '';
+
+        const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) return raw;
+
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) {
+            return '';
+        }
+
+        const yyyy = parsed.getFullYear();
+        const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+        const dd = String(parsed.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function normalizeRatingValue(value: string | number | null | undefined): number {
+        const parsed = typeof value === 'number' ? value : parseInt(String(value || ''), 10);
+        if (!Number.isFinite(parsed)) return 0;
+        return Math.max(0, Math.min(5, parsed));
+    }
+
+    function parseBooleanCellValue(value: string | null | undefined): boolean {
+        const normalized = String(value || '').trim().toLowerCase();
+        return normalized === 'true' || normalized === 'yes' || normalized === '1' || normalized === 'y';
+    }
+
+    function updateCheckboxCellPresentation(cell: HTMLElement, checked: boolean) {
+        cell.setAttribute('data-checkbox-checked', checked ? 'true' : 'false');
+        const checkbox = cell.querySelector('.xlsx-cell-checkbox') as HTMLInputElement | null;
+        if (checkbox) {
+            checkbox.checked = checked;
+        }
+        const valueLabel = cell.querySelector('.checkbox-value') as HTMLElement | null;
+        if (valueLabel) {
+            valueLabel.textContent = checked ? 'TRUE' : 'FALSE';
+        }
+    }
+
+    function updateDropdownCellPresentation(cell: HTMLElement, value: string) {
+        const normalized = normalizeCellText(value || '');
+        const select = cell.querySelector('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+        if (select) {
+            select.value = normalized;
+        }
+        cell.setAttribute('data-dropdown-value', normalized);
+    }
+
+    function updateRatingCellPresentation(cell: HTMLElement, rating: number) {
+        const normalized = normalizeRatingValue(rating);
+        cell.setAttribute('data-rating-value', String(normalized));
+
+        const content = cell.querySelector('.cell-rating-content') as HTMLElement | null;
+        if (content) {
+            content.setAttribute('data-rating-value', String(normalized));
+        }
+
+        cell.querySelectorAll('.xlsx-rating-star').forEach((el) => {
+            const star = el as HTMLButtonElement;
+            const val = normalizeRatingValue(star.getAttribute('data-rating-value'));
+            star.classList.toggle('active', val <= normalized && normalized > 0);
+        });
+
+        const label = cell.querySelector('.rating-value') as HTMLElement | null;
+        if (label) {
+            label.textContent = normalized > 0 ? String(normalized) : '';
+        }
+    }
+
+    function updateDateCellPresentation(cell: HTMLElement, value: string) {
+        const normalized = normalizeDateInputValue(value);
+        const dateInput = cell.querySelector('.xlsx-cell-date') as HTMLInputElement | null;
+        if (dateInput) {
+            dateInput.value = normalized;
+        }
+        cell.setAttribute('data-date-value', normalized);
+    }
+
+    function pushSingleCellUndo(before: CellUndoState | null, after: CellUndoState | null) {
+        if (!before || !after) return;
+        pushEditUndoEntry({ before: [before], after: [after] });
+    }
+
+    function getCellNormalizedValue(cell: HTMLElement): string {
+        const type = getCellType(cell);
+
+        if (type === 'checkbox') {
+            const checkbox = cell.querySelector('.xlsx-cell-checkbox') as HTMLInputElement | null;
+            if (checkbox) {
+                return checkbox.checked ? 'TRUE' : 'FALSE';
+            }
+            return parseBooleanCellValue(cell.getAttribute('data-checkbox-checked')) ? 'TRUE' : 'FALSE';
+        }
+
+        if (type === 'dropdown') {
+            const select = cell.querySelector('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+            if (select) {
+                return normalizeCellText(select.value || '');
+            }
+            return normalizeCellText(cell.getAttribute('data-dropdown-value') || '');
+        }
+
+        if (type === 'rating') {
+            const content = cell.querySelector('.cell-rating-content') as HTMLElement | null;
+            if (content) {
+                const current = normalizeRatingValue(content.getAttribute('data-rating-value'));
+                return String(current);
+            }
+            return String(normalizeRatingValue(cell.getAttribute('data-rating-value')));
+        }
+
+        if (type === 'date') {
+            const dateInput = cell.querySelector('.xlsx-cell-date') as HTMLInputElement | null;
+            if (dateInput) {
+                return normalizeDateInputValue(dateInput.value);
+            }
+            return normalizeDateInputValue(cell.getAttribute('data-date-value'));
+        }
+
+        return normalizeCellText(cell.textContent || '');
+    }
+
+    function canUseInteractiveControlsOutsideEditMode(): boolean {
+        return !!currentSettings.allowInteractiveControlsOutsideEditMode && !isVersionPreviewMode;
+    }
+
+    function areInteractiveControlsEnabled(): boolean {
+        return isEditMode || canUseInteractiveControlsOutsideEditMode();
+    }
+
+    function applyInteractiveControlState(root?: ParentNode | null) {
+        const scope = root || document;
+        const controlsEnabled = areInteractiveControlsEnabled();
+        const outsideEditEnabled = !isEditMode && controlsEnabled;
+
+        document.body.classList.toggle('controls-editable-outside-edit-mode', outsideEditEnabled);
+
+        scope.querySelectorAll('.xlsx-cell-checkbox').forEach((el) => {
+            const input = el as HTMLInputElement;
+            input.disabled = !controlsEnabled;
+        });
+
+        scope.querySelectorAll('.xlsx-cell-dropdown').forEach((el) => {
+            const select = el as HTMLSelectElement;
+            select.disabled = !controlsEnabled;
+        });
+
+        scope.querySelectorAll('.xlsx-rating-star').forEach((el) => {
+            const button = el as HTMLButtonElement;
+            button.disabled = !controlsEnabled;
+        });
+
+        scope.querySelectorAll('.xlsx-cell-date').forEach((el) => {
+            const input = el as HTMLInputElement;
+            input.disabled = !controlsEnabled;
+        });
+
+        scope.querySelectorAll('.xlsx-dropdown-edit-button').forEach((el) => {
+            const button = el as HTMLButtonElement;
+            button.disabled = !isEditMode;
+        });
+    }
+
+    function showManualSaveReminderIfNeeded() {
+        if (isEditMode || isVersionPreviewMode || currentSettings.autoSave || !currentSettings.showManualSavePopup) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now < manualSaveReminderUntil) {
+            return;
+        }
+
+        manualSaveReminderUntil = now + 2500;
+        showToast('Autosave is off. Press Ctrl/Cmd+S to save.', false, 1300);
+    }
+
+    function upsertPendingOutsideControlEdit(row: number, col: number, value: string) {
+        const existingIndex = pendingOutsideControlEdits.findIndex((edit) => edit.row === row && edit.col === col);
+        const next = { row, col, value };
+
+        if (existingIndex >= 0) {
+            pendingOutsideControlEdits[existingIndex] = next;
+            return;
+        }
+
+        pendingOutsideControlEdits.push(next);
+    }
+
+    function removePendingOutsideControlEdit(row: number, col: number) {
+        pendingOutsideControlEdits = pendingOutsideControlEdits.filter((edit) => edit.row !== row || edit.col !== col);
+    }
+
+    function clearPendingOutsideControlEdits() {
+        pendingOutsideControlEdits = [];
+    }
+
+    function shouldScheduleAutosaveForChange(kind: XlsxAutoSaveChangeKind): boolean {
+        if (!currentSettings.autoSave) {
+            return false;
+        }
+
+        const mode = currentSettings.autoSaveMode === 'controlsOnly' ? 'controlsOnly' : 'all';
+        if (mode === 'all') {
+            return true;
+        }
+
+        return kind === 'control';
+    }
+
+    function persistInteractiveControlEdit(cell: HTMLElement) {
+        if (isVersionPreviewMode || isEditMode) return;
+
+        const row = parseInt(cell.getAttribute('data-rownum') || '0', 10);
+        const col = parseInt(cell.getAttribute('data-colnum') || '0', 10);
+        if (!row || !col) return;
+
+        const value = getCellNormalizedValue(cell).replace(/\u00a0/g, '');
+
+        if (!currentSettings.autoSave) {
+            upsertPendingOutsideControlEdit(row, col, value);
+            showManualSaveReminderIfNeeded();
+            return;
+        }
+
+        removePendingOutsideControlEdit(row, col);
+        vscode.postMessage({
+            command: 'saveXlsxEdits',
+            sheetIndex: currentWorksheet,
+            edits: [{ row, col, value }],
+            richEdits: [],
+            styleEdits: [],
+            operations: [],
+            isAutosave: true
+        });
+    }
+
+    function hasPendingXlsxEdits(): boolean {
+        if (pendingOutsideControlEdits.length > 0) {
+            return true;
+        }
+
+        if (pendingWorksheetOps.length > 0 || pendingCellStyleEdits.size > 0) {
+            return true;
+        }
+
+        const table = document.querySelector('#tableContainer table');
+        if (!table) return false;
+
+        const editedCell = Array.from(table.querySelectorAll('td.editable-cell')).find((td) => {
+            const htmlTd = td as HTMLElement;
+            const original = (htmlTd.dataset.originalText || '').replace(/\u00a0/g, '');
+            const current = getCellNormalizedValue(htmlTd).replace(/\u00a0/g, '');
+            return current !== original;
+        });
+
+        return !!editedCell;
+    }
+
+    function clearAutoSaveTimer() {
+        if (autoSaveTimer) {
+            clearTimeout(autoSaveTimer);
+            autoSaveTimer = null;
+        }
+    }
+
+    function scheduleAutoSave(kind: XlsxAutoSaveChangeKind = 'text') {
+        if (!isEditMode || isVersionPreviewMode || isSaving) return;
+        if (!shouldScheduleAutosaveForChange(kind)) {
+            if (!currentSettings.autoSave) {
+                showManualSaveReminderIfNeeded();
+            }
+            return;
+        }
+
+        clearAutoSaveTimer();
+        autoSaveTimer = setTimeout(() => {
+            autoSaveTimer = null;
+            if (!currentSettings.autoSave || !isEditMode || isVersionPreviewMode || isSaving) {
+                return;
+            }
+            if (!hasPendingXlsxEdits()) {
+                return;
+            }
+            saveEdits(false, true);
+        }, 1100);
+    }
+
     // ===== Virtual Scrolling Core =====
 
+    let activeScrollContainer: HTMLElement | null = null;
+
     function getTableContainer(): HTMLElement | null {
-        return document.querySelector('.table-scroll');
+        if (!document.body.classList.contains('sticky-toolbar-enabled')) {
+            return document.getElementById('content');
+        }
+        return document.querySelector('#tableContainer .table-scroll') || document.getElementById('tableContainer');
     }
 
     function requestRows(start: number, end: number, timeout = 10000): Promise<any[]> {
@@ -2453,7 +3393,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             columnCount,
             columnWidths,
             isPlainView,
-            isEditMode
+            isEditMode,
+            allowInteractiveControls: areInteractiveControlsEnabled()
         });
     }
 
@@ -2515,12 +3456,36 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
     }
 
+    function setRowHeaderWidth(widthPx: number, allowShrink = false) {
+        const nextWidth = Math.max(MIN_ROW_HEADER_WIDTH, Math.ceil(widthPx));
+        if (!allowShrink && nextWidth <= currentRowHeaderWidth) return;
+        if (allowShrink && nextWidth === currentRowHeaderWidth) return;
+
+        currentRowHeaderWidth = nextWidth;
+        document.documentElement.style.setProperty('--row-header-width', `${nextWidth}px`);
+    }
+
+    function estimateRowHeaderWidthForRowIndex(rowIndex: number): number {
+        const oneBasedRow = Math.max(1, rowIndex + 1);
+        const digits = String(oneBasedRow).length;
+        return Math.max(MIN_ROW_HEADER_WIDTH, digits * 8 + 16);
+    }
+
+    function ensureRowHeaderWidthForVisibleRange(startRow: number, endRowExclusive: number) {
+        if (totalRows <= 0) return;
+
+        const maxVisibleRow = Math.max(startRow, endRowExclusive - 1);
+        const clampedMaxVisibleRow = Math.max(0, Math.min(totalRows - 1, maxVisibleRow));
+        const needed = estimateRowHeaderWidthForRowIndex(clampedMaxVisibleRow);
+        setRowHeaderWidth(needed);
+    }
+
     const syncColumnWidthsToCurrentMode = debounce(() => {
         if (isEditMode) return;
         adjustColumnWidths(document.body.classList.contains('expanded-mode') ? 'expand' : 'default');
     }, 100);
 
-    function renderVirtualRows(startIndex: number, endIndex: number, rowsData: any[]) {
+    function renderVirtualRows(startIndex: number, endIndex: number, rowsData: any[], cacheRows = true) {
         if (isRendering) return;
         isRendering = true;
 
@@ -2530,21 +3495,14 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             return;
         }
 
-        // Cache rows
-        rowsData.forEach((row, i) => {
-            rowCache.set(startIndex + i, row);
-        });
-
-        // Calculate spacer heights using pre-loaded heights (stable)
-        let topSpacerHeight = 0;
-        for (let i = 0; i < startIndex; i++) {
-            topSpacerHeight += getEffectiveRowHeightByIndex(i);
+        if (cacheRows) {
+            rowsData.forEach((row, i) => {
+                rowCache.set(startIndex + i, row);
+            });
         }
 
-        let bottomSpacerHeight = 0;
-        for (let i = endIndex; i < totalRows; i++) {
-            bottomSpacerHeight += getEffectiveRowHeightByIndex(i);
-        }
+        const topSpacerHeight = getRowTopOffset(startIndex);
+        const bottomSpacerHeight = getRowHeightRange(endIndex, totalRows);
 
         let html = '';
 
@@ -2562,6 +3520,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
 
         tbody.innerHTML = html;
+        applyInteractiveControlState(tbody);
         ensureHeaderVisible();
         reapplySelection();
         applyFindHighlightsInVisibleCells();
@@ -2581,33 +3540,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const scrollTop = container.scrollTop;
         const clientHeight = container.clientHeight;
 
-        // Calculate which rows are visible using pre-loaded heights
-        let accumulatedHeight = 0;
-        let firstVisibleRow = 0;
-        
-        for (let i = 0; i < totalRows; i++) {
-            const rowHeight = getEffectiveRowHeightByIndex(i);
-            if (accumulatedHeight + rowHeight > scrollTop) {
-                firstVisibleRow = i;
-                break;
-            }
-            accumulatedHeight += rowHeight;
-            if (i === totalRows - 1) {
-                firstVisibleRow = totalRows - 1;
-            }
-        }
-        
-        // Find last visible row
-        let lastVisibleRow = firstVisibleRow;
-        let visibleHeight = 0;
-        for (let i = firstVisibleRow; i < totalRows; i++) {
-            const rowHeight = getEffectiveRowHeightByIndex(i);
-            visibleHeight += rowHeight;
-            lastVisibleRow = i + 1;
-            if (visibleHeight >= clientHeight) {
-                break;
-            }
-        }
+        const firstVisibleRow = findRowIndexByOffset(scrollTop);
+        const lastVisibleRow = Math.min(totalRows, findRowIndexByOffset(scrollTop + clientHeight) + 1);
+
+        // Match CSV behavior: keep row headers compact and only grow when larger row numbers become visible.
+        ensureRowHeaderWidthForVisibleRange(firstVisibleRow, lastVisibleRow);
 
         // Add buffer
         const bufferedStart = Math.max(0, firstVisibleRow - BUFFER_ROWS);
@@ -2646,6 +3583,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
 
         if (needsFetch && !isRequestingRows) {
+            currentVisibleStart = chunkStart;
+            currentVisibleEnd = chunkEnd;
+
             isRequestingRows = true;
 
             try {
@@ -2673,15 +3613,19 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     const onScroll = debounce(() => {
         updateVisibleRows();
-    }, 50); // Increased debounce to reduce fluctuation
+    }, 16);
 
     function initializeVirtualScrolling() {
         const container = getTableContainer();
         if (!container) return;
 
-        // Remove any existing listener first
+        if (activeScrollContainer && activeScrollContainer !== container) {
+            activeScrollContainer.removeEventListener('scroll', onScroll);
+        }
+
         container.removeEventListener('scroll', onScroll);
         container.addEventListener('scroll', onScroll, { passive: true });
+        activeScrollContainer = container;
         updateVisibleRows();
     }
 
@@ -2704,6 +3648,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
             if (row >= minRow && row <= maxRow && col >= minCol && col <= maxCol) {
                 cell.classList.add('selected');
+                if (row === minRow) cell.classList.add('selection-top');
+                if (row === maxRow) cell.classList.add('selection-bottom');
+                if (col === minCol) cell.classList.add('selection-left');
+                if (col === maxCol) cell.classList.add('selection-right');
                 selectedCells.add(cell);
             }
         });
@@ -2765,6 +3713,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     function setVersionPreviewMode(isPreview: boolean, label?: string) {
         isVersionPreviewMode = isPreview;
         document.body.classList.toggle('preview-mode', isPreview);
+        applyInteractiveControlState();
+        if (isPreview) {
+            hideImagePreview();
+        }
 
         const banner = ensurePreviewBanner();
         if (isPreview) {
@@ -2812,26 +3764,14 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         columnWidths = wsMeta.columnWidths || [];
         mergedCells = wsMeta.mergedCells || [];
         allRowHeights = wsMeta.rowHeights || [];
-        
-        // Pre-calculate total content height for stable scrolling
-        totalContentHeight = 0;
-        for (let i = 0; i < totalRows; i++) {
-            totalContentHeight += getEffectiveRowHeightByIndex(i);
-        }
+        invalidateRowMetrics();
+        ensureRowOffsetPrefix();
 
         // Allow the overlay to render
         setTimeout(() => {
             try {
                 const container = document.getElementById('tableContainer');
                 if (!container) return;
-
-                // Rescue the toolbar if it's currently inside tableContainer
-                const toolbarEl = document.getElementById('toolbar') as HTMLElement | null;
-                const toolbarParent = toolbarEl ? toolbarEl.parentElement : null;
-                const wasInTableContainer = toolbarParent && container.contains(toolbarParent);
-                if (wasInTableContainer && toolbarEl) {
-                    document.body.appendChild(toolbarEl); // Keep it safe in the body for a moment
-                }
 
                 container.innerHTML = createTableShell();
                 ensureHeaderVisible();
@@ -2840,9 +3780,18 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 initializeHyperlinkHover();
                 initializeVirtualScrolling();
 
-                // Put the toolbar back
-                if (wasInTableContainer && toolbarManager) {
-                    toolbarManager.applyStickyLayout(!!currentSettings.stickyToolbar, 'content', '.table-scroll');
+                const toolbarEl = document.getElementById('toolbar') as HTMLElement | null;
+                if (toolbarEl) {
+                    toolbarEl.classList.remove('hidden');
+                    toolbarEl.style.removeProperty('display');
+                }
+
+                if (toolbarManager) {
+                    applyToolbarLayout(toolbarManager, {
+                        stickyToolbar: !!currentSettings.stickyToolbar,
+                        scrollTarget: '#content',
+                        onLayoutApplied: initializeVirtualScrolling
+                    });
                 }
             } finally {
                 hideLoading();
@@ -3228,10 +4177,40 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             const cellTarget = target.closest('td, th') as HTMLElement;
             if (!cellTarget) return;
 
+            if (cellTarget.tagName === 'TD' && target.closest('.xlsx-cell-checkbox, .xlsx-cell-dropdown, .xlsx-dropdown-edit-button, .xlsx-rating-star, .xlsx-cell-date')) {
+                const state = captureCellUndoState(cellTarget);
+                if (state) {
+                    pendingControlUndoState.set(cellTarget, state);
+                }
+            }
+
             const isHeaderInteraction =
                 cellTarget.classList.contains('col-header') ||
                 cellTarget.classList.contains('row-header') ||
                 cellTarget.classList.contains('corner-cell');
+
+            if (!isEditMode && cellTarget.tagName === 'TD' && !isHeaderInteraction) {
+                const cellType = getCellType(cellTarget);
+                const controlTarget = target.closest('.xlsx-cell-checkbox, .xlsx-cell-dropdown, .xlsx-dropdown-edit-button, .xlsx-rating-star, .xlsx-cell-date') as HTMLElement | null;
+                const canEditControls = areInteractiveControlsEnabled();
+
+                if ((cellType === 'checkbox' || cellType === 'dropdown' || cellType === 'rating' || cellType === 'date') && canEditControls) {
+                    if (!(e.ctrlKey || e.metaKey || e.shiftKey)) {
+                        clearSelection();
+                        selectCell(cellTarget);
+                    }
+
+                    if (cellType === 'date' && controlTarget) {
+                        const dateInput = cellTarget.querySelector('.xlsx-cell-date') as HTMLInputElement | null;
+                        if (dateInput && !dateInput.disabled) {
+                            dateInput.focus();
+                        }
+                    }
+
+                    updateSelectionInfo();
+                    return;
+                }
+            }
 
             if (isEditMode && !isHeaderInteraction) {
                 if (cellTarget.tagName === 'TD') {
@@ -3241,7 +4220,26 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
                     const row = parseInt(cellTarget.dataset.row!, 10);
                     const col = parseInt(cellTarget.dataset.col!, 10);
+                    const cellType = getCellType(cellTarget);
+                    const controlTarget = target.closest('.xlsx-cell-checkbox, .xlsx-cell-dropdown, .xlsx-dropdown-edit-button, .xlsx-rating-star, .xlsx-cell-date') as HTMLElement | null;
                     const wasSingleActiveCell = activeCell === cellTarget && selectedCells.size === 1;
+
+                    // Match CSV/TSV behavior: single-cell mode should clear row/column mode selections.
+                    selectedColumnIndices.clear();
+                    selectedRowIndices.clear();
+                    selectedColumns.clear();
+                    selectedRows.clear();
+
+                    if ((cellType === 'checkbox' || cellType === 'dropdown' || cellType === 'rating' || cellType === 'date') && controlTarget) {
+                        if (!(e.ctrlKey || e.metaKey || e.shiftKey)) {
+                            clearSelection();
+                            selectCell(cellTarget);
+                        }
+                        pendingEditCell = null;
+                        pendingEditDrag = false;
+                        updateSelectionInfo();
+                        return;
+                    }
 
                     if (formatPainterArmed && formatPainterStyle) {
                         formatPainterExecuting = true;
@@ -3255,13 +4253,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                         selectionStart = null;
                         selectionEnd = null;
                         if (cellTarget.classList.contains('selected')) {
-                            cellTarget.classList.remove('selected');
+                            cellTarget.classList.remove('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                             selectedCells.delete(cellTarget);
                             if (cellTarget === activeCell) {
                                 activeCell = null;
                             }
                         } else {
-                            cellTarget.classList.add('selected');
+                            cellTarget.classList.add('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                             selectedCells.add(cellTarget);
                             if (activeCell) {
                                 activeCell.classList.remove('active-cell');
@@ -3281,13 +4279,14 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                         isSelecting = true;
                         selectionStart = { row, col };
                         selectionEnd = { row, col };
-                        pendingEditCell = (wasSingleActiveCell && !formatPainterExecuting) ? cellTarget : null;
+                        pendingEditCell = (wasSingleActiveCell && !formatPainterExecuting && cellType === 'text') ? cellTarget : null;
                         pendingEditDrag = false;
                     }
 
-                    if (!isCellEditing) {
+                    if (!isCellEditing && cellType === 'text') {
                         e.preventDefault();
                     }
+
                     updateSelectionInfo();
                 }
                 return;
@@ -3315,9 +4314,24 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
             if (cellTarget.classList.contains('corner-cell')) {
                 clearSelection();
+
+                for (let c = 0; c < columnCount; c++) {
+                    selectedColumns.add(c);
+                    selectedColumnIndices.add(c);
+                }
+
+                selectionStart = { row: 0, col: 0 };
+                selectionEnd = { row: Math.max(0, totalRows - 1), col: Math.max(0, columnCount - 1) };
+
                 const allCells = table.querySelectorAll('td') as NodeListOf<HTMLElement>;
                 allCells.forEach(cell => {
                     cell.classList.add('selected');
+                    const row = parseInt(cell.dataset.row || '-1', 10);
+                    const col = parseInt(cell.dataset.col || '-1', 10);
+                    if (row === 0) cell.classList.add('selection-top');
+                    if (row === totalRows - 1) cell.classList.add('selection-bottom');
+                    if (col === 0) cell.classList.add('selection-left');
+                    if (col === columnCount - 1) cell.classList.add('selection-right');
                     selectedCells.add(cell);
                 });
                 if (allCells.length > 0) {
@@ -3332,9 +4346,15 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 const row = parseInt(cellTarget.dataset.row!, 10);
                 const col = parseInt(cellTarget.dataset.col!, 10);
 
+                // Match CSV/TSV behavior: single-cell mode should clear row/column mode selections.
+                selectedColumnIndices.clear();
+                selectedRowIndices.clear();
+                selectedColumns.clear();
+                selectedRows.clear();
+
                 if (e.ctrlKey || e.metaKey) {
                     if (cellTarget.classList.contains('selected')) {
-                        cellTarget.classList.remove('selected');
+                        cellTarget.classList.remove('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                         selectedCells.delete(cellTarget);
                         if (cellTarget === activeCell) {
                             cellTarget.classList.remove('active-cell');
@@ -3347,7 +4367,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                             }
                         }
                     } else {
-                        cellTarget.classList.add('selected');
+                        cellTarget.classList.add('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                         selectedCells.add(cellTarget);
                         if (activeCell) {
                             activeCell.classList.remove('active-cell');
@@ -3389,6 +4409,147 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
             // Start auto-scroll loop if needed
             startAutoScroll();
+        });
+
+        table.addEventListener('input', (e) => {
+            if (!isEditMode) return;
+
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+
+            const editableCell = target.closest('td[contenteditable="true"]') as HTMLElement | null;
+            if (!editableCell) return;
+
+            scheduleAutoSave('text');
+        });
+
+        table.addEventListener('focusin', (e) => {
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+
+            const controlTarget = target.closest('.xlsx-cell-checkbox, .xlsx-cell-dropdown, .xlsx-dropdown-edit-button, .xlsx-rating-star, .xlsx-cell-date') as HTMLElement | null;
+            if (!controlTarget) return;
+
+            const cell = controlTarget.closest('td') as HTMLElement | null;
+            if (!cell) return;
+
+            const state = captureCellUndoState(cell);
+            if (state) {
+                pendingControlUndoState.set(cell, state);
+            }
+        });
+
+        table.addEventListener('change', (e) => {
+            const controlsEditable = areInteractiveControlsEnabled();
+            if (!controlsEditable) return;
+
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+
+            const checkbox = target.closest('.xlsx-cell-checkbox') as HTMLInputElement | null;
+            if (checkbox) {
+                const cell = checkbox.closest('td') as HTMLElement | null;
+                if (!cell) return;
+                const before = pendingControlUndoState.get(cell) || captureCellUndoState(cell);
+                pendingControlUndoState.delete(cell);
+                updateCheckboxCellPresentation(cell, !!checkbox.checked);
+                const after = captureCellUndoState(cell);
+                pushSingleCellUndo(before, after);
+                if (isEditMode) {
+                    scheduleAutoSave('control');
+                } else {
+                    persistInteractiveControlEdit(cell);
+                }
+                return;
+            }
+
+            const dropdown = target.closest('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+            if (dropdown) {
+                const cell = dropdown.closest('td') as HTMLElement | null;
+                if (!cell) return;
+                const before = pendingControlUndoState.get(cell) || captureCellUndoState(cell);
+                pendingControlUndoState.delete(cell);
+                updateDropdownCellPresentation(cell, dropdown.value);
+                const after = captureCellUndoState(cell);
+                pushSingleCellUndo(before, after);
+                if (isEditMode) {
+                    scheduleAutoSave('control');
+                } else {
+                    persistInteractiveControlEdit(cell);
+                }
+                return;
+            }
+
+            const dateInput = target.closest('.xlsx-cell-date') as HTMLInputElement | null;
+            if (dateInput) {
+                const cell = dateInput.closest('td') as HTMLElement | null;
+                if (!cell) return;
+                const before = pendingControlUndoState.get(cell) || captureCellUndoState(cell);
+                pendingControlUndoState.delete(cell);
+                updateDateCellPresentation(cell, dateInput.value);
+                const after = captureCellUndoState(cell);
+                pushSingleCellUndo(before, after);
+                if (isEditMode) {
+                    scheduleAutoSave('control');
+                } else {
+                    persistInteractiveControlEdit(cell);
+                }
+            }
+        });
+
+        table.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+
+            const editButton = target.closest('.xlsx-dropdown-edit-button') as HTMLButtonElement | null;
+            if (editButton) {
+                const cell = editButton.closest('td') as HTMLElement | null;
+                if (!cell || editButton.disabled) return;
+
+                void editDropdownOptionsForCell(cell);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
+            const ratingStar = target.closest('.xlsx-rating-star') as HTMLButtonElement | null;
+            if (ratingStar) {
+                const cell = ratingStar.closest('td') as HTMLElement | null;
+                if (!cell || ratingStar.disabled) return;
+
+                const before = pendingControlUndoState.get(cell) || captureCellUndoState(cell);
+                pendingControlUndoState.delete(cell);
+                const clickedValue = normalizeRatingValue(ratingStar.getAttribute('data-rating-value'));
+                const currentValue = normalizeRatingValue(cell.getAttribute('data-rating-value'));
+                const nextValue = clickedValue === currentValue ? 0 : clickedValue;
+                updateRatingCellPresentation(cell, nextValue);
+                const after = captureCellUndoState(cell);
+                pushSingleCellUndo(before, after);
+
+                if (isEditMode) {
+                    scheduleAutoSave('control');
+                } else {
+                    persistInteractiveControlEdit(cell);
+                }
+
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
+            const imageTarget = target.closest('.xlsx-cell-image, .cell-image-content') as HTMLElement | null;
+            if (!imageTarget) return;
+
+            const cell = imageTarget.closest('td') as HTMLElement | null;
+            if (!cell || getCellType(cell) !== 'image') return;
+
+            const imageEl = cell.querySelector('.xlsx-cell-image') as HTMLImageElement | null;
+            const src = imageEl?.getAttribute('src') || '';
+            if (!src) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            showImagePreview(src);
         });
 
         function startAutoScroll() {
@@ -3457,7 +4618,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             if (!target) return;
             if (!(target.closest('#tableContainer') || target.closest('.toolbar') || target.closest('#xlsxTable'))) return;
 
-            if (target.closest('#xlsxEditFormattingStrip select') || target.closest('#sheetFindOverlay input')) {
+            if (target.closest('select') || target.closest('input') || target.closest('.xlsx-dropdown-edit-button')) {
                 return;
             }
 
@@ -3495,6 +4656,42 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         document.addEventListener('keydown', (e) => {
             const isCmdOrCtrl = e.ctrlKey || e.metaKey;
             const target = e.target as HTMLElement | null;
+
+            if (e.key === 'Escape' && imagePreviewOverlayEl && !imagePreviewOverlayEl.classList.contains('hidden')) {
+                e.preventDefault();
+                hideImagePreview();
+                return;
+            }
+
+            if (e.key === 'Escape' && insertControlPopupEl && !insertControlPopupEl.classList.contains('hidden')) {
+                e.preventDefault();
+                hideInsertControlPopup();
+                return;
+            }
+
+            if (e.key === 'Escape' && dropdownOptionsPopupEl && !dropdownOptionsPopupEl.classList.contains('hidden')) {
+                e.preventDefault();
+                hideDropdownOptionsPopup(null);
+                return;
+            }
+
+            const isFormEntryTarget = !!target && (
+                target.closest('#xlsxDropdownOptionsPopup') !== null ||
+                target.closest('.xlsx-cell-dropdown') !== null ||
+                target.closest('.xlsx-dropdown-edit-button') !== null ||
+                target.closest('.xlsx-cell-date') !== null ||
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT'
+            );
+
+            if (isFormEntryTarget) {
+                if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    saveEdits(false);
+                }
+                return;
+            }
 
             if (isCmdOrCtrl && e.key.toLowerCase() === 'f') {
                 e.preventDefault();
@@ -3539,6 +4736,32 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 e.preventDefault();
                 saveEdits(false);
                 return;
+            }
+
+            const isUndoShortcut = isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'z';
+            const isRedoShortcut = isCmdOrCtrl && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'));
+            if (isUndoShortcut || isRedoShortcut) {
+                const active = document.activeElement as HTMLElement | null;
+                const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
+
+                if (isEditingCell && isEditMode) {
+                    e.preventDefault();
+                    exitCellEditMode();
+                }
+
+                const handled = isRedoShortcut ? redoEditAction() : undoEditAction();
+                if (handled) {
+                    e.preventDefault();
+                    if (isEditMode) {
+                        scheduleAutoSave('text');
+                    }
+                    return;
+                }
+
+                if (isEditMode) {
+                    e.preventDefault();
+                    return;
+                }
             }
 
             if (!isCellEditing) {
@@ -3602,37 +4825,6 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             }
 
             if (isEditMode) {
-                if (isCmdOrCtrl && (e.key.toLowerCase() === 'z')) {
-                    e.preventDefault();
-                    const active = document.activeElement as HTMLElement | null;
-                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
-                    if (isEditingCell) {
-                        if (e.shiftKey) document.execCommand('redo');
-                        else document.execCommand('undo');
-                    } else {
-                        if (e.shiftKey) {
-                            if (!redoEditAction()) {
-                                document.execCommand('redo');
-                            }
-                        } else if (!undoEditAction()) {
-                            document.execCommand('undo');
-                        }
-                    }
-                    return;
-                }
-
-                if (isCmdOrCtrl && e.key.toLowerCase() === 'y') {
-                    e.preventDefault();
-                    const active = document.activeElement as HTMLElement | null;
-                    const isEditingCell = !!active && active.tagName === 'TD' && active.getAttribute('contenteditable') === 'true';
-                    if (isEditingCell) {
-                        document.execCommand('redo');
-                    } else if (!redoEditAction()) {
-                        document.execCommand('redo');
-                    }
-                    return;
-                }
-
                 if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
                     e.preventDefault();
                     applyEditFormatting('bold');
@@ -3671,8 +4863,23 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 if (!currentTable) return;
                 const allCells = currentTable.querySelectorAll('td') as NodeListOf<HTMLElement>;
                 clearSelection();
+
+                for (let c = 0; c < columnCount; c++) {
+                    selectedColumns.add(c);
+                    selectedColumnIndices.add(c);
+                }
+
+                selectionStart = { row: 0, col: 0 };
+                selectionEnd = { row: Math.max(0, totalRows - 1), col: Math.max(0, columnCount - 1) };
+
                 allCells.forEach(cell => {
                     cell.classList.add('selected');
+                    const row = parseInt(cell.dataset.row || '-1', 10);
+                    const col = parseInt(cell.dataset.col || '-1', 10);
+                    if (row === 0) cell.classList.add('selection-top');
+                    if (row === totalRows - 1) cell.classList.add('selection-bottom');
+                    if (col === 0) cell.classList.add('selection-left');
+                    if (col === columnCount - 1) cell.classList.add('selection-right');
                     selectedCells.add(cell);
                 });
                 if (allCells.length > 0) {
@@ -3791,6 +4998,54 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }, 120);
     }
 
+    function ensureImagePreviewOverlay(): HTMLElement {
+        if (imagePreviewOverlayEl) return imagePreviewOverlayEl;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'xlsxImagePreviewOverlay';
+        overlay.className = 'xlsx-image-preview-overlay hidden';
+        overlay.innerHTML = `
+            <div class="xlsx-image-preview-dialog" role="dialog" aria-modal="true" aria-label="Image preview">
+                <button type="button" id="xlsxImagePreviewClose" class="xlsx-image-preview-close" aria-label="Close image preview">Close</button>
+                <img id="xlsxImagePreviewImg" class="xlsx-image-preview-image" alt="XLSX cell image preview" />
+            </div>
+        `;
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                hideImagePreview();
+            }
+        });
+
+        const closeBtn = overlay.querySelector('#xlsxImagePreviewClose') as HTMLButtonElement | null;
+        closeBtn?.addEventListener('click', () => hideImagePreview());
+
+        document.body.appendChild(overlay);
+        imagePreviewOverlayEl = overlay;
+        return overlay;
+    }
+
+    function showImagePreview(src: string) {
+        if (!src) return;
+        const overlay = ensureImagePreviewOverlay();
+        const img = overlay.querySelector('#xlsxImagePreviewImg') as HTMLImageElement | null;
+        if (!img) return;
+
+        img.src = src;
+        overlay.classList.remove('hidden');
+        document.body.classList.add('image-preview-open');
+    }
+
+    function hideImagePreview() {
+        if (!imagePreviewOverlayEl) return;
+        const img = imagePreviewOverlayEl.querySelector('#xlsxImagePreviewImg') as HTMLImageElement | null;
+        if (img) {
+            img.removeAttribute('src');
+        }
+        imagePreviewOverlayEl.classList.add('hidden');
+        document.body.classList.remove('image-preview-open');
+    }
+
     function initializeHyperlinkHover() {
         const table = document.querySelector('table');
         if (!table) return;
@@ -3836,6 +5091,23 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const previousSpacious = !!currentSettings.spaciousCells;
         currentSettings = normalizeXlsxSettings(settings, currentSettings);
 
+        if (!currentSettings.autoSave) {
+            clearAutoSaveTimer();
+            if (!isEditMode && pendingOutsideControlEdits.length > 0) {
+                showManualSaveReminderIfNeeded();
+            }
+        } else {
+            if (isEditMode && hasPendingXlsxEdits()) {
+                scheduleAutoSave('text');
+            } else if (!isEditMode && pendingOutsideControlEdits.length > 0) {
+                saveEdits(false, true);
+            }
+        }
+
+        if (currentSettings.autoSave) {
+            manualSaveReminderUntil = 0;
+        }
+
         // Show/hide enable button based on whether this is the default editor
         if (toolbarManager) {
             toolbarManager.setButtonVisibility('enableAsDefaultButton', currentSettings.isDefaultEditor === false);
@@ -3847,17 +5119,19 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         document.body.classList.toggle('first-row-as-header', !!currentSettings.firstRowIsHeader);
         document.body.classList.toggle('spacious-cells', !!currentSettings.spaciousCells);
 
-        if (toolbarManager) {
-            toolbarManager.applyStickyLayout(isEditMode ? true : !!currentSettings.stickyToolbar, 'content', '.table-scroll');
-            setTimeout(() => toolbarManager?.updateHeaderHeight(), 0);
-        } else {
-            document.body.classList.toggle('sticky-toolbar-enabled', isEditMode ? true : !!currentSettings.stickyToolbar);
-        }
+        applyToolbarLayout(toolbarManager, {
+            stickyToolbar: !!currentSettings.stickyToolbar,
+            forceSticky: isEditMode,
+            scrollTarget: '#content',
+            onLayoutApplied: initializeVirtualScrolling
+        });
 
         if (!currentSettings.hyperlinkPreview) hideLinkTooltip();
+        applyInteractiveControlState();
 
         const spaciousChanged = previousSpacious !== !!currentSettings.spaciousCells;
         if (spaciousChanged && worksheetsMeta.length > 0) {
+            invalidateRowMetrics();
             currentVisibleStart = 0;
             currentVisibleEnd = 0;
             rerenderCurrentSheetFromLocalState();
@@ -3870,9 +5144,62 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     function enterCellEditMode(cell: HTMLElement, clearContent = false) {
         if (!isEditMode) return;
+
+        const cellType = getCellType(cell);
+        if (cellType === 'checkbox') {
+            const checkbox = cell.querySelector('.xlsx-cell-checkbox') as HTMLInputElement | null;
+            if (checkbox && !checkbox.disabled) {
+                const before = captureCellUndoState(cell);
+                const next = !checkbox.checked;
+                updateCheckboxCellPresentation(cell, next);
+                const after = captureCellUndoState(cell);
+                pushSingleCellUndo(before, after);
+                scheduleAutoSave('control');
+            }
+            return;
+        }
+
+        if (cellType === 'dropdown') {
+            const dropdown = cell.querySelector('.xlsx-cell-dropdown') as HTMLSelectElement | null;
+            if (dropdown && !dropdown.disabled) {
+                dropdown.focus();
+            }
+            return;
+        }
+
+        if (cellType === 'rating') {
+            const current = normalizeRatingValue(cell.getAttribute('data-rating-value'));
+            const next = current >= 5 ? 0 : current + 1;
+            const before = captureCellUndoState(cell);
+            updateRatingCellPresentation(cell, next);
+            const after = captureCellUndoState(cell);
+            pushSingleCellUndo(before, after);
+            scheduleAutoSave('control');
+            return;
+        }
+
+        if (cellType === 'date') {
+            const dateInput = cell.querySelector('.xlsx-cell-date') as HTMLInputElement | null;
+            if (dateInput && !dateInput.disabled) {
+                dateInput.focus();
+                dateInput.showPicker?.();
+            }
+            return;
+        }
+
+        if (cellType === 'image') {
+            const imageEl = cell.querySelector('.xlsx-cell-image') as HTMLImageElement | null;
+            const src = imageEl?.getAttribute('src') || '';
+            if (src) {
+                showImagePreview(src);
+            }
+            return;
+        }
+
         if (isCellEditing) {
             exitCellEditMode();
         }
+        activeTextEditBeforeState = captureCellUndoState(cell);
         isCellEditing = true;
         cell.setAttribute('contenteditable', 'true');
         cell.setAttribute('spellcheck', 'false');
@@ -3892,14 +5219,35 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     function exitCellEditMode() {
         if (!isCellEditing) return;
         isCellEditing = false;
+
+        const editableCell = (document.querySelector('td[contenteditable="true"]') as HTMLElement | null)
+            || ((document.activeElement as HTMLElement | null)?.tagName === 'TD' ? document.activeElement as HTMLElement : null);
         const active = document.activeElement as HTMLElement;
+        let changed = false;
+        let afterState: CellUndoState | null = null;
+
+        if (editableCell) {
+            const original = (editableCell.dataset.originalText || '').replace(/\u00a0/g, '');
+            const current = getCellNormalizedValue(editableCell).replace(/\u00a0/g, '');
+            changed = current !== original;
+            afterState = captureCellUndoState(editableCell);
+            editableCell.removeAttribute('contenteditable');
+        }
+
         if (active && active.tagName === 'TD') {
-            active.removeAttribute('contenteditable');
             active.blur();
         }
+
         document.querySelectorAll('td[contenteditable="true"]').forEach(td => {
             td.removeAttribute('contenteditable');
         });
+
+        if (changed) {
+            pushSingleCellUndo(activeTextEditBeforeState, afterState);
+            scheduleAutoSave('text');
+        }
+
+        activeTextEditBeforeState = null;
     }
 
     async function moveSelection(rowDelta: number, colDelta: number, shiftKey: boolean) {
@@ -3924,10 +5272,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!nextCell) {
             const container = getTableContainer();
             if (container) {
-                let top = 0;
-                for (let i = 0; i < nextR; i++) {
-                    top += getEffectiveRowHeightByIndex(i);
-                }
+                const top = getRowTopOffset(nextR);
                 container.scrollTop = Math.max(0, top - 100);
                 await updateVisibleRows();
                 nextCell = document.querySelector(`td[data-row="${nextR}"][data-col="${nextC}"]`) as HTMLElement;
@@ -3980,6 +5325,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         isEditMode = !!enabled;
         document.body.classList.toggle('edit-mode', isEditMode);
+        hideImagePreview();
 
         const toolbarEl = document.getElementById('toolbar') as HTMLElement | null;
         if (toolbarEl) {
@@ -3997,9 +5343,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             }
         }
 
-        if (toolbarManager) {
-            toolbarManager.applyStickyLayout(isEditMode ? true : !!currentSettings.stickyToolbar, 'content', '.table-scroll');
-        }
+        applyToolbarLayout(toolbarManager, {
+            stickyToolbar: !!currentSettings.stickyToolbar,
+            forceSticky: isEditMode,
+            scrollTarget: '#content',
+            onLayoutApplied: initializeVirtualScrolling
+        });
 
         const sheetSelector = document.getElementById('sheetSelector');
         const toggleExpandButton = document.getElementById('toggleExpandButton');
@@ -4013,6 +5362,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const toggleTableEditButton = document.getElementById('toggleTableEditButton');
         const saveTableEditsButton = document.getElementById('saveTableEditsButton');
         const cancelTableEditsButton = document.getElementById('cancelTableEditsButton');
+        const insertControlButton = document.getElementById('insertControlButton');
         const formatBoldButton = document.getElementById('formatBoldButton');
         const formatItalicButton = document.getElementById('formatItalicButton');
         const formatTextColorButton = document.getElementById('formatTextColorButton');
@@ -4022,6 +5372,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             toolbarManager.setButtonVisibility('toggleTableEditButton', !isEditMode);
             toolbarManager.setButtonVisibility('saveTableEditsButton', isEditMode);
             toolbarManager.setButtonVisibility('cancelTableEditsButton', isEditMode);
+            toolbarManager.setButtonVisibility('insertControlButton', isEditMode);
             toolbarManager.setButtonVisibility('formatBoldButton', false);
             toolbarManager.setButtonVisibility('formatItalicButton', false);
             toolbarManager.setButtonVisibility('formatTextColorButton', false);
@@ -4030,6 +5381,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             if (toggleTableEditButton) toggleTableEditButton.classList.toggle('hidden', isEditMode);
             if (saveTableEditsButton) saveTableEditsButton.classList.toggle('hidden', !isEditMode);
             if (cancelTableEditsButton) cancelTableEditsButton.classList.toggle('hidden', !isEditMode);
+            if (insertControlButton) insertControlButton.classList.toggle('hidden', !isEditMode);
             if (formatBoldButton) formatBoldButton.classList.add('hidden');
             if (formatItalicButton) formatItalicButton.classList.add('hidden');
             if (formatTextColorButton) formatTextColorButton.classList.add('hidden');
@@ -4057,6 +5409,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             hideHeaderContextMenu();
             hideColorPalette();
             hideBorderPopup();
+            hideInsertControlPopup();
+            clearAutoSaveTimer();
+            applyInteractiveControlState();
+
             clearSelection();
             lastEditRange = null;
             pendingWorksheetOps = [];
@@ -4072,14 +5428,33 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         clearSelection();
         editUndoStack.length = 0;
         editRedoStack.length = 0;
+        hideInsertControlPopup();
 
         // Enable contenteditable for table cells
         const table = document.querySelector('#tableContainer table');
         if (!table) return;
+
+        // Rebuild visible dropdown controls when entering edit mode so the inline Edit button appears immediately.
+        table.querySelectorAll('td[data-cell-type="dropdown"]').forEach((td) => {
+            const cell = td as HTMLElement;
+            const options = getDropdownOptionsFromCell(cell);
+            const selectedValue = getCellNormalizedValue(cell);
+
+            cell.innerHTML = renderDropdownCellContent({
+                options,
+                selectedValue,
+                allowInteractiveControls: areInteractiveControlsEnabled(),
+                showEditButton: true
+            });
+            updateDropdownCellPresentation(cell, selectedValue);
+        });
+
+        applyInteractiveControlState(table);
+
         table.querySelectorAll('td').forEach(td => {
             td.classList.add('editable-cell');
             const htmlTd = td as HTMLElement;
-            const currentText = normalizeCellText(htmlTd.textContent || '');
+            const currentText = getCellNormalizedValue(htmlTd);
             htmlTd.dataset.originalText = currentText;
             htmlTd.dataset.originalHtml = htmlTd.innerHTML;
         });
@@ -4092,58 +5467,101 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!table) return;
         table.querySelectorAll('td.editable-cell').forEach(td => {
             const htmlTd = td as HTMLElement;
-            const currentText = normalizeCellText(htmlTd.textContent || '');
+            const currentText = getCellNormalizedValue(htmlTd);
             htmlTd.dataset.originalText = currentText;
             htmlTd.dataset.originalHtml = htmlTd.innerHTML;
         });
     }
 
-    function saveEdits(shouldExit = false) {
-        if (isSaving || !isEditMode) return;
+    function saveEdits(shouldExit = false, isAutosave = false) {
+        if (isSaving) return;
+        if (isAutosave && !currentSettings.autoSave) return;
+
         const table = document.querySelector('#tableContainer table');
-        if (!table) return;
+        const canSaveFromEditMode = isEditMode && !!table;
+        const canSaveOutsideEditMode = !isEditMode && pendingOutsideControlEdits.length > 0;
 
-        isSaving = true;
-        exitAfterSave = !!shouldExit;
-        setButtonsEnabled(false);
-
-        if (document.activeElement && document.activeElement.tagName === 'TD') {
-            (document.activeElement as HTMLElement).blur();
+        if (!canSaveFromEditMode && !canSaveOutsideEditMode) {
+            return;
         }
-        clearSelection();
-        if (window.getSelection) {
-            window.getSelection()!.removeAllRanges();
+
+        clearAutoSaveTimer();
+        isSaving = true;
+        exitAfterSave = canSaveFromEditMode && !isAutosave ? !!shouldExit : false;
+        if (canSaveFromEditMode) {
+            setButtonsEnabled(false);
+
+            if (document.activeElement && document.activeElement.tagName === 'TD') {
+                (document.activeElement as HTMLElement).blur();
+            }
+            clearSelection();
+            if (window.getSelection) {
+                window.getSelection()!.removeAllRanges();
+            }
         }
 
         const edits: any[] = [];
         const richEdits: any[] = [];
-        table.querySelectorAll('td.editable-cell').forEach(td => {
-            const htmlTd = td as HTMLElement;
-            const row = parseInt(htmlTd.getAttribute('data-rownum') || '0', 10);
-            const col = parseInt(htmlTd.getAttribute('data-colnum') || '0', 10);
-            if (!row || !col) return;
+        let styleEdits: CellStyleEdit[] = [];
+        let operations: WorksheetOp[] = [];
 
-            const original = (htmlTd.dataset.originalText || '').replace(/\u00a0/g, '');
-            const current = (htmlTd.textContent || '').replace(/\u00a0/g, '');
-            const originalHtml = (htmlTd.dataset.originalHtml || '').trim();
-            const currentHtml = (htmlTd.innerHTML || '').trim();
+        if (canSaveFromEditMode && table) {
+            table.querySelectorAll('td.editable-cell').forEach(td => {
+                const htmlTd = td as HTMLElement;
+                const row = parseInt(htmlTd.getAttribute('data-rownum') || '0', 10);
+                const col = parseInt(htmlTd.getAttribute('data-colnum') || '0', 10);
+                if (!row || !col) return;
 
-            const runs = getCellRichRuns(htmlTd);
-            const shouldSaveRuns = hasRunFormatting(runs) || currentHtml !== originalHtml;
+                const cellType = getCellType(htmlTd);
+                const original = (htmlTd.dataset.originalText || '').replace(/\u00a0/g, '');
+                const current = getCellNormalizedValue(htmlTd).replace(/\u00a0/g, '');
+                const originalHtml = (htmlTd.dataset.originalHtml || '').trim();
+                const currentHtml = (htmlTd.innerHTML || '').trim();
 
-            if (shouldSaveRuns) {
-                richEdits.push({ row, col, runs });
+                const runs = cellType === 'text' ? getCellRichRuns(htmlTd) : [];
+                const shouldSaveRuns = cellType === 'text' && (hasRunFormatting(runs) || currentHtml !== originalHtml);
+
+                if (shouldSaveRuns) {
+                    richEdits.push({ row, col, runs });
+                }
+
+                if (current !== original) {
+                    edits.push({ row, col, value: current });
+                }
+            });
+
+            styleEdits = Array.from(pendingCellStyleEdits.values());
+            operations = pendingWorksheetOps;
+        } else {
+            pendingOutsideControlEdits.forEach((edit) => {
+                edits.push({ row: edit.row, col: edit.col, value: edit.value });
+            });
+        }
+
+        if (canSaveFromEditMode && pendingOutsideControlEdits.length > 0) {
+            pendingOutsideControlEdits.forEach((edit) => {
+                const existingIndex = edits.findIndex((candidate) => candidate.row === edit.row && candidate.col === edit.col);
+                if (existingIndex >= 0) {
+                    edits[existingIndex].value = edit.value;
+                    return;
+                }
+                edits.push({ row: edit.row, col: edit.col, value: edit.value });
+            });
+        }
+
+        if (!edits.length && !richEdits.length && !styleEdits.length && !operations.length) {
+            isSaving = false;
+            if (canSaveFromEditMode) {
+                setButtonsEnabled(true);
             }
+            return;
+        }
 
-            if (current !== original) {
-                edits.push({ row, col, value: current });
-            }
-        });
-
-        setLoadingText('Saving worksheet...');
-        showLoading();
-        const styleEdits = Array.from(pendingCellStyleEdits.values());
-        vscode.postMessage({ command: 'saveXlsxEdits', sheetIndex: currentWorksheet, edits, richEdits, styleEdits, operations: pendingWorksheetOps });
+        if (!isAutosave) {
+            setLoadingText('Saving worksheet...');
+            showLoading();
+        }
+        vscode.postMessage({ command: 'saveXlsxEdits', sheetIndex: currentWorksheet, edits, richEdits, styleEdits, operations, isAutosave });
     }
 
     function setExpandedMode(isExpanded: boolean) {
@@ -4217,6 +5635,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     }
                     toolbarManager?.updateHeaderHeight();
                 }, 180);
+            },
+            onInsertControl: () => {
+                const btn = document.getElementById('insertControlButton') as HTMLElement | null;
+                if (btn) {
+                    showInsertControlPopup(btn);
+                }
             },
             onFormatBold: () => applyEditFormatting('bold'),
             onFormatItalic: () => applyEditFormatting('italic'),
@@ -4293,6 +5717,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
 
         wireSettingsUI();
+
+        document.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+
+            if (!target.closest('#insertControlButton') && !target.closest('#xlsxInsertControlPopup') && !target.closest('#xlsxDropdownOptionsPopup')) {
+                hideInsertControlPopup();
+            }
+
+            if (!target.closest('#xlsxDropdownOptionsPopup') && !target.closest('#xlsxInsertControlPopup') && !target.closest('#insertControlButton') && dropdownOptionsPopupEl && !dropdownOptionsPopupEl.classList.contains('hidden')) {
+                hideDropdownOptionsPopup(null);
+            }
+        });
+
         window.addEventListener('resize', () => {
             toolbarManager?.updateHeaderHeight();
         });
@@ -4345,16 +5783,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             if (message.ok) {
                 const thead = document.querySelector('#xlsxTable thead') as HTMLElement | null;
                 if (thead) thead.style.display = 'table-header-group';
-                showToast('Saved');
+                const isAutosaveResult = !!message.isAutosave;
+                showToast(isAutosaveResult ? 'Autosaved' : 'Saved', isAutosaveResult, 1000);
                 pendingWorksheetOps = [];
                 pendingCellStyleEdits.clear();
+                clearPendingOutsideControlEdits();
+                manualSaveReminderUntil = 0;
                 if (exitAfterSave) {
                     setEditMode(false);
-                } else {
+                } else if (isEditMode) {
                     captureOriginalCellValues();
                 }
             } else {
-                showToast('Error saving');
+                const isAutosaveResult = !!message.isAutosave;
+                showToast(isAutosaveResult ? 'Autosave failed' : 'Error saving', isAutosaveResult, 1000);
             }
             return;
         }
@@ -4386,8 +5828,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             worksheetsMeta = Array.isArray(message.worksheets) ? message.worksheets : [];
             currentWorksheet = Math.min(Math.max(previousWorksheet, 0), Math.max(worksheetsMeta.length - 1, 0));
 
-            const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : 60;
-            document.documentElement.style.setProperty('--row-header-width', rowHeaderWidth + 'px');
+            const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : MIN_ROW_HEADER_WIDTH;
+            setRowHeaderWidth(rowHeaderWidth, true);
 
             attachHandlersOnce();
             populateSheetSelector();
@@ -4440,8 +5882,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             });
             currentWorksheet = Math.min(Math.max(previousWorksheet, 0), Math.max(worksheetsMeta.length - 1, 0));
 
-            const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : 60;
-            document.documentElement.style.setProperty('--row-header-width', rowHeaderWidth + 'px');
+            const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : MIN_ROW_HEADER_WIDTH;
+            setRowHeaderWidth(rowHeaderWidth, true);
 
             attachHandlersOnce();
             populateSheetSelector();

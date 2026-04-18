@@ -2,7 +2,7 @@
     "name": "xlsx-viewer",
     "displayName": "XLSX, CSV, TSV & Markdown Editor",
     "description": "View and edit XLSX files with colors, fonts and styles from Excel files (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
-    "version": "1.8.4",
+    "version": "1.8.5",
     "publisher": "muhammad-ahmad",
     "engines": {
         "vscode": "^1.60.0"
@@ -141,6 +141,11 @@
                     "default": true,
                     "description": "Keep the CSV toolbar sticky at the top of the editor."
                 },
+                "xlsxViewer.csv.autoSave": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically save CSV edits after a short debounce."
+                },
                 "xlsxViewer.csv.spaciousCells": {
                     "type": "boolean",
                     "default": false,
@@ -161,6 +166,11 @@
                     "default": true,
                     "description": "Keep the TSV toolbar sticky at the top of the editor."
                 },
+                "xlsxViewer.tsv.autoSave": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically save TSV edits after a short debounce."
+                },
                 "xlsxViewer.tsv.spaciousCells": {
                     "type": "boolean",
                     "default": false,
@@ -180,6 +190,30 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Make the first row sticky when 'First row is header' is enabled."
+                },
+                "xlsxViewer.xlsx.autoSave": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Automatically save XLSX edits shortly after text, checkbox, dropdown, formatting, or structure changes."
+                },
+                "xlsxViewer.xlsx.autoSaveMode": {
+                    "type": "string",
+                    "default": "all",
+                    "enum": [
+                        "all",
+                        "controlsOnly"
+                    ],
+                    "description": "Choose whether XLSX autosave applies to all changes or only checkbox/dropdown changes."
+                },
+                "xlsxViewer.xlsx.showManualSavePopup": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "When XLSX autosave is off, show a brief reminder popup to save manually after edits."
+                },
+                "xlsxViewer.xlsx.allowInteractiveControlsOutsideEditMode": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Allow checkbox and dropdown cells to be edited without entering table edit mode."
                 },
                 "xlsxViewer.xlsx.hyperlinkPreview": {
                     "type": "boolean",

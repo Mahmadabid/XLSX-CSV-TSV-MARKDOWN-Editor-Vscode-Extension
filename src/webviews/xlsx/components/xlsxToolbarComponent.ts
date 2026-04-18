@@ -8,6 +8,7 @@ export interface CreateXlsxToolbarButtonsOptions {
     onToggleTableEdit: () => void;
     onSaveTableEdits: () => void;
     onCancelTableEdits: () => void;
+    onInsertControl: () => void;
     onFormatBold: () => void;
     onFormatItalic: () => void;
     onFormatTextColor: () => void;
@@ -106,6 +107,14 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
             tooltip: 'XLSX Settings',
             cls: 'icon-only',
             onClick: options.onOpenSettings
+        },
+        {
+            id: 'insertControlButton',
+            icon: Icons.TableInsert,
+            label: 'Insert',
+            tooltip: 'Insert checkbox, dropdown, rating, or date into selected cells',
+            hidden: true,
+            onClick: options.onInsertControl
         },
         {
             id: 'toggleBackgroundButton',

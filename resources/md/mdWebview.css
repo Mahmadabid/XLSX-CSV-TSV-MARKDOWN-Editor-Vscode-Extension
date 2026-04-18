@@ -966,8 +966,7 @@ body.edit-mode .edit-mode-hide {
 /* --------------------------------------------------------- */
 
 .markdown-preview,
-.markdown-editor,
-#content {
+.markdown-editor {
     /* Firefox */
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
@@ -976,7 +975,6 @@ body.edit-mode .edit-mode-hide {
 /* WebKit-based browsers (Chrome, Edge, Safari) */
 body::-webkit-scrollbar,
 html::-webkit-scrollbar,
-#content::-webkit-scrollbar,
 .markdown-preview::-webkit-scrollbar,
 .markdown-editor::-webkit-scrollbar {
     width: 10px;
@@ -985,7 +983,6 @@ html::-webkit-scrollbar,
 
 body::-webkit-scrollbar-track,
 html::-webkit-scrollbar-track,
-#content::-webkit-scrollbar-track,
 .markdown-preview::-webkit-scrollbar-track,
 .markdown-editor::-webkit-scrollbar-track {
     background: var(--scrollbar-track);
@@ -993,7 +990,6 @@ html::-webkit-scrollbar-track,
 
 body::-webkit-scrollbar-thumb,
 html::-webkit-scrollbar-thumb,
-#content::-webkit-scrollbar-thumb,
 .markdown-preview::-webkit-scrollbar-thumb,
 .markdown-editor::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
@@ -1004,7 +1000,6 @@ html::-webkit-scrollbar-thumb,
 
 body::-webkit-scrollbar-thumb:hover,
 html::-webkit-scrollbar-thumb:hover,
-#content::-webkit-scrollbar-thumb:hover,
 .markdown-preview::-webkit-scrollbar-thumb:hover,
 .markdown-editor::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
@@ -1012,12 +1007,10 @@ html::-webkit-scrollbar-thumb:hover,
 
 body::-webkit-scrollbar-button,
 html::-webkit-scrollbar-button,
-#content::-webkit-scrollbar-button,
 .markdown-preview::-webkit-scrollbar-button,
 .markdown-editor::-webkit-scrollbar-button,
 body::-webkit-scrollbar-corner,
 html::-webkit-scrollbar-corner,
-#content::-webkit-scrollbar-corner,
 .markdown-preview::-webkit-scrollbar-corner,
 .markdown-editor::-webkit-scrollbar-corner {
     display: none;

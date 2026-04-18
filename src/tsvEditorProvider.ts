@@ -377,6 +377,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 firstRowIsHeader: cfg.get('tsv.firstRowIsHeader', false),
                                 stickyHeader: cfg.get('tsv.stickyHeader', false),
                                 stickyToolbar: cfg.get('tsv.stickyToolbar', true),
+                                autoSave: cfg.get('tsv.autoSave', true),
                                 spaciousCells: cfg.get('tsv.spaciousCells', false),
                                 isDefaultEditor: isDefault
                             };
@@ -425,6 +426,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('tsv.firstRowIsHeader', !!s.firstRowIsHeader, vscode.ConfigurationTarget.Global);
                             await cfg.update('tsv.stickyHeader', !!s.stickyHeader, vscode.ConfigurationTarget.Global);
                             await cfg.update('tsv.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
+                            await cfg.update('tsv.autoSave', s.autoSave !== false, vscode.ConfigurationTarget.Global);
                             await cfg.update('tsv.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
@@ -441,6 +443,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 firstRowIsHeader: cfg_e.get('tsv.firstRowIsHeader', false),
                                 stickyHeader: cfg_e.get('tsv.stickyHeader', false),
                                 stickyToolbar: cfg_e.get('tsv.stickyToolbar', true),
+                                autoSave: cfg_e.get('tsv.autoSave', true),
                                 spaciousCells: cfg_e.get('tsv.spaciousCells', false),
                                 isDefaultEditor: true
                             }
@@ -756,6 +759,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         firstRowIsHeader: cfg.get('tsv.firstRowIsHeader', false),
                         stickyHeader: cfg.get('tsv.stickyHeader', false),
                         stickyToolbar: cfg.get('tsv.stickyToolbar', true),
+                        autoSave: cfg.get('tsv.autoSave', true),
                         spaciousCells: cfg.get('tsv.spaciousCells', false),
                         isDefaultEditor: isDefault
                     };
@@ -816,7 +820,7 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
         </head>
         <body>
             <div class="header-background"></div>
-            <div class="toolbar" id="toolbar"></div>
+            <div class="toolbar-wrapper"><div class="toolbar" id="toolbar"></div></div>
             <div id="content">
                 <div id="loadingIndicator" class="loading-indicator">Loading TSV...</div>
                 <div class="table-scroll" id="tableContainer">

@@ -9,6 +9,7 @@ import { Icons } from '../shared/icons';
 import { vscode, VirtualScrollConfig, debounce } from '../shared/common';
 import { VirtualLoader } from '../shared/virtualLoader';
 import { InfoTooltip } from '../shared/infoTooltip';
+import { applyToolbarLayout } from '../shared/toolbarLayout';
 import { createTableToolbarButtons } from './components/tableToolbarComponent';
 import { TableFindManager } from './components/tableFindComponent';
 
@@ -63,6 +64,7 @@ import { TableFindManager } from './components/tableFindComponent';
         firstRowIsHeader: boolean;
         stickyToolbar: boolean;
         stickyHeader: boolean;
+        autoSave?: boolean;
         spaciousCells?: boolean;
         isDefaultEditor?: boolean;
     }
@@ -71,6 +73,7 @@ import { TableFindManager } from './components/tableFindComponent';
         firstRowIsHeader: false,
         stickyToolbar: true,
         stickyHeader: false,
+        autoSave: true,
         spaciousCells: false,
         isDefaultEditor: true
     };
@@ -160,9 +163,9 @@ import { TableFindManager } from './components/tableFindComponent';
         endCell = { row: boundedRow, col: boundedCol };
 
         const thRow = document.querySelector(`th.row-header[data-row="${boundedRow}"]`) as HTMLElement | null;
-        if (thRow) thRow.classList.add('row-selected');
+        if (thRow) thRow.classList.add('row-selected-implied');
         const thCol = document.querySelector(`th.col-header[data-col="${boundedCol}"]`) as HTMLElement | null;
-        if (thCol) thCol.classList.add('column-selected');
+        if (thCol) thCol.classList.add('column-selected-implied');
 
         const container = getTableContainer();
         if (container) {
@@ -199,7 +202,12 @@ import { TableFindManager } from './components/tableFindComponent';
 
     // ===== Virtual Scrolling Core =====
 
+    let activeScrollContainer: HTMLElement | null = null;
+
     function getTableContainer(): HTMLElement | null {
+        if (!document.body.classList.contains('sticky-toolbar-enabled')) {
+            return $('content');
+        }
         return $('tableContainer');
     }
 
@@ -330,7 +338,13 @@ import { TableFindManager } from './components/tableFindComponent';
         const container = getTableContainer();
         if (!container) return;
 
+        if (activeScrollContainer && activeScrollContainer !== container) {
+            activeScrollContainer.removeEventListener('scroll', onScroll);
+        }
+
+        container.removeEventListener('scroll', onScroll);
         container.addEventListener('scroll', onScroll, { passive: true });
+        activeScrollContainer = container;
         updateVisibleRows();
     }
 
@@ -338,9 +352,9 @@ import { TableFindManager } from './components/tableFindComponent';
 
     function clearSelection() {
         document.querySelectorAll(
-            'td.selected, td.active-cell, td.column-selected, td.row-selected, th.column-selected, th.row-selected, th.row-header.row-selected, th.col-header.column-selected'
+            'td.selected, td.active-cell, td.column-selected, td.row-selected, th.column-selected, th.row-selected, th.column-selected-implied, th.row-selected-implied, th.row-header.row-selected, th.col-header.column-selected, td.selection-top, td.selection-bottom, td.selection-left, td.selection-right'
         ).forEach((el) => {
-            el.classList.remove('selected', 'active-cell', 'column-selected', 'row-selected', 'copying');
+            el.classList.remove('selected', 'active-cell', 'column-selected', 'row-selected', 'column-selected-implied', 'row-selected-implied', 'copying', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
         });
         selectedCells.clear();
         selectedRows.clear();
@@ -354,12 +368,54 @@ import { TableFindManager } from './components/tableFindComponent';
         if (selectionInfo) selectionInfo.style.display = 'none';
     }
 
+    function refreshImpliedHeaderSelection() {
+        document.querySelectorAll('th.row-selected-implied, th.column-selected-implied').forEach((el) => {
+            el.classList.remove('row-selected-implied', 'column-selected-implied');
+        });
+
+        if (selectedRowIndices.size > 0 || selectedColumnIndices.size > 0) {
+            return;
+        }
+
+        const selectedRowsFromCells = new Set<number>();
+        const selectedColsFromCells = new Set<number>();
+
+        selectedCells.forEach((cell) => {
+            const row = parseInt(cell.dataset.row || '-1', 10);
+            const col = parseInt(cell.dataset.col || '-1', 10);
+            if (row >= 0) selectedRowsFromCells.add(row);
+            if (col >= 0) selectedColsFromCells.add(col);
+        });
+
+        if (activeCell) {
+            const activeRow = parseInt(activeCell.dataset.row || '-1', 10);
+            const activeCol = parseInt(activeCell.dataset.col || '-1', 10);
+            if (activeRow >= 0) selectedRowsFromCells.add(activeRow);
+            if (activeCol >= 0) selectedColsFromCells.add(activeCol);
+        }
+
+        selectedRowsFromCells.forEach((row) => {
+            const headerCell = document.querySelector(`th.row-header[data-row="${row}"]`) as HTMLElement | null;
+            if (headerCell) headerCell.classList.add('row-selected-implied');
+        });
+
+        selectedColsFromCells.forEach((col) => {
+            const headerCell = document.querySelector(`th.col-header[data-col="${col}"]`) as HTMLElement | null;
+            if (headerCell) headerCell.classList.add('column-selected-implied');
+        });
+    }
+
     function reapplySelection() {
         // Re-apply column selection
         selectedColumnIndices.forEach(colIdx => {
             document.querySelectorAll(`td[data-col="${colIdx}"], th[data-col="${colIdx}"]`).forEach((cell) => {
                 cell.classList.add('column-selected');
-                if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                if (cell.tagName === 'TD') {
+                    selectedCells.add(cell as HTMLElement);
+                    const row = parseInt((cell as HTMLElement).dataset.row!, 10);
+                    if (row === 0) cell.classList.add('selection-top');
+                    if (row === totalRows - 1) cell.classList.add('selection-bottom');
+                }
                 else if (cell.tagName === 'TH') cell.classList.add('column-selected');
             });
         });
@@ -370,10 +426,38 @@ import { TableFindManager } from './components/tableFindComponent';
             if (rowHeader && rowHeader.parentElement) {
                 rowHeader.parentElement.querySelectorAll('td, th').forEach((cell) => {
                     cell.classList.add('row-selected');
-                    if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                    if (cell.tagName === 'TD') {
+                        selectedCells.add(cell as HTMLElement);
+                        cell.classList.add('selection-top', 'selection-bottom');
+                        const col = parseInt((cell as HTMLElement).dataset.col!, 10);
+                        if (col === 0) cell.classList.add('selection-left');
+                        if (col === columnCount - 1) cell.classList.add('selection-right');
+                    }
                 });
             }
         });
+
+        if (startCell && endCell && selectedRowIndices.size === 0 && selectedColumnIndices.size === 0) {
+            const minRow = Math.min(startCell.row, endCell.row);
+            const maxRow = Math.max(startCell.row, endCell.row);
+            const minCol = Math.min(startCell.col, endCell.col);
+            const maxCol = Math.max(startCell.col, endCell.col);
+
+            document.querySelectorAll('td[data-row][data-col]').forEach((cell) => {
+                const htmlCell = cell as HTMLElement;
+                const coords = getCellCoordinates(htmlCell);
+                if (!coords) return;
+                if (coords.row >= minRow && coords.row <= maxRow &&
+                    coords.col >= minCol && coords.col <= maxCol) {
+                    htmlCell.classList.add('selected');
+                    if (coords.row === minRow) htmlCell.classList.add('selection-top');
+                    if (coords.row === maxRow) htmlCell.classList.add('selection-bottom');
+                    if (coords.col === minCol) htmlCell.classList.add('selection-left');
+                    if (coords.col === maxCol) htmlCell.classList.add('selection-right');
+                    selectedCells.add(htmlCell);
+                }
+            });
+        }
 
         // Re-apply active cell
         if (activeCell) {
@@ -388,19 +472,7 @@ import { TableFindManager } from './components/tableFindComponent';
             }
         }
 
-        if (selectedCells.size > 0 && selectedRowIndices.size === 0 && selectedColumnIndices.size === 0) {
-            const cellsArray = Array.from(selectedCells);
-            const rows = new Set(cellsArray.map((cell) => parseInt(cell.dataset.row!, 10)));
-            const cols = new Set(cellsArray.map((cell) => parseInt(cell.dataset.col!, 10)));
-            rows.forEach(r => {
-                const thRow = document.querySelector(`th.row-header[data-row="${r}"]`);
-                if (thRow) thRow.classList.add('row-selected');
-            });
-            cols.forEach(c => {
-                const thCol = document.querySelector(`th.col-header[data-col="${c}"]`);
-                if (thCol) thCol.classList.add('column-selected');
-            });
-        }
+        refreshImpliedHeaderSelection();
     }
 
     function getCellCoordinates(cell: HTMLElement | null): { row: number, col: number } | null {
@@ -414,6 +486,8 @@ import { TableFindManager } from './components/tableFindComponent';
     function updateSelectionInfo() {
         const selectionInfo = $('selectionInfo');
         if (!selectionInfo) return;
+
+        refreshImpliedHeaderSelection();
 
         // For full column/row selection, show total counts
         if (selectedColumnIndices.size > 0 || selectedRowIndices.size > 0) {
@@ -448,8 +522,8 @@ import { TableFindManager } from './components/tableFindComponent';
         const minCol = Math.min(start.col, end.col);
         const maxCol = Math.max(start.col, end.col);
 
-        document.querySelectorAll('td.selected, td.active-cell, th.row-selected, th.column-selected').forEach((el) => {
-            el.classList.remove('selected', 'active-cell', 'row-selected', 'column-selected');
+        document.querySelectorAll('td.selected, td.active-cell, th.row-selected, th.column-selected, th.row-selected-implied, th.column-selected-implied, td.selection-top, td.selection-bottom, td.selection-left, td.selection-right').forEach((el) => {
+            el.classList.remove('selected', 'active-cell', 'row-selected', 'column-selected', 'row-selected-implied', 'column-selected-implied', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
         });
         selectedCells.clear();
 
@@ -460,19 +534,13 @@ import { TableFindManager } from './components/tableFindComponent';
             if (coords.row >= minRow && coords.row <= maxRow &&
                 coords.col >= minCol && coords.col <= maxCol) {
                 htmlCell.classList.add('selected');
+                if (coords.row === minRow) htmlCell.classList.add('selection-top');
+                if (coords.row === maxRow) htmlCell.classList.add('selection-bottom');
+                if (coords.col === minCol) htmlCell.classList.add('selection-left');
+                if (coords.col === maxCol) htmlCell.classList.add('selection-right');
                 selectedCells.add(htmlCell);
             }
         });
-
-        // Add header highlighting
-        for (let r = minRow; r <= maxRow; r++) {
-            const thRow = document.querySelector(`th.row-header[data-row="${r}"]`) as HTMLElement;
-            if (thRow) thRow.classList.add('row-selected');
-        }
-        for (let c = minCol; c <= maxCol; c++) {
-            const thCol = document.querySelector(`th.col-header[data-col="${c}"]`) as HTMLElement;
-            if (thCol) thCol.classList.add('column-selected');
-        }
 
         const startCellElement = document.querySelector(
             `td[data-row="${start.row}"][data-col="${start.col}"]`
@@ -497,7 +565,14 @@ import { TableFindManager } from './components/tableFindComponent';
                 selectedColumnIndices.add(col);
                 document.querySelectorAll(`td[data-col="${col}"], th[data-col="${col}"]`).forEach((cell) => {
                     cell.classList.add('column-selected');
-                    if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                    if (cell.tagName === 'TD') {
+                        selectedCells.add(cell as HTMLElement);
+                        const row = parseInt((cell as HTMLElement).dataset.row!, 10);
+                        if (row === 0) cell.classList.add('selection-top');
+                        if (row === totalRows - 1) cell.classList.add('selection-bottom');
+                        if (col === minCol) cell.classList.add('selection-left');
+                        if (col === maxCol) cell.classList.add('selection-right');
+                    }
                 });
             }
         } else if (ctrlKey) {
@@ -505,7 +580,7 @@ import { TableFindManager } from './components/tableFindComponent';
                 selectedColumns.delete(columnIndex);
                 selectedColumnIndices.delete(columnIndex);
                 document.querySelectorAll(`td[data-col="${columnIndex}"], th[data-col="${columnIndex}"]`).forEach((cell) => {
-                    cell.classList.remove('column-selected');
+                    cell.classList.remove('column-selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                     if (cell.tagName === 'TD') selectedCells.delete(cell as HTMLElement);
                 });
             } else {
@@ -513,7 +588,13 @@ import { TableFindManager } from './components/tableFindComponent';
                 selectedColumnIndices.add(columnIndex);
                 document.querySelectorAll(`td[data-col="${columnIndex}"], th[data-col="${columnIndex}"]`).forEach((cell) => {
                     cell.classList.add('column-selected');
-                    if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                    if (cell.tagName === 'TD') {
+                        selectedCells.add(cell as HTMLElement);
+                        const row = parseInt((cell as HTMLElement).dataset.row!, 10);
+                        if (row === 0) cell.classList.add('selection-top');
+                        if (row === totalRows - 1) cell.classList.add('selection-bottom');
+                        cell.classList.add('selection-left', 'selection-right');
+                    }
                 });
             }
             lastSelectedColumn = columnIndex;
@@ -522,7 +603,13 @@ import { TableFindManager } from './components/tableFindComponent';
             selectedColumnIndices.add(columnIndex);
             document.querySelectorAll(`td[data-col="${columnIndex}"], th[data-col="${columnIndex}"]`).forEach((cell) => {
                 cell.classList.add('column-selected');
-                if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                if (cell.tagName === 'TD') {
+                    selectedCells.add(cell as HTMLElement);
+                    const row = parseInt((cell as HTMLElement).dataset.row!, 10);
+                    if (row === 0) cell.classList.add('selection-top');
+                    if (row === totalRows - 1) cell.classList.add('selection-bottom');
+                    cell.classList.add('selection-left', 'selection-right');
+                }
                 else if (cell.tagName === 'TH') cell.classList.add('column-selected');
             });
             lastSelectedColumn = columnIndex;
@@ -544,7 +631,14 @@ import { TableFindManager } from './components/tableFindComponent';
                 if (rowHeader && rowHeader.parentElement) {
                     rowHeader.parentElement.querySelectorAll('td, th').forEach((cell) => {
                         cell.classList.add('row-selected');
-                        if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                        if (cell.tagName === 'TD') {
+                            selectedCells.add(cell as HTMLElement);
+                            if (row === minRow) cell.classList.add('selection-top');
+                            if (row === maxRow) cell.classList.add('selection-bottom');
+                            const col = parseInt((cell as HTMLElement).dataset.col!, 10);
+                            if (col === 0) cell.classList.add('selection-left');
+                            if (col === columnCount - 1) cell.classList.add('selection-right');
+                        }
                     });
                 }
             }
@@ -555,7 +649,7 @@ import { TableFindManager } from './components/tableFindComponent';
                 const rowHeader = document.querySelector(`th[data-row="${rowIndex}"]`);
                 if (rowHeader && rowHeader.parentElement) {
                     rowHeader.parentElement.querySelectorAll('td, th').forEach((cell) => {
-                        cell.classList.remove('row-selected');
+                        cell.classList.remove('row-selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                         if (cell.tagName === 'TD') selectedCells.delete(cell as HTMLElement);
                     });
                 }
@@ -566,7 +660,13 @@ import { TableFindManager } from './components/tableFindComponent';
                 if (rowHeader && rowHeader.parentElement) {
                     rowHeader.parentElement.querySelectorAll('td, th').forEach((cell) => {
                         cell.classList.add('row-selected');
-                        if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                        if (cell.tagName === 'TD') {
+                            selectedCells.add(cell as HTMLElement);
+                            cell.classList.add('selection-top', 'selection-bottom');
+                            const col = parseInt((cell as HTMLElement).dataset.col!, 10);
+                            if (col === 0) cell.classList.add('selection-left');
+                            if (col === columnCount - 1) cell.classList.add('selection-right');
+                        }
                     });
                 }
             }
@@ -578,7 +678,13 @@ import { TableFindManager } from './components/tableFindComponent';
             if (rowHeader && rowHeader.parentElement) {
                 rowHeader.parentElement.querySelectorAll('td, th').forEach((cell) => {
                     cell.classList.add('row-selected');
-                    if (cell.tagName === 'TD') selectedCells.add(cell as HTMLElement);
+                    if (cell.tagName === 'TD') {
+                        selectedCells.add(cell as HTMLElement);
+                        cell.classList.add('selection-top', 'selection-bottom');
+                        const col = parseInt((cell as HTMLElement).dataset.col!, 10);
+                        if (col === 0) cell.classList.add('selection-left');
+                        if (col === columnCount - 1) cell.classList.add('selection-right');
+                    }
                 });
             }
             lastSelectedRow = rowIndex;
@@ -632,9 +738,9 @@ import { TableFindManager } from './components/tableFindComponent';
             endCell = { row, col };
 
             const thRow = document.querySelector(`th.row-header[data-row="${row}"]`) as HTMLElement;
-            if (thRow) thRow.classList.add('row-selected');
+            if (thRow) thRow.classList.add('row-selected-implied');
             const thCol = document.querySelector(`th.col-header[data-col="${col}"]`) as HTMLElement;
-            if (thCol) thCol.classList.add('column-selected');
+            if (thCol) thCol.classList.add('column-selected-implied');
 
             updateSelectionInfo();
             setTimeout(() => {
@@ -764,6 +870,9 @@ import { TableFindManager } from './components/tableFindComponent';
     }
 
     function scheduleSave() {
+        if (!currentSettings.autoSave) {
+            return;
+        }
         if (saveTimeout) clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
             performSave(false, true);
@@ -1297,18 +1406,22 @@ import { TableFindManager } from './components/tableFindComponent';
 
         document.body.classList.toggle('first-row-as-header', !!settings.firstRowIsHeader);
         document.body.classList.toggle('sticky-header-enabled', !!settings.stickyHeader);
-        document.body.classList.toggle('sticky-toolbar-enabled', !!settings.stickyToolbar);
-
         const chkHeader = $('chkHeaderRow') as HTMLInputElement;
         const chkSticky = $('chkStickyHeader') as HTMLInputElement;
         const chkToolbar = $('chkStickyToolbar') as HTMLInputElement;
+        const chkAutoSave = $('chkAutoSave') as HTMLInputElement;
         const chkSpacious = $('chkSpaciousCells') as HTMLInputElement;
 
         if (chkHeader) chkHeader.checked = !!settings.firstRowIsHeader;
         if (chkSticky) { chkSticky.checked = !!settings.stickyHeader; chkSticky.disabled = !settings.firstRowIsHeader; if (chkSticky.parentElement) { chkSticky.parentElement.style.opacity = !settings.firstRowIsHeader ? '0.5' : '1'; chkSticky.parentElement.style.pointerEvents = !settings.firstRowIsHeader ? 'none' : 'auto'; } }
         if (chkToolbar) chkToolbar.checked = !!settings.stickyToolbar;
+        if (chkAutoSave) chkAutoSave.checked = settings.autoSave !== false;
         if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
-        if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
+
+        if (settings.autoSave === false && saveTimeout) {
+            clearTimeout(saveTimeout);
+            saveTimeout = null;
+        }
 
         // Show/hide enable button based on whether this is the default editor
         if (toolbarManager) {
@@ -1344,9 +1457,11 @@ import { TableFindManager } from './components/tableFindComponent';
         }
 
         // Update toolbar stickiness
-        if (toolbarManager) {
-            toolbarManager.applyStickyLayout(!!settings.stickyToolbar, 'content', '.table-scroll');
-        }
+        applyToolbarLayout(toolbarManager, {
+            stickyToolbar: !!settings.stickyToolbar,
+            scrollTarget: '#content',
+            onLayoutApplied: initializeVirtualScrolling
+        });
 
         if (rowHeightChanged) {
             // Force re-render of virtual rows
@@ -1367,6 +1482,7 @@ import { TableFindManager } from './components/tableFindComponent';
             {
                 id: 'chkHeaderRow',
                 label: 'Header Row',
+                tooltip: 'Treat the first data row as a header row.',
                 onChange: (val: boolean) => {
                     const chkSticky = document.getElementById('chkStickyHeader') as HTMLInputElement;
                     if (chkSticky) {
@@ -1384,6 +1500,7 @@ import { TableFindManager } from './components/tableFindComponent';
             {
                 id: 'chkStickyHeader',
                 label: 'Sticky Header',
+                tooltip: 'Keep the header row visible while scrolling vertically.',
                 onChange: (val: boolean) => {
                     currentSettings.stickyHeader = val;
                     applySettings(currentSettings, true);
@@ -1393,6 +1510,7 @@ import { TableFindManager } from './components/tableFindComponent';
             {
                 id: 'chkStickyToolbar',
                 label: 'Sticky Toolbar',
+                tooltip: 'Keep the table toolbar pinned at the top while scrolling.',
                 onChange: (val: boolean) => {
                     currentSettings.stickyToolbar = val;
                     applySettings(currentSettings, true);
@@ -1400,8 +1518,19 @@ import { TableFindManager } from './components/tableFindComponent';
                 defaultValue: currentSettings.stickyToolbar
             },
             {
+                id: 'chkAutoSave',
+                label: 'Autosave',
+                tooltip: 'Automatically save CSV/TSV table edits after a short debounce.',
+                onChange: (val: boolean) => {
+                    currentSettings.autoSave = val;
+                    applySettings(currentSettings, true);
+                },
+                defaultValue: currentSettings.autoSave !== false
+            },
+            {
                 id: 'chkSpaciousCells',
                 label: 'Spacious Cells',
+                tooltip: 'Increase cell height and padding for a roomier table layout.',
                 onChange: (val: boolean) => {
                     currentSettings.spaciousCells = val;
                     applySettings(currentSettings, true);
@@ -1495,11 +1624,11 @@ import { TableFindManager } from './components/tableFindComponent';
                     pendingEditDrag = false;
                     e.stopPropagation();
                     if (target.classList.contains('selected')) {
-                        target.classList.remove('selected');
+                        target.classList.remove('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                         selectedCells.delete(target);
                         if (target === activeCell) activeCell = null;
                     } else {
-                        target.classList.add('selected');
+                        target.classList.add('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                         selectedCells.add(target);
                         if (activeCell) activeCell.classList.remove('active-cell');
                         target.classList.add('active-cell');
@@ -1516,14 +1645,14 @@ import { TableFindManager } from './components/tableFindComponent';
                     isSelecting = true;
                     startCell = coords;
                     endCell = coords;
-                    target.classList.add('selected', 'active-cell');
+                    target.classList.add('selected', 'active-cell', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
                     selectedCells.add(target);
                     activeCell = target;
 
                     const thRow = document.querySelector(`th.row-header[data-row="${coords.row}"]`) as HTMLElement;
-                    if (thRow) thRow.classList.add('row-selected');
+                    if (thRow) thRow.classList.add('row-selected-implied');
                     const thCol = document.querySelector(`th.col-header[data-col="${coords.col}"]`) as HTMLElement;
-                    if (thCol) thCol.classList.add('column-selected');
+                    if (thCol) thCol.classList.add('column-selected-implied');
                     pendingEditCell = wasSingleActiveCell ? target : null;
                     pendingEditDrag = false;
                 }
@@ -1543,6 +1672,9 @@ import { TableFindManager } from './components/tableFindComponent';
         document.addEventListener('pointerdown', (e) => {
             const target = e.target as HTMLElement | null;
             if (!target) return;
+            
+            if (target.closest('select') || target.closest('input')) return;
+
             if (target.closest('#csv-table') || target.closest('#tableContainer') || target.closest('.toolbar')) {
                 focusWebviewSurface();
             }
@@ -1755,9 +1887,9 @@ import { TableFindManager } from './components/tableFindComponent';
                         startCell = { row: nr, col: nc };
                         
                         const thRow = document.querySelector(`th.row-header[data-row="${nr}"]`) as HTMLElement;
-                        if (thRow) thRow.classList.add('row-selected');
+                        if (thRow) thRow.classList.add('row-selected-implied');
                         const thCol = document.querySelector(`th.col-header[data-col="${nc}"]`) as HTMLElement;
-                        if (thCol) thCol.classList.add('column-selected');
+                        if (thCol) thCol.classList.add('column-selected-implied');
                         
                         // Scroll into view if needed
                         const container = $('tableContainer');

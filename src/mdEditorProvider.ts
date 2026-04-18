@@ -431,7 +431,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
         <body>
             <div id="readingProgressBar" class="reading-progress-bar"></div>
             <div class="header-background"></div>
-            <div class="toolbar" id="toolbar"></div>
+            <div class="toolbar-wrapper"><div class="toolbar" id="toolbar"></div></div>
 
             <div id="formattingToolbar" class="formatting-toolbar hidden">
                 <div class="fmt-group">

@@ -13,7 +13,10 @@ export type WorksheetOpType =
     | 'deleteCellShiftLeft'
     | 'deleteCellShiftUp'
     | 'mergeRange'
-    | 'unmergeRange';
+    | 'unmergeRange'
+    | 'insertControl';
+
+export type InsertControlType = 'checkbox' | 'dropdown' | 'rating' | 'date';
 
 export type HorizontalAlign = 'left' | 'center' | 'right';
 export type VerticalAlign = 'top' | 'middle' | 'bottom';
@@ -43,6 +46,9 @@ export interface WorksheetOp {
     startCol?: number;
     endRow?: number;
     endCol?: number;
+    controlType?: InsertControlType;
+    dropdownOptions?: string[];
+    defaultValue?: string;
 }
 
 export interface CellStyleEdit {
@@ -69,6 +75,11 @@ export interface CellUndoState {
     key: string;
     styleAttr: string;
     innerHtml: string;
+    dataCellType?: string;
+    dataCheckboxChecked?: string;
+    dataDropdownValue?: string;
+    dataRatingValue?: string;
+    dataDateValue?: string;
     pendingStyle: CellStyleEdit | null;
 }
 

@@ -42,7 +42,7 @@ export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vs
         <div class="loading-text">Rendering worksheet...</div>
     </div>
 
-    <div class="toolbar" id="toolbar"></div>
+    <div class="toolbar-wrapper"><div class="toolbar" id="toolbar"></div></div>
     <div id="content">
         <div id="tableContainer"></div>
     </div>
