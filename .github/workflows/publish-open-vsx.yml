@@ -51,3 +51,23 @@ jobs:
       # 7️⃣ Publish to Open VSX
       - name: Publish to Open VSX
         run: npx ovsx publish -p ${{ secrets.OPEN_VSX_TOKEN }}
+
+      # 8️⃣ Extract changelog
+      - name: Extract changelog
+        id: changelog
+        run: |
+          VERSION="v${{ steps.pkg.outputs.version }}"
+          awk "/## $VERSION/{flag=1;next}/## v/{flag=0}flag" CHANGELOG.md > RELEASE_NOTES.md
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat RELEASE_NOTES.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # 9️⃣ Create GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.pkg.outputs.version }}
+          name: v${{ steps.pkg.outputs.version }}
+          body: ${{ steps.changelog.outputs.notes }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
