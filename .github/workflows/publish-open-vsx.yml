@@ -8,7 +8,7 @@ on:
       - "package.json"
 
 permissions:
-  contents: read   # no write access needed
+  contents: write   # REQUIRED for GitHub Releases
 
 jobs:
   publish:
@@ -34,25 +34,27 @@ jobs:
           echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
           echo "ext=$(node -p "require('./package.json').publisher + '.' + require('./package.json').name")" >> $GITHUB_OUTPUT
 
-      # 5️⃣ Prevent republish of same version (fails workflow if already published)
+      # 5️⃣ Prevent republish of same version
       - name: Prevent republish of same version
         run: |
-          # Check if this exact version exists on Open VSX by requesting its metadata.
-          # 'ovsx get --metadata -v <version>' returns 0 when metadata exists.
           if npx ovsx get "${{ steps.pkg.outputs.ext }}" --metadata -v "${{ steps.pkg.outputs.version }}" > /dev/null 2>&1; then
             echo "Version ${{ steps.pkg.outputs.version }} already published on Open VSX"
             exit 1
           fi
 
-      # 6️⃣ Publish to VS Marketplace
+      # 6️⃣ Package Extension (.vsix)
+      - name: Package Extension
+        run: npx vsce package
+
+      # 7️⃣ Publish to VS Marketplace
       - name: Publish to VS Marketplace
         run: npx vsce publish -p ${{ secrets.VSCE_TOKEN }}
 
-      # 7️⃣ Publish to Open VSX
+      # 8️⃣ Publish to Open VSX
       - name: Publish to Open VSX
         run: npx ovsx publish -p ${{ secrets.OPEN_VSX_TOKEN }}
 
-      # 8️⃣ Extract changelog
+      # 9️⃣ Extract changelog
       - name: Extract changelog
         id: changelog
         run: |
@@ -62,12 +64,13 @@ jobs:
           cat RELEASE_NOTES.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      # 9️⃣ Create GitHub Release
+      # 🔟 Create GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.pkg.outputs.version }}
           name: v${{ steps.pkg.outputs.version }}
           body: ${{ steps.changelog.outputs.notes }}
+          files: "*.vsix"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
