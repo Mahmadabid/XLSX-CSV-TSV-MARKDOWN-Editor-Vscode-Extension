@@ -102,6 +102,18 @@ import { TableFindManager } from './components/tableFindComponent';
         return '"' + v.replace(/"/g, '""') + '"';
     }
 
+    function renderCellContent(value: string): string {
+        if (!value) {
+            return '<span class="cell-content">&nbsp;</span>';
+        }
+        return '<span class="cell-content">' + escapeHtml(value) + '</span>';
+    }
+
+    function setCellDisplayValue(cell: HTMLElement, value: string) {
+        const normalized = value === '' ? '' : normalizeCellText(value);
+        cell.innerHTML = renderCellContent(normalized);
+    }
+
     function setButtonsEnabled(enabled: boolean) {
         const ids = ['toggleViewButton', 'toggleBackgroundButton', 'toggleExpandButton', 'versionHistoryButton', 'convertFileButton'];
         ids.forEach((id) => {
@@ -227,12 +239,12 @@ import { TableFindManager } from './components/tableFindComponent';
         for (let colIndex = 0; colIndex < columnCount; colIndex++) {
             const cellContent = (rowData && rowData[colIndex]) ? rowData[colIndex].trim() : '';
             const isEmpty = cellContent === '';
-            const displayContent = isEmpty ? '&nbsp;' : escapeHtml(cellContent);
+            const displayContent = renderCellContent(cellContent);
 
             html += `<td data-row="${rowIndex}" data-col="${colIndex}" `;
             html += `data-default-bg="true" data-default-color="true"`;
             if (isEmpty) html += ` data-empty="true"`;
-            html += `>${displayContent}</td>`;
+            html += ` style="color: var(--text-color) !important;">${displayContent}</td>`;
         }
 
         html += '</tr>';
@@ -866,6 +878,8 @@ import { TableFindManager } from './components/tableFindComponent';
             vscode.postMessage({ command: 'updateRow', rowIndex: row, rowData: cloned });
             scheduleSave();
         }
+
+        setCellDisplayValue(editingCell, value);
         editingCell = null;
     }
 
@@ -1832,7 +1846,7 @@ import { TableFindManager } from './components/tableFindComponent';
                         rowCache.set(row, rowData);
                     }
                     rowData[col] = '';
-                    cell.textContent = '';
+                    setCellDisplayValue(cell, '');
                     vscode.postMessage({ command: 'updateRow', rowIndex: row, rowData });
                 });
                 scheduleSave();
@@ -1981,7 +1995,7 @@ import { TableFindManager } from './components/tableFindComponent';
                     // Update DOM if cell is visible
                     const cell = document.querySelector(`td[data-row="${targetRow}"][data-col="${targetCol}"]`) as HTMLElement;
                     if (cell) {
-                        cell.textContent = cols[c] === '' ? '\u00a0' : cols[c];
+                        setCellDisplayValue(cell, cols[c]);
                     }
                 }
                 

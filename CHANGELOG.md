@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.8.6 - Bug Fixes
+- Fixed an issue where the hover changed the text color of cells in csv and tsv.
+
 ## v1.8.5 - UI Polish & New Features
 - Changed the theme toggle button to a pill-shaped toggle.
 - Added support for checkbox, dropdown, rating and date in xlsx.

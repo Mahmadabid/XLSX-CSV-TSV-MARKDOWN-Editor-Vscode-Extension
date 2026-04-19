@@ -237,8 +237,6 @@ body.vscode-theme {
     --header-bg: var(--vscode-editorWidget-background, #f5f5f7);
     --toolbar-bg: var(--vscode-editorWidget-background, var(--vscode-editor-background, #f5f5f7));
     --row-hover-bg: var(--vscode-list-hoverBackground, rgba(0, 132, 255, 0.076));
-    /* Keep hover text stable; avoid host list hover foreground from recoloring table cells. */
-    --vscode-list-hoverForeground: var(--text-color);
     --panel-bg: var(--vscode-editorWidget-background, rgba(245, 245, 247, 0.9));
     --overlay-bg: var(--vscode-notifications-background, rgba(255, 255, 255, 0.95));
 

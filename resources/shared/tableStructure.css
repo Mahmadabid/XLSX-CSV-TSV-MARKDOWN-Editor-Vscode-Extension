@@ -114,9 +114,19 @@ td.row-selected:hover::before {
     background-color: var(--cell-selection-overlay, color-mix(in srgb, var(--accent-color) 14%, transparent));
 }
 
-/* VS Code webview host may inject list hover foreground; keep table text color stable on hover. */
-body.vscode-theme #csv-table tbody tr:hover td {
+/* VS Code webview host may inject list hover foreground; keep default table text stable. */
+body.vscode-theme #csv-table td[data-default-color="true"] {
     color: var(--text-color) !important;
+}
+
+/* Keep CSV/TSV hover/selection tint under text content, matching XLSX layering behavior. */
+#csv-table td::before {
+    z-index: 1 !important;
+}
+
+#csv-table td > .cell-content {
+    position: relative;
+    z-index: 2;
 }
 
 /* Active cell selection outline and background exception */
