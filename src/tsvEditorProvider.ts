@@ -705,11 +705,13 @@ export class TSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                     case 'getSystemDetails': {
                         const ext = vscode.extensions.getExtension('muhammad-ahmad.xlsx-viewer');
+                        const editorName = vscode.env.appName || 'VS Code';
                         webviewPanel.webview.postMessage({
                             command: 'systemDetails',
                             vscodeVersion: vscode.version,
                             extensionVersion: ext?.packageJSON?.version ?? 'unknown',
-                            osInfo: `${process.platform} ${process.arch}`
+                            osInfo: `${process.platform} ${process.arch}`,
+                            editorName: editorName
                         });
                         break;
                     }

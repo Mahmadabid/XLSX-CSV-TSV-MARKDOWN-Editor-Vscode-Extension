@@ -448,11 +448,13 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
             if (message?.command === 'getSystemDetails') {
                 const ext = vscode.extensions.getExtension('muhammad-ahmad.xlsx-viewer');
+                const editorName = vscode.env.appName || 'VS Code';
                 webview.postMessage({
                     command: 'systemDetails',
                     vscodeVersion: vscode.version,
                     extensionVersion: ext?.packageJSON?.version ?? 'unknown',
-                    osInfo: `${process.platform} ${process.arch}`
+                    osInfo: `${process.platform} ${process.arch}`,
+                    editorName: editorName
                 });
                 return;
             }

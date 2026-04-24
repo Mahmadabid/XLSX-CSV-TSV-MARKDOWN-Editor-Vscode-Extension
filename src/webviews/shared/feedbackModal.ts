@@ -35,7 +35,7 @@ export class FeedbackModal {
                 <form id="feedbackForm">
                     <div class="form-group">
                         <label>System Information</label>
-                        <textarea id="feedbackSystemDetails" name="entry.1764429077" readonly rows="3"></textarea>
+                        <textarea id="feedbackSystemDetails" name="entry.1764429077" readonly rows="4"></textarea>
                     </div>
 
                     <div class="form-group">
@@ -120,7 +120,8 @@ export class FeedbackModal {
             if (event.data.command === 'systemDetails') {
                 const detailsArea = document.getElementById('feedbackSystemDetails') as HTMLTextAreaElement;
                 if (detailsArea) {
-                    detailsArea.value = `VS Code: ${event.data.vscodeVersion}\nExtension: ${event.data.extensionVersion}\nOS: ${event.data.osInfo}`;
+                    const editorName = event.data.editorName || 'VS Code';
+                    detailsArea.value = `Editor: ${editorName}\nVersion: ${event.data.vscodeVersion}\nExtension: ${event.data.extensionVersion}\nOS: ${event.data.osInfo}`;
                 }
             } else if (event.data.command === 'feedbackResult') {
                 const submitBtn = document.getElementById('feedbackSubmitBtn') as HTMLButtonElement;

@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.8.8 - System Info Editor Name & Feedback Modal Spacing
+- Added editor name detection (VS Code, Cursor, etc.) to system information in feedback modal
+
 ## v1.8.7 - Feedback Modal UI & Markdown Relative Links
 - Added support for relative links in Markdown files.
 - Modified help and feedback UI, now opens the form directly in the vscode and user can submit feedback without leaving vscode.
