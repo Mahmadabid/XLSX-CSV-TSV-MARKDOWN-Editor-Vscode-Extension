@@ -13,6 +13,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
 import { createXlsxRowHtml, getExcelColumnLabel, renderDropdownCellContent } from './components/xlsxRenderComponent';
 import { XlsxSelectionManager } from './components/xlsxSelectionComponent';
 import { createXlsxToolbarButtons } from './components/xlsxToolbarComponent';
+import { FeedbackModal } from '../shared/feedbackModal';
 import {
     XlsxViewSettings,
     defaultXlsxViewSettings,
@@ -5682,10 +5683,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             onOpenSettings: () => {},
             onToggleBackground: () => {},
             onHelp: () => {
-                vscode.postMessage({
-                    command: 'openExternal',
-                    url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
-                });
+                FeedbackModal.show();
             },
             onConvertFile: () => {
                 if (isEditMode) return;

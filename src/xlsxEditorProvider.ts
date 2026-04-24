@@ -446,6 +446,42 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 return;
             }
 
+            if (message?.command === 'getSystemDetails') {
+                const ext = vscode.extensions.getExtension('muhammad-ahmad.xlsx-viewer');
+                webview.postMessage({
+                    command: 'systemDetails',
+                    vscodeVersion: vscode.version,
+                    extensionVersion: ext?.packageJSON?.version ?? 'unknown',
+                    osInfo: `${process.platform} ${process.arch}`
+                });
+                return;
+            }
+
+            if (message?.command === 'submitFeedback') {
+                try {
+                    const https = await import('https');
+                    const formData = message.data as Record<string, string>;
+                    const body = Object.entries(formData)
+                        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v ?? '')}`)
+                        .join('&');
+                    const result = await new Promise<boolean>((resolve) => {
+                        const req = https.request({
+                            hostname: 'docs.google.com',
+                            path: '/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/formResponse',
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
+                        }, (res) => resolve(res.statusCode !== undefined && res.statusCode < 400));
+                        req.on('error', () => resolve(false));
+                        req.write(body);
+                        req.end();
+                    });
+                    webview.postMessage({ command: 'feedbackResult', ok: result });
+                } catch {
+                    webview.postMessage({ command: 'feedbackResult', ok: false });
+                }
+                return;
+            }
+
             if (message?.command === 'convertFile') {
                 try {
                     await vscode.commands.executeCommand('xlsx-viewer.convertFile', document.uri);

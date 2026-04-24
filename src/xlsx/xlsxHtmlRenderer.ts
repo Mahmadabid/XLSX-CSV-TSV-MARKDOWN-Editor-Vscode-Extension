@@ -12,6 +12,9 @@ export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vs
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'xlsxWebview.css')
         );
+        const feedbackStyleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(context.extensionUri, 'resources', 'shared', 'feedback.css')
+        );
         const imgUri = webview.asWebviewUri(
             vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'view.png')
         );
@@ -29,6 +32,7 @@ export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vs
     <title>XLSX Viewer</title>
     <link href="${themeStyleUri}" rel="stylesheet" />
     <link href="${styleUri}" rel="stylesheet" />
+    <link href="${feedbackStyleUri}" rel="stylesheet" />
     <script>
         window.viewImgUri = "${imgUri}";
         window.logoSvgUri = "${svgUri}";

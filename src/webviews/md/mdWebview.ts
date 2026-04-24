@@ -28,6 +28,7 @@ import { applyToolbarLayout } from '../shared/toolbarLayout';
 import { Utils } from '../shared/utils';
 import { Icons } from '../shared/icons';
 import { vscode, debounce } from '../shared/common';
+import { FeedbackModal } from '../shared/feedbackModal';
 import { InfoTooltip } from '../shared/infoTooltip';
 import TurndownService from 'turndown';
 // @ts-ignore
@@ -57,6 +58,9 @@ let originalContent = '';
 let currentContent = '';
 let toolbarManager: ToolbarManager | null = null;
 const resolvedImageUriCache = new Map<string, string>();
+let documentUri = '';
+let documentDirUri = '';
+let workspaceFolderUri: string | null = null;
 
 // Turndown (HTML -> Markdown)
 const turndownService = new TurndownService({
@@ -1523,6 +1527,9 @@ window.addEventListener('message', (event) => {
 
             currentContent = m.content || '';
             originalContent = currentContent;
+            documentUri = m.documentUri || '';
+            documentDirUri = m.documentDirUri || '';
+            workspaceFolderUri = m.workspaceFolderUri || null;
             resolvedImageUriCache.clear();
             renderMarkdown(currentContent);
             updateStatusInfo();
@@ -1689,10 +1696,7 @@ function wireButtons() {
             tooltip: 'Help & Feedback',
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
-                vscode.postMessage({
-                    command: 'openExternal',
-                    url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
-                });
+                FeedbackModal.show();
             }
         },
         {
@@ -3218,10 +3222,30 @@ function wirePreviewInteractions() {
         const link = target.closest('a') as HTMLAnchorElement | null;
         if (link && link.href) {
             const href = link.getAttribute('href') || '';
+            
+            // Handle external links
             if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:')) {
                 e.preventDefault();
                 e.stopPropagation();
                 vscode.postMessage({ command: 'openExternal', url: href });
+                return;
+            }
+            
+            // Handle anchor links (same document)
+            if (href.startsWith('#')) {
+                // Let the browser handle anchor navigation
+                return;
+            }
+            
+            // Handle relative links to other files
+            if (href && !href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('mailto:')) {
+                e.preventDefault();
+                e.stopPropagation();
+                vscode.postMessage({ 
+                    command: 'openRelativeFile', 
+                    href: href,
+                    documentUri: documentUri
+                });
             }
         }
     });

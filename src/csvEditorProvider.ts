@@ -706,6 +706,42 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         }
                         break;
 
+                    case 'getSystemDetails': {
+                        const ext = vscode.extensions.getExtension('muhammad-ahmad.xlsx-viewer');
+                        webviewPanel.webview.postMessage({
+                            command: 'systemDetails',
+                            vscodeVersion: vscode.version,
+                            extensionVersion: ext?.packageJSON?.version ?? 'unknown',
+                            osInfo: `${process.platform} ${process.arch}`
+                        });
+                        break;
+                    }
+
+                    case 'submitFeedback': {
+                        try {
+                            const https = await import('https');
+                            const formData = message.data as Record<string, string>;
+                            const body = Object.entries(formData)
+                                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v ?? '')}`)
+                                .join('&');
+                            const result = await new Promise<boolean>((resolve) => {
+                                const req = https.request({
+                                    hostname: 'docs.google.com',
+                                    path: '/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/formResponse',
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
+                                }, (res) => resolve(res.statusCode !== undefined && res.statusCode < 400));
+                                req.on('error', () => resolve(false));
+                                req.write(body);
+                                req.end();
+                            });
+                            webviewPanel.webview.postMessage({ command: 'feedbackResult', ok: result });
+                        } catch {
+                            webviewPanel.webview.postMessage({ command: 'feedbackResult', ok: false });
+                        }
+                        break;
+                    }
+
                     case 'convertFile':
                         try {
                             await vscode.commands.executeCommand('xlsx-viewer.convertFile', document.uri);
@@ -804,6 +840,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'table', 'tableWebview.js'));
         const themeStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'shared', 'theme.css'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'table', 'tableWebview.css'));
+        const feedbackStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'shared', 'feedback.css'));
         const cspSource = webview.cspSource;
 
         return `
@@ -816,6 +853,7 @@ export class CSVEditorProvider implements vscode.CustomReadonlyEditorProvider {
             <title>CSV Viewer</title>
             <link href="${themeStyleUri}" rel="stylesheet" />
             <link href="${styleUri}" rel="stylesheet" />
+            <link href="${feedbackStyleUri}" rel="stylesheet" />
             <script>
                 window.viewImgUri = "${imgUri}";
                 window.logoSvgUri = "${svgUri}";

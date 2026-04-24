@@ -12,6 +12,7 @@ import { InfoTooltip } from '../shared/infoTooltip';
 import { applyToolbarLayout } from '../shared/toolbarLayout';
 import { createTableToolbarButtons } from './components/tableToolbarComponent';
 import { TableFindManager } from './components/tableFindComponent';
+import { FeedbackModal } from '../shared/feedbackModal';
 
 (function () {
     // ===== Configuration =====
@@ -2269,10 +2270,7 @@ import { TableFindManager } from './components/tableFindComponent';
                 vscode.postMessage({ command: 'showVersionHistory' });
             },
             onHelp: () => {
-                vscode.postMessage({
-                    command: 'openExternal',
-                    url: 'https://docs.google.com/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/viewform'
-                });
+                FeedbackModal.show();
             },
             onConvertFile: () => {
                 vscode.postMessage({ command: 'convertFile' });

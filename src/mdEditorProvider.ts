@@ -298,6 +298,69 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         }
                         break;
 
+                    case 'openRelativeFile':
+                        try {
+                            const href = typeof message.href === 'string' ? message.href : '';
+                            const docUri = typeof message.documentUri === 'string' ? message.documentUri : '';
+                            
+                            if (!href || !docUri) {
+                                break;
+                            }
+                            
+                            // Parse the document URI to get the file path
+                            const currentDocUri = vscode.Uri.parse(docUri);
+                            const currentDir = path.dirname(currentDocUri.fsPath);
+                            
+                            // Remove any anchor/hash from the href
+                            const hrefWithoutAnchor = href.split('#')[0];
+                            
+                            // Resolve the relative path
+                            const resolvedPath = path.resolve(currentDir, hrefWithoutAnchor);
+                            const targetUri = vscode.Uri.file(resolvedPath);
+                            
+                            // Open the file
+                            await vscode.commands.executeCommand('vscode.open', targetUri);
+                        } catch (err) {
+                            vscode.window.showErrorMessage(`Failed to open file: ${err}`);
+                        }
+                        break;
+
+                    case 'getSystemDetails': {
+                        const ext = vscode.extensions.getExtension('muhammad-ahmad.xlsx-viewer');
+                        webviewPanel.webview.postMessage({
+                            command: 'systemDetails',
+                            vscodeVersion: vscode.version,
+                            extensionVersion: ext?.packageJSON?.version ?? 'unknown',
+                            osInfo: `${process.platform} ${process.arch}`
+                        });
+                        break;
+                    }
+
+                    case 'submitFeedback': {
+                        try {
+                            const https = await import('https');
+                            const formData = message.data as Record<string, string>;
+                            const body = Object.entries(formData)
+                                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v ?? '')}`)
+                                .join('&');
+                            const result = await new Promise<boolean>((resolve) => {
+                                const req = https.request({
+                                    hostname: 'docs.google.com',
+                                    path: '/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/formResponse',
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
+                                }, (res) => resolve(res.statusCode !== undefined && res.statusCode < 400));
+                                req.on('error', () => resolve(false));
+                                req.write(body);
+                                req.end();
+                            });
+                            webviewPanel.webview.postMessage({ command: 'feedbackResult', ok: result });
+                        } catch {
+                            webviewPanel.webview.postMessage({ command: 'feedbackResult', ok: false });
+                        }
+                        break;
+                    }
+
                     case 'disableMdEditor':
                         try {
                             const result = await vscode.window.showWarningMessage(
@@ -410,6 +473,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'md', 'mdWebview.css'));
         const themeUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'shared', 'theme.css'));
         const highlightUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'md', 'highlight.css'));
+        const feedbackStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'shared', 'feedback.css'));
         const cspSource = webview.cspSource;
 
         return `
@@ -423,6 +487,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             <link href="${themeUri}" rel="stylesheet" />
             <link href="${styleUri}" rel="stylesheet" />
             <link href="${highlightUri}" rel="stylesheet" />
+            <link href="${feedbackStyleUri}" rel="stylesheet" />
             <script>
                 window.viewImgUri = "${imgUri}";
                 window.logoSvgUri = "${svgUri}";

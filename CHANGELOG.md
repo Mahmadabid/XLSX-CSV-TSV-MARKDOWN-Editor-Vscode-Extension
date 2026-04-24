@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.8.7 - Feedback Modal UI & Markdown Relative Links
+- Added support for relative links in Markdown files.
+- Modified help and feedback UI, now opens the form directly in the vscode and user can submit feedback without leaving vscode.
+
 ## v1.8.6 - Bug Fixes
 - Fixed an issue where the hover changed the text color of cells in csv and tsv.
 
@@ -201,8 +205,6 @@
   - Added **Undo/Redo** support and keyboard shortcuts for edit mode (Ctrl+S / Ctrl+Z / Ctrl+Y / Enter).
   - **Toolbar & Settings parity**: toolbar controls and the Settings panel (header toggle, sticky header, sticky toolbar, hyperlink preview) were added to XLSX views to match CSV editor UX.
   - **UX improvements**: refined toolbar responsiveness, consistent sticky headers, and polished visual styles across XLSX and CSV editors.
-
-
 
 ## v1.5.3 - UI Polish & Settings UX
 - **UI Polish & Settings UX**:
