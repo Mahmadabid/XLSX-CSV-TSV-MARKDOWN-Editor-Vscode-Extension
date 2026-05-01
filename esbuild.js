@@ -46,8 +46,7 @@ async function main() {
 	const webviewCtx = await esbuild.context({
 		entryPoints: [
 			'src/webviews/md/mdWebview.ts',
-			'src/webviews/table/tableWebview.ts',
-			'src/webviews/xlsx/xlsxWebview.ts'
+			'src/webviews/spreadsheet/spreadsheetWebview.ts'
 		],
 		bundle: true,
 		format: 'iife',

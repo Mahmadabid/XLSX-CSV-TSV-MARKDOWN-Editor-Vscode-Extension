@@ -205,6 +205,56 @@ body.sticky-toolbar-enabled {
     gap: 8px;
 }
 
+.xlsx-style-mode-notice-popup {
+    position: fixed;
+    inset: 0;
+    z-index: 200220;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: color-mix(in srgb, var(--vscode-editor-background) 58%, transparent);
+}
+
+.xlsx-style-mode-notice-popup.hidden {
+    display: none;
+}
+
+.xlsx-style-mode-notice-dialog {
+    width: min(520px, calc(100vw - 28px));
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--overlay-bg);
+    box-shadow: var(--shadow-lg);
+    padding: 14px;
+}
+
+.style-mode-notice-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-color);
+    margin-bottom: 8px;
+}
+
+.style-mode-notice-message {
+    font-size: 12.5px;
+    color: var(--text-color);
+    line-height: 1.45;
+    margin-bottom: 8px;
+}
+
+.style-mode-notice-message:last-of-type {
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.style-mode-notice-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 body.format-painter-armed #xlsxTable td {
     cursor: copy;
 }
@@ -287,6 +337,7 @@ td[data-hyperlink] {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    flex-wrap: wrap;
     padding: 8px 12px;
     margin: 8px 12px 0;
     border: 1px solid var(--vscode-widget-border);
@@ -307,7 +358,20 @@ td[data-hyperlink] {
 
 .version-preview-actions {
     display: inline-flex;
+    align-items: center;
     gap: 8px;
+    flex-wrap: nowrap;
+    margin-left: auto;
+}
+
+.version-preview-actions .toggle-button-primary {
+    border-color: var(--accent-color);
+    background: var(--accent-color);
+    color: var(--vscode-button-foreground);
+}
+
+.version-preview-actions .toggle-button-primary:hover {
+    filter: brightness(1.05);
 }
 
 body.preview-mode td {
@@ -461,6 +525,27 @@ th.col-header {
     user-select: none;
     cursor: pointer;
     max-width: 200px;
+}
+
+th.col-header {
+    position: relative;
+    vertical-align: middle;
+}
+
+.col-header-label {
+    display: block;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.col-header-indicator {
+    display: block;
+    margin-top: 2px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.1;
+    color: color-mix(in srgb, var(--accent-color) 72%, var(--text-muted));
+    white-space: nowrap;
 }
 
 th.row-header:hover,
@@ -1109,7 +1194,7 @@ body.edit-mode td[contenteditable="true"] *::-moz-selection {
 .header-context-menu {
     position: fixed;
     z-index: 10020;
-    min-width: 180px;
+    min-width: 220px;
     background: var(--glass-bg-strong);
     border: 1px solid var(--border-color);
     border-radius: 10px;
@@ -1140,6 +1225,72 @@ body.edit-mode td[contenteditable="true"] *::-moz-selection {
     margin: 6px 4px;
     background: var(--border-color);
     opacity: 0.7;
+}
+
+.header-filter-panel {
+    display: grid;
+    gap: 7px;
+    padding: 6px 8px 8px;
+}
+
+.header-filter-title {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.header-filter-select,
+.header-filter-input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text-color);
+    font-size: 12px;
+    padding: 6px 8px;
+}
+
+.header-filter-input:disabled {
+    color: var(--text-muted);
+    opacity: 0.75;
+}
+
+.header-filter-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-color);
+    font-size: 12px;
+    user-select: none;
+}
+
+.header-filter-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.header-filter-button {
+    flex: 1;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-color);
+    font-size: 12px;
+    padding: 6px 8px;
+    cursor: pointer;
+}
+
+.header-filter-button.primary {
+    background: var(--button-bg);
+    border-color: var(--button-bg);
+    color: var(--button-text);
+}
+
+.header-filter-button:hover,
+.header-filter-select:hover,
+.header-filter-input:hover {
+    border-color: var(--accent-color);
 }
 
 /* First row as header */

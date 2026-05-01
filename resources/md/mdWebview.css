@@ -49,6 +49,48 @@ body.edit-mode #content {
     stroke: var(--accent-color);
 }
 
+/* ===== Version Preview Banner ===== */
+.version-preview-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    margin: 8px 12px 0;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--accent-bg);
+    color: var(--text-color);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.version-preview-banner.hidden {
+    display: none;
+}
+
+.version-preview-text {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.version-preview-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.version-preview-actions .toggle-button-primary {
+    border-color: var(--accent-color);
+    background: var(--accent-color);
+    color: var(--button-foreground);
+}
+
+.version-preview-actions .toggle-button-primary:hover {
+    filter: brightness(1.05);
+}
+
 /* ===== Hover Tooltip (fixed positioned - matches tableWebview.css style) ===== */
 .hover-tooltip {
     position: fixed;

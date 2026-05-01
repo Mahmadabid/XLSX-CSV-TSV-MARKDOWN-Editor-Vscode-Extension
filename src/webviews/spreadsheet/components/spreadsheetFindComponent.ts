@@ -239,13 +239,12 @@ export class XlsxFindManager {
             const text = textNode.data || '';
             const idx = text.toLowerCase().indexOf(queryLower);
             if (idx >= 0 && text.length > 0) {
-                const before = textNode.splitText(idx);
-                textNode.splitText(queryLower.length);
-
                 const mark = document.createElement('span');
                 mark.className = 'find-text-highlight';
-                mark.textContent = before.data;
-                before.parentNode?.replaceChild(mark, before);
+                const matchNode = textNode.splitText(idx);
+                matchNode.splitText(queryLower.length);
+                mark.textContent = matchNode.data;
+                matchNode.parentNode?.replaceChild(mark, matchNode);
 
                 return true;
             }

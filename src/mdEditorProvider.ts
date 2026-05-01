@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { VERSION_HISTORY_RETENTION_MS, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS, getVersionHistoryFile } from './shared/versionHistory';
+import { VERSION_HISTORY_RETENTION_MS, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS, buildGroupedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryFile } from './shared/versionHistory';
 
 export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
     constructor(private readonly context: vscode.ExtensionContext) { }
@@ -34,6 +34,10 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
             let versionSnapshotDebounceTimer: NodeJS.Timeout | null = null;
             let currentContent = '';
+            let previewVersionId: string | null = null;
+            let previewVersionTimestamp: number | null = null;
+            let previewVersionContent: string | null = null;
+            let restoredVersionId: string | null = null;
 
             const getHistoryFilePath = () => {
                 return getVersionHistoryFile(this.context.globalStorageUri.fsPath, filePath, 'md');
@@ -159,6 +163,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 previewPosition: cfg.get('md.previewPosition', 'right'),
                                 showOutline: cfg.get('md.showOutline', true),
                                 showLineNumbers: cfg.get('md.showLineNumbers', true),
+                                moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                                 isMdEnabled: isMdEnabled
                             };
                             webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -211,6 +216,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('md.wordWrap', !!s.wordWrap, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.syncScroll', !!s.syncScroll, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.previewPosition', s.previewPosition || 'right', vscode.ConfigurationTarget.Global);
+                            await cfg.update('md.moveMdButtonsToEnd', !!s.moveMdButtonsToEnd, vscode.ConfigurationTarget.Global);
                             if (typeof s.showOutline === 'boolean') {
                                 await cfg.update('md.showOutline', !!s.showOutline, vscode.ConfigurationTarget.Global);
                             }
@@ -253,10 +259,19 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             }
 
                             const sorted = [...history].sort((a, b) => b.timestamp - a.timestamp);
+                            const oldestVersionId = sorted.length ? sorted[sorted.length - 1].id : null;
                             const picked = await vscode.window.showQuickPick(
-                                sorted.map(entry => ({
-                                    label: new Date(entry.timestamp).toLocaleString(),
-                                    description: `${entry.charCount} chars`,
+                                buildGroupedVersionHistoryItems(sorted, (entry) => ({
+                                    label: entry.id === oldestVersionId && entry.id === restoredVersionId
+                                        ? 'Original File (Restored)'
+                                        : entry.id === oldestVersionId
+                                            ? 'Original File'
+                                        : entry.id === restoredVersionId
+                                            ? 'Restored'
+                                            : formatVersionHistoryTimestamp(entry.timestamp),
+                                    description: entry.id === oldestVersionId || entry.id === restoredVersionId
+                                        ? formatVersionHistoryTimestamp(entry.timestamp)
+                                        : `${entry.charCount} chars`,
                                     detail: `Saved ${Math.max(1, Math.round((Date.now() - entry.timestamp) / 60000))} min ago`,
                                     entry
                                 })),
@@ -269,13 +284,14 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 break;
                             }
 
-                            await vscode.workspace.fs.writeFile(document.uri, Buffer.from(picked.entry.content, 'utf8'));
+                            previewVersionId = picked.entry.id;
+                            previewVersionTimestamp = picked.entry.timestamp;
+                            previewVersionContent = picked.entry.content;
                             currentContent = picked.entry.content;
-                            await persistVersionSnapshot(currentContent);
 
                             webviewPanel.webview.postMessage(buildInitMarkdownPayload(currentContent));
                             webviewPanel.webview.postMessage({
-                                command: 'versionRestoredMd',
+                                command: 'versionPreviewMd',
                                 versionId: picked.entry.id,
                                 timestamp: picked.entry.timestamp
                             });
@@ -286,6 +302,68 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             });
                         }
                         break;
+
+                            case 'cancelVersionPreview':
+                                try {
+                                    if (!previewVersionId) {
+                                        break;
+                                    }
+
+                                    const content = await fs.promises.readFile(filePath, 'utf8');
+                                    currentContent = content;
+                                    previewVersionId = null;
+                                    previewVersionTimestamp = null;
+                                    previewVersionContent = null;
+                                    restoredVersionId = null;
+
+                                    webviewPanel.webview.postMessage(buildInitMarkdownPayload(currentContent));
+                                    webviewPanel.webview.postMessage({ command: 'versionPreviewCancelledMd' });
+                                } catch (err) {
+                                    webviewPanel.webview.postMessage({
+                                        command: 'versionHistoryError',
+                                        message: `Version preview cancel failed: ${String(err)}`
+                                    });
+                                }
+                                break;
+
+                            case 'restoreVersion':
+                                try {
+                                    const versionId = typeof message.versionId === 'string' ? message.versionId : previewVersionId || '';
+                                    if (!versionId) {
+                                        break;
+                                    }
+
+                                    const history = await pruneHistory();
+                                    const entry = history.find(item => item.id === versionId);
+                                    if (!entry) {
+                                        webviewPanel.webview.postMessage({
+                                            command: 'versionHistoryError',
+                                            message: 'Selected version is no longer available'
+                                        });
+                                        break;
+                                    }
+
+                                    await vscode.workspace.fs.writeFile(document.uri, Buffer.from(entry.content, 'utf8'));
+                                    currentContent = entry.content;
+                                    previewVersionId = null;
+                                    previewVersionTimestamp = null;
+                                    previewVersionContent = null;
+                                    restoredVersionId = entry.id;
+                                    await persistVersionSnapshot(currentContent);
+
+                                    webviewPanel.webview.postMessage(buildInitMarkdownPayload(currentContent));
+                                    webviewPanel.webview.postMessage({
+                                        command: 'versionRestoredMd',
+                                        versionId: entry.id,
+                                        timestamp: entry.timestamp
+                                    });
+                                } catch (err) {
+                                    webviewPanel.webview.postMessage({
+                                        command: 'versionHistoryError',
+                                        message: `Version history failed: ${String(err)}`
+                                    });
+                                }
+                                break;
 
                     case 'openExternal':
                         try {
@@ -366,7 +444,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     case 'disableMdEditor':
                         try {
                             const result = await vscode.window.showWarningMessage(
-                                "Are you sure you want to disable XLSX Viewer for all Markdown files? You will be prompted to select a new default editor.",
+                                "Are you sure you want to disable Markdown Viewer for all Markdown files? You will be prompted to select a new default editor.",
                                 "Yes, Disable",
                                 "Cancel"
                             );
@@ -397,6 +475,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                  previewPosition: cfg.get('md.previewPosition', 'right'),
                                  showOutline: cfg.get('md.showOutline', true),
                                  showLineNumbers: cfg.get('md.showLineNumbers', true),
+                                 moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                                  isMdEnabled: true
                              };
                              webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -435,6 +514,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         previewPosition: cfg.get('md.previewPosition', 'right'),
                         showOutline: cfg.get('md.showOutline', true),
                         showLineNumbers: cfg.get('md.showLineNumbers', true),
+                        moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                         isMdEnabled: isMdEnabled
                     };
                     try {

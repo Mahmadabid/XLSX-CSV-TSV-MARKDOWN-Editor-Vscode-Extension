@@ -4,22 +4,22 @@ export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vs
         const webview = webviewPanel.webview;
 
         const scriptUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(context.extensionUri, 'dist', 'xlsx', 'xlsxWebview.js')
+            vscode.Uri.joinPath(context.extensionUri, 'dist', 'spreadsheet', 'spreadsheetWebview.js')
         );
         const themeStyleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(context.extensionUri, 'resources', 'shared', 'theme.css')
         );
         const styleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'xlsxWebview.css')
+            vscode.Uri.joinPath(context.extensionUri, 'resources', 'spreadsheet', 'spreadsheetWebview.css')
         );
         const feedbackStyleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(context.extensionUri, 'resources', 'shared', 'feedback.css')
         );
         const imgUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'view.png')
+            vscode.Uri.joinPath(context.extensionUri, 'resources', 'spreadsheet', 'spreadsheetView.png')
         );
         const svgUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(context.extensionUri, 'resources', 'xlsx', 'table.svg')
+            vscode.Uri.joinPath(context.extensionUri, 'resources', 'spreadsheet', 'spreadsheet.svg')
         );
         const cspSource = webview.cspSource;
 
@@ -29,7 +29,7 @@ export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vs
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XLSX Viewer</title>
+    <title>Spreadsheet Viewer</title>
     <link href="${themeStyleUri}" rel="stylesheet" />
     <link href="${styleUri}" rel="stylesheet" />
     <link href="${feedbackStyleUri}" rel="stylesheet" />
@@ -55,7 +55,7 @@ export function getWebviewContent(webviewPanel: vscode.WebviewPanel, context: vs
 
     <noscript>
         <div style="padding: 8px; margin-top: 10px; background: #fff3cd; border: 1px solid #ffeeba;">
-            JavaScript is disabled in this webview, so the XLSX table cannot load.
+            JavaScript is disabled in this webview, so the spreadsheet table cannot load.
         </div>
     </noscript>
 

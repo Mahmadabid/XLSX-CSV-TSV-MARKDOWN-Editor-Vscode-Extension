@@ -21,12 +21,17 @@ export function formatCellStyle(style: any): string {
     if (style.fontWeight) css += 'font-weight: ' + style.fontWeight + ';';
     if (style.fontStyle) css += 'font-style: ' + style.fontStyle + ';';
     if (style.textDecoration) css += 'text-decoration: ' + style.textDecoration + ';';
+    if (style.textDecorationLine) css += 'text-decoration-line: ' + style.textDecorationLine + ';';
+    if (style.textDecorationThickness) css += 'text-decoration-thickness: ' + style.textDecorationThickness + ';';
+    if (style.textDecorationSkipInk) css += 'text-decoration-skip-ink: ' + style.textDecorationSkipInk + ';';
     if (style.fontSize) css += 'font-size: ' + style.fontSize + ';';
     if (style.fontFamily) css += 'font-family: ' + style.fontFamily + ';';
     if (style.textAlign) css += 'text-align: ' + style.textAlign + ';';
     if (style.verticalAlign) css += 'vertical-align: ' + style.verticalAlign + ';';
     if (style.whiteSpace) css += 'white-space: ' + style.whiteSpace + ';';
     if (style.wordWrap) css += 'word-wrap: ' + style.wordWrap + ';';
+    if (style.overflow) css += 'overflow: ' + style.overflow + ';';
+    if (style.textOverflow) css += 'text-overflow: ' + style.textOverflow + ';';
     if (style.paddingLeft) css += 'padding-left: ' + style.paddingLeft + ';';
 
     if (style.border) {

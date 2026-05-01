@@ -10,9 +10,9 @@ import { Icons } from '../shared/icons';
 import { vscode, VirtualScrollConfig, debounce } from '../shared/common';
 import { VirtualLoader } from '../shared/virtualLoader';
 import { InfoTooltip } from '../shared/infoTooltip';
-import { createXlsxRowHtml, getExcelColumnLabel, renderDropdownCellContent } from './components/xlsxRenderComponent';
-import { XlsxSelectionManager } from './components/xlsxSelectionComponent';
-import { createXlsxToolbarButtons } from './components/xlsxToolbarComponent';
+import { createXlsxRowHtml, getExcelColumnLabel, renderDropdownCellContent } from './components/spreadsheetRenderComponent';
+import { XlsxSelectionManager } from './components/spreadsheetSelectionComponent';
+import { createXlsxToolbarButtons } from './components/spreadsheetToolbarComponent';
 import { FeedbackModal } from '../shared/feedbackModal';
 import {
     XlsxViewSettings,
@@ -20,7 +20,7 @@ import {
     normalizeXlsxSettings,
     syncSettingsCheckboxes,
     createXlsxSettingsDefinitions
-} from './components/xlsxSettingsComponent';
+} from './components/spreadsheetSettingsComponent';
 import {
     BorderLineStyle,
     BorderThickness,
@@ -32,7 +32,7 @@ import {
     inferBorderLineStyleFromCss,
     inferBorderModeFromStyle,
     getActiveBorderModes
-} from './components/xlsxBorderComponent';
+} from './components/spreadsheetBorderComponent';
 import type {
     StructuralOpType,
     WorksheetOpType,
@@ -47,21 +47,21 @@ import type {
     CellUndoState,
     EditUndoEntry,
     WorksheetStateSnapshot
-} from './components/xlsxTypes';
+} from './components/spreadsheetTypes';
 import {
     cloneCellData,
     getCellFromRow,
     setCellOnRow,
     normalizeRowsAfterStructureChange,
     cloneWorksheetOps
-} from './components/xlsxSheetDataComponent';
+} from './components/spreadsheetSheetDataComponent';
 import {
     normalizeColorToHex,
     getCellRichRuns,
     hasRunFormatting
-} from './components/xlsxRichTextComponent';
-import { XlsxFindManager } from './components/xlsxFindComponent';
-import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClipboardAsync } from './components/xlsxCopyComponent';
+} from './components/spreadsheetRichTextComponent';
+import { XlsxFindManager } from './components/spreadsheetFindComponent';
+import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClipboardAsync } from './components/spreadsheetCopyComponent';
 
 (function () {
     // ===== Virtual Scrolling Configuration =====
@@ -148,8 +148,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     let selectionGlobalListenersAttached = false;
     let toolbarManager: ToolbarManager | null = null;
 
+    type SettingsScope = 'plain' | 'styled';
+
+    const defaultPlainViewSettings: XlsxViewSettings = {
+        ...defaultXlsxViewSettings,
+        autoSave: true,
+        autoSaveMode: 'all',
+        showManualSavePopup: false
+    };
+
     // Settings (persisted by extension)
     let currentSettings: XlsxViewSettings = { ...defaultXlsxViewSettings };
+    let plainModeSettings: XlsxViewSettings = { ...defaultPlainViewSettings };
+    let styledModeSettings: XlsxViewSettings = { ...defaultXlsxViewSettings };
+    let hasVirtualTableInit = false;
 
     // Table edit mode (text-only)
     let isEditMode = false;
@@ -177,6 +189,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     let dropdownOptionsResolver: ((options: string[] | null) => void) | null = null;
     let mergeWarningPopupEl: HTMLElement | null = null;
     let mergeWarningResolver: ((confirmed: boolean) => void) | null = null;
+    let styleModeNoticePopupEl: HTMLElement | null = null;
     let formatPainterStyle: Partial<CellStyleEdit> | null = null;
     let formatPainterArmed = false;
     let formatPainterExecuting = false;
@@ -201,6 +214,27 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     // Plain view mode (removes all XLSX styling)
     let isPlainView = false;
+    let isTemporaryStyleFile = false;
+    let styleModeRequestPending = false;
+    let pendingStyleModeAction: (() => void) | null = null;
+
+    type FilterMode = 'contains' | 'equals' | 'startsWith' | 'nonEmpty';
+    type SortDirection = 'asc' | 'desc';
+
+    interface ColumnFilterState {
+        columnIndex: number;
+        mode: FilterMode;
+        query: string;
+        caseSensitive: boolean;
+    }
+
+    const MAX_ROWS_FOR_CLIENT_DATA_OPS = 120000;
+    let baseTotalRows = 0;
+    let baseRowHeights: number[] = [];
+    let sourceRowsSnapshot: any[] | null = null;
+    let transformedRowsSnapshot: any[] | null = null;
+    const activeColumnFilters = new Map<number, ColumnFilterState>();
+    let activeSortState: { columnIndex: number; direction: SortDirection } | null = null;
 
     // Hyperlink hover tooltip
     let linkTooltip: HTMLElement | null = null;
@@ -893,6 +927,74 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         });
     }
 
+    function hideStyleModeNoticePopup() {
+        if (!styleModeNoticePopupEl) return;
+        styleModeNoticePopupEl.classList.add('hidden');
+    }
+
+    function submitStyleModeDecision(decision: 'continue' | 'convert' | 'cancel') {
+        hideStyleModeNoticePopup();
+        if (!styleModeRequestPending) {
+            return;
+        }
+        vscode.postMessage({ command: 'styleModeDecision', decision });
+    }
+
+    function ensureStyleModeNoticePopup() {
+        if (styleModeNoticePopupEl) return styleModeNoticePopupEl;
+
+        const popup = document.createElement('div');
+        popup.id = 'xlsxStyleModeNoticePopup';
+        popup.className = 'xlsx-style-mode-notice-popup hidden';
+        popup.innerHTML = `
+            <div class="xlsx-style-mode-notice-dialog" role="dialog" aria-modal="true" aria-labelledby="styleModeNoticeTitle">
+                <div id="styleModeNoticeTitle" class="style-mode-notice-title">Style Mode for CSV/TSV</div>
+                <div class="style-mode-notice-message">CSV/TSV files do not store formatting in the file itself.</div>
+                <div class="style-mode-notice-message">
+                    Styled edits are saved only as local extension data and expire after 48 hours from the last styled edit.
+                    To preserve formatting permanently, convert this file to XLSX.
+                </div>
+                <div class="style-mode-notice-actions">
+                    <button id="styleModeNoticeCancel" type="button" class="toggle-button">Keep Plain Mode</button>
+                    <button id="styleModeNoticeContinue" type="button" class="toggle-button">Continue Styled Mode</button>
+                    <button id="styleModeNoticeConvert" type="button" class="toggle-button">Convert to XLSX</button>
+                </div>
+            </div>
+        `;
+
+        popup.addEventListener('click', (e) => {
+            if (e.target === popup) {
+                submitStyleModeDecision('cancel');
+            }
+        });
+
+        const cancelBtn = popup.querySelector('#styleModeNoticeCancel') as HTMLButtonElement | null;
+        const continueBtn = popup.querySelector('#styleModeNoticeContinue') as HTMLButtonElement | null;
+        const convertBtn = popup.querySelector('#styleModeNoticeConvert') as HTMLButtonElement | null;
+
+        cancelBtn?.addEventListener('click', () => submitStyleModeDecision('cancel'));
+        continueBtn?.addEventListener('click', () => submitStyleModeDecision('continue'));
+        convertBtn?.addEventListener('click', () => submitStyleModeDecision('convert'));
+
+        popup.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                submitStyleModeDecision('cancel');
+            }
+        });
+
+        document.body.appendChild(popup);
+        styleModeNoticePopupEl = popup;
+        return popup;
+    }
+
+    function showStyleModeNoticePopup() {
+        const popup = ensureStyleModeNoticePopup();
+        popup.classList.remove('hidden');
+        const continueBtn = popup.querySelector('#styleModeNoticeContinue') as HTMLButtonElement | null;
+        continueBtn?.focus();
+    }
+
     function ensureHeaderVisible() {
         const thead = document.querySelector('#xlsxTable thead') as HTMLElement | null;
         if (thead) {
@@ -1304,7 +1406,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function showHeaderContextMenu(e: MouseEvent, targetType: 'row' | 'column', targetIndexZeroBased: number) {
-        if (!isEditMode) return;
+        if (targetType === 'row' && !isEditMode && !isPlainDirectEditMode()) return;
 
         const menu = ensureHeaderContextMenu();
         menu.innerHTML = '';
@@ -1333,6 +1435,242 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             menu.appendChild(btn);
         });
 
+        if (targetType === 'column') {
+            const appendSeparator = () => {
+                const separator = document.createElement('div');
+                separator.className = 'header-context-separator';
+                menu.appendChild(separator);
+            };
+
+            const appendAction = (label: string, onClick: () => Promise<void> | void, hideBeforeRun = true) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'header-context-item';
+                btn.textContent = label;
+                btn.addEventListener('click', async () => {
+                    if (hideBeforeRun) {
+                        hideHeaderContextMenu();
+                    }
+                    try {
+                        await onClick();
+                    } catch {
+                        showToast('Unable to apply column operation');
+                    }
+                });
+                menu.appendChild(btn);
+            };
+
+            const applyColumnFilter = async (mode: FilterMode, query: string, caseSensitive: boolean) => {
+                const ready = await ensureSourceRowsSnapshot();
+                if (!ready) return;
+
+                const trimmedQuery = query.trim();
+                if (mode === 'nonEmpty') {
+                    activeColumnFilters.set(colIndex, {
+                        columnIndex: colIndex,
+                        mode,
+                        query: '',
+                        caseSensitive: false
+                    });
+                } else if (!trimmedQuery) {
+                    activeColumnFilters.delete(colIndex);
+                } else {
+                    activeColumnFilters.set(colIndex, {
+                        columnIndex: colIndex,
+                        mode,
+                        query: trimmedQuery,
+                        caseSensitive
+                    });
+                }
+
+                rebuildFilteredRows();
+                const hasTransforms = activeSortState || activeColumnFilters.size > 0;
+                applyDataOpsRowsToViewport(hasTransforms ? transformedRowsSnapshot : null);
+
+                const filteredCount = hasTransforms && transformedRowsSnapshot ? transformedRowsSnapshot.length : baseTotalRows;
+                showToast(hasTransforms ? `Showing ${filteredCount.toLocaleString()} filtered rows` : 'Filter cleared');
+            };
+
+            const clearColumnFilter = async () => {
+                if (!activeColumnFilters.has(colIndex)) {
+                    return;
+                }
+
+                activeColumnFilters.delete(colIndex);
+
+                if (!sourceRowsSnapshot) {
+                    applyDataOpsRowsToViewport(null);
+                    return;
+                }
+
+                rebuildFilteredRows();
+                if (!activeSortState && activeColumnFilters.size === 0) {
+                    applyDataOpsRowsToViewport(null);
+                    showToast('Filter cleared');
+                    return;
+                }
+
+                applyDataOpsRowsToViewport(transformedRowsSnapshot);
+                const filteredCount = transformedRowsSnapshot ? transformedRowsSnapshot.length : baseTotalRows;
+                showToast(`Showing ${filteredCount.toLocaleString()} filtered rows`);
+            };
+
+            const appendFilterPanel = () => {
+                const existingFilter = activeColumnFilters.get(colIndex);
+                const panel = document.createElement('div');
+                panel.className = 'header-filter-panel';
+                panel.addEventListener('click', (event) => event.stopPropagation());
+                panel.addEventListener('mousedown', (event) => event.stopPropagation());
+
+                const title = document.createElement('div');
+                title.className = 'header-filter-title';
+                title.textContent = `Filter ${getExcelColumnLabel(colIndex + 1)}`;
+                panel.appendChild(title);
+
+                const modeSelect = document.createElement('select');
+                modeSelect.className = 'header-filter-select';
+                const filterModes: Array<{ value: FilterMode; label: string }> = [
+                    { value: 'contains', label: 'Contains' },
+                    { value: 'equals', label: 'Equals' },
+                    { value: 'startsWith', label: 'Starts with' },
+                    { value: 'nonEmpty', label: 'Non-empty' }
+                ];
+                filterModes.forEach((mode) => {
+                    const option = document.createElement('option');
+                    option.value = mode.value;
+                    option.textContent = mode.label;
+                    modeSelect.appendChild(option);
+                });
+                modeSelect.value = existingFilter?.mode || 'contains';
+                panel.appendChild(modeSelect);
+
+                const queryInput = document.createElement('input');
+                queryInput.className = 'header-filter-input';
+                queryInput.type = 'text';
+                queryInput.placeholder = 'Filter value';
+                queryInput.value = existingFilter && existingFilter.mode !== 'nonEmpty' ? existingFilter.query : '';
+                panel.appendChild(queryInput);
+
+                const caseLabel = document.createElement('label');
+                caseLabel.className = 'header-filter-checkbox';
+                const caseInput = document.createElement('input');
+                caseInput.type = 'checkbox';
+                caseInput.checked = !!existingFilter?.caseSensitive;
+                caseLabel.appendChild(caseInput);
+                caseLabel.appendChild(document.createTextNode('Case sensitive'));
+                panel.appendChild(caseLabel);
+
+                const actions = document.createElement('div');
+                actions.className = 'header-filter-actions';
+
+                const applyBtn = document.createElement('button');
+                applyBtn.type = 'button';
+                applyBtn.className = 'header-filter-button primary';
+                applyBtn.textContent = 'Apply';
+
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.className = 'header-filter-button';
+                clearBtn.textContent = 'Clear';
+
+                actions.appendChild(applyBtn);
+                actions.appendChild(clearBtn);
+                panel.appendChild(actions);
+
+                const syncControls = () => {
+                    const nonEmpty = modeSelect.value === 'nonEmpty';
+                    queryInput.disabled = nonEmpty;
+                    caseInput.disabled = nonEmpty;
+                    queryInput.placeholder = nonEmpty ? 'No value needed' : 'Filter value';
+                };
+
+                const runApply = async () => {
+                    hideHeaderContextMenu();
+                    await applyColumnFilter(modeSelect.value as FilterMode, queryInput.value, caseInput.checked);
+                };
+
+                modeSelect.addEventListener('change', () => {
+                    syncControls();
+                    if (modeSelect.value !== 'nonEmpty') {
+                        queryInput.focus();
+                        queryInput.select();
+                    }
+                });
+                queryInput.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void runApply();
+                    } else if (event.key === 'Escape') {
+                        hideHeaderContextMenu();
+                    }
+                });
+                applyBtn.addEventListener('click', () => {
+                    void runApply();
+                });
+                clearBtn.addEventListener('click', () => {
+                    hideHeaderContextMenu();
+                    void clearColumnFilter();
+                });
+
+                syncControls();
+                menu.appendChild(panel);
+            };
+
+            const colIndex = targetIndexZeroBased;
+            appendSeparator();
+            
+            // Show visual indicators for active sorts
+            const isAscSorted = activeSortState?.columnIndex === colIndex && activeSortState?.direction === 'asc';
+            const isDescSorted = activeSortState?.columnIndex === colIndex && activeSortState?.direction === 'desc';
+            
+            appendAction('Sort A to Z' + (isAscSorted ? ' ✓' : ''), async () => {
+                const ready = await ensureSourceRowsSnapshot();
+                if (!ready) return;
+                
+                if (isAscSorted) {
+                    // Already sorted A-Z, toggle off
+                    activeSortState = null;
+                } else {
+                    activeSortState = { columnIndex: colIndex, direction: 'asc' };
+                }
+                
+                rebuildFilteredRows();
+                applyDataOpsRowsToViewport(activeSortState || activeColumnFilters.size > 0 ? transformedRowsSnapshot : null);
+            });
+            
+            appendAction('Sort Z to A' + (isDescSorted ? ' ✓' : ''), async () => {
+                const ready = await ensureSourceRowsSnapshot();
+                if (!ready) return;
+                
+                if (isDescSorted) {
+                    // Already sorted Z-A, toggle off
+                    activeSortState = null;
+                } else {
+                    activeSortState = { columnIndex: colIndex, direction: 'desc' };
+                }
+                
+                rebuildFilteredRows();
+                applyDataOpsRowsToViewport(activeSortState || activeColumnFilters.size > 0 ? transformedRowsSnapshot : null);
+            });
+
+            appendSeparator();
+            appendFilterPanel();
+            appendAction('Filter Non-Empty', async () => {
+                await applyColumnFilter('nonEmpty', '', false);
+            });
+            appendAction('Clear Column Filter', async () => {
+                await clearColumnFilter();
+            });
+            appendAction('Clear All Filters/Sort', async () => {
+                if (!sourceRowsSnapshot && activeColumnFilters.size === 0 && !activeSortState) {
+                    return;
+                }
+                activeColumnFilters.clear();
+                activeSortState = null;
+                applyDataOpsRowsToViewport(null);
+            });
+        }
+
         menu.classList.remove('hidden');
 
         const rect = menu.getBoundingClientRect();
@@ -1343,7 +1681,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function showCellContextMenu(e: MouseEvent, cell: HTMLElement) {
-        if (!isEditMode) return;
+        if (!isEditMode && !isPlainDirectEditMode()) return;
 
         const menu = ensureHeaderContextMenu();
         menu.innerHTML = '';
@@ -1442,7 +1780,183 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
     }
 
+    function updatePlainViewButtonLabel() {
+        const btn = document.getElementById('togglePlainViewButton');
+        if (!btn) return;
+
+        const labelSpan = btn.querySelector('.btn-label');
+        if (labelSpan) {
+            labelSpan.textContent = isPlainView ? 'Styled' : 'Plain';
+        }
+    }
+
+    function syncPlainViewUiState() {
+        document.body.classList.toggle('plain-view', isPlainView);
+        updatePlainViewButtonLabel();
+    }
+
+    function isPlainDirectEditMode() {
+        return isPlainView && !isVersionPreviewMode;
+    }
+
+    function shouldShowSheetSelector() {
+        // Show sheet selector if there are multiple sheets, regardless of file type
+        return worksheetsMeta && worksheetsMeta.length > 1;
+    }
+
+    function syncSheetSelectorVisibility() {
+        const selector = document.getElementById('sheetSelector');
+        if (!selector) return;
+        selector.classList.toggle('hidden', isEditMode || !shouldShowSheetSelector());
+    }
+
+    function syncTemporaryFileToolbarActions() {
+        const editFileButton = document.getElementById('editFileButton');
+        const togglePlainViewButton = document.getElementById('togglePlainViewButton');
+        const toggleTableEditButton = document.getElementById('toggleTableEditButton');
+        const hideEditTableButton = isPlainDirectEditMode();
+
+        if (toolbarManager) {
+            toolbarManager.setButtonVisibility('editFileButton', !!isTemporaryStyleFile && !isEditMode);
+            toolbarManager.setButtonVisibility('togglePlainViewButton', !isEditMode || isPlainView);
+            toolbarManager.setButtonVisibility('toggleTableEditButton', !isEditMode && !hideEditTableButton);
+            return;
+        }
+
+        if (editFileButton) {
+            editFileButton.classList.toggle('hidden', !isTemporaryStyleFile || isEditMode);
+        }
+        if (togglePlainViewButton) {
+            togglePlainViewButton.classList.toggle('hidden', isEditMode && !isPlainView);
+        }
+        if (toggleTableEditButton) {
+            toggleTableEditButton.classList.toggle('hidden', isEditMode || hideEditTableButton);
+        }
+    }
+
+    function resolveSettingsScope(scope: any): SettingsScope {
+        return scope === 'plain' ? 'plain' : 'styled';
+    }
+
+    function getCurrentSettingsScope(): SettingsScope {
+        return isPlainView ? 'plain' : 'styled';
+    }
+
+    function getStoredSettingsForScope(scope: SettingsScope): XlsxViewSettings {
+        return scope === 'plain' ? plainModeSettings : styledModeSettings;
+    }
+
+    function setStoredSettingsForScope(scope: SettingsScope, settings: XlsxViewSettings) {
+        if (scope === 'plain') {
+            plainModeSettings = { ...settings };
+            return;
+        }
+        styledModeSettings = { ...settings };
+    }
+
+    function normalizeSettingsForScope(scope: SettingsScope, incoming: any, previous: XlsxViewSettings): XlsxViewSettings {
+        const normalized = normalizeXlsxSettings(incoming, previous);
+        if (scope === 'plain') {
+            normalized.autoSaveMode = 'all';
+            normalized.showManualSavePopup = false;
+        }
+        return normalized;
+    }
+
+    function ingestSettingsForScope(scope: SettingsScope, incoming: any) {
+        const previous = getStoredSettingsForScope(scope);
+        const normalized = normalizeSettingsForScope(scope, incoming, previous);
+        setStoredSettingsForScope(scope, normalized);
+    }
+
+    function applySettingsForScope(scope: SettingsScope) {
+        applySettings(getStoredSettingsForScope(scope), scope);
+    }
+
+    function consumeIncomingSettingsPayload(message: any) {
+        const incomingScope = resolveSettingsScope(message?.settingsScope);
+
+        if (message?.plainSettings) {
+            ingestSettingsForScope('plain', message.plainSettings);
+        }
+        if (message?.styledSettings) {
+            ingestSettingsForScope('styled', message.styledSettings);
+        }
+
+        if (message?.settings) {
+            const shouldIngestPlain = incomingScope === 'plain' && !message?.plainSettings;
+            const shouldIngestStyled = incomingScope === 'styled' && !message?.styledSettings;
+            if (shouldIngestPlain) {
+                ingestSettingsForScope('plain', message.settings);
+            }
+            if (shouldIngestStyled) {
+                ingestSettingsForScope('styled', message.settings);
+            }
+        }
+
+        const scopeToApply = hasVirtualTableInit ? getCurrentSettingsScope() : incomingScope;
+        applySettingsForScope(scopeToApply);
+    }
+
+    function requestStyledMode(nextAction?: () => void) {
+        if (!isTemporaryStyleFile || !isPlainView) {
+            return false;
+        }
+
+        pendingStyleModeAction = nextAction ?? null;
+        if (!styleModeRequestPending) {
+            styleModeRequestPending = true;
+            vscode.postMessage({ command: 'requestStyleMode' });
+        }
+        return true;
+    }
+
+    function activateStyledMode() {
+        styleModeRequestPending = false;
+        hideStyleModeNoticePopup();
+        isPlainView = false;
+        syncPlainViewUiState();
+        syncTemporaryFileToolbarActions();
+        if (isTemporaryStyleFile) {
+            vscode.postMessage({ command: 'setPreferredViewMode', mode: 'styled' });
+        }
+        applySettingsForScope('styled');
+
+        // Flush any pending plain-mode edits before switching so data is not lost.
+        // Then request a full re-init from the provider to get fresh data (the
+        // provider re-reads the file which contains the auto-saved plain edits).
+        if (pendingOutsideControlEdits.length > 0) {
+            saveEdits(false, true);
+        }
+        rowCache.clear();
+        currentVisibleStart = 0;
+        currentVisibleEnd = 0;
+        renderWorksheet(currentWorksheet);
+
+        const nextAction = pendingStyleModeAction;
+        pendingStyleModeAction = null;
+        if (nextAction) {
+            setTimeout(() => {
+                try {
+                    nextAction();
+                } catch {
+                    // ignore
+                }
+            }, 100);
+        }
+    }
+
+    function cancelStyledModeRequest() {
+        styleModeRequestPending = false;
+        hideStyleModeNoticePopup();
+        pendingStyleModeAction = null;
+    }
+
     function applyEditFormatting(command: string, value?: string) {
+        if (requestStyledMode(() => applyEditFormatting(command, value))) {
+            return;
+        }
+
         if (!isEditMode) return;
 
         const selection = window.getSelection();
@@ -1501,6 +2015,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyFormatToLogicalSelection(styleChanges: Partial<CellStyleEdit>, mode: 'set' | 'toggle' = 'set', toggleKey?: keyof CellStyleEdit) {
+        if (requestStyledMode(() => applyFormatToLogicalSelection(styleChanges, mode, toggleKey))) {
+            return;
+        }
+
         const bounds = getLogicalSelectionBounds();
         if (!bounds) {
             showToast('Select cells to format');
@@ -1645,13 +2163,128 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         return null;
     }
 
+    function styleToRendererCss(style: Record<string, any>): Record<string, any> {
+        const css: Record<string, any> = {};
+
+        const backgroundColor = typeof style.backgroundColor === 'string' ? style.backgroundColor : (typeof style.bgColor === 'string' ? style.bgColor : '');
+        if (backgroundColor) {
+            css.backgroundColor = backgroundColor;
+        }
+
+        const textColor = typeof style.color === 'string' ? style.color : (typeof style.textColor === 'string' ? style.textColor : '');
+        if (textColor) {
+            css.color = textColor;
+        }
+
+        if (typeof style.fontWeight === 'string') {
+            css.fontWeight = style.fontWeight;
+        } else if (typeof style.bold === 'boolean') {
+            css.fontWeight = style.bold ? 'bold' : 'normal';
+        }
+
+        if (typeof style.fontStyle === 'string') {
+            css.fontStyle = style.fontStyle;
+        } else if (typeof style.italic === 'boolean') {
+            css.fontStyle = style.italic ? 'italic' : 'normal';
+        }
+
+        const fontSizeValue = style.fontSize;
+        if (typeof fontSizeValue === 'string' && fontSizeValue.trim()) {
+            css.fontSize = fontSizeValue;
+        } else if (typeof fontSizeValue === 'number') {
+            css.fontSize = `${fontSizeValue}pt`;
+        }
+
+        if (typeof style.fontFamily === 'string') {
+            css.fontFamily = style.fontFamily;
+        }
+
+        if (typeof style.textDecoration === 'string') {
+            css.textDecoration = style.textDecoration;
+        }
+        if (typeof style.textDecorationLine === 'string') {
+            css.textDecorationLine = style.textDecorationLine;
+        } else if (typeof style.strike === 'boolean') {
+            css.textDecorationLine = style.strike ? 'line-through' : '';
+        }
+        if (typeof style.textDecorationThickness === 'string') {
+            css.textDecorationThickness = style.textDecorationThickness;
+        }
+        if (typeof style.textDecorationSkipInk === 'string') {
+            css.textDecorationSkipInk = style.textDecorationSkipInk;
+        }
+
+        if (typeof style.textAlign === 'string') {
+            css.textAlign = style.textAlign;
+        } else if (typeof style.horizontalAlign === 'string') {
+            css.textAlign = style.horizontalAlign;
+        }
+
+        if (typeof style.verticalAlign === 'string') {
+            css.verticalAlign = style.verticalAlign;
+        }
+
+        if (typeof style.whiteSpace === 'string') {
+            css.whiteSpace = style.whiteSpace;
+        }
+        if (typeof style.wordWrap === 'string') {
+            css.wordWrap = style.wordWrap;
+        }
+        if (typeof style.overflow === 'string') {
+            css.overflow = style.overflow;
+        }
+
+        if (typeof style.paddingLeft === 'string') {
+            css.paddingLeft = style.paddingLeft;
+        } else if (typeof style.indent === 'number') {
+            css.paddingLeft = `${Math.max(0, style.indent) * 8}px`;
+        }
+
+        if (style.border && typeof style.border === 'object' && !style.border.clear) {
+            css.border = {
+                top: style.border.top,
+                right: style.border.right,
+                bottom: style.border.bottom,
+                left: style.border.left,
+                color: style.border.color,
+                style: style.border.style
+            };
+        }
+
+        return css;
+    }
+
+    function normalizeStyleForStorage(style: Record<string, any>): Record<string, any> {
+        if (!style || typeof style !== 'object') {
+            return {};
+        }
+
+        if (style.clearFormatting) {
+            return {
+                row: style.row,
+                col: style.col,
+                clearFormatting: true,
+                border: { clear: true, top: false, right: false, bottom: false, left: false }
+            };
+        }
+
+        const stored: Record<string, any> = { ...style };
+        const css = styleToRendererCss(style);
+
+        for (const [key, value] of Object.entries(css)) {
+            stored[key] = value;
+        }
+
+        return stored;
+    }
+
     function recordLogicalStyleEdit(row: number, col: number, style: Partial<CellStyleEdit>) {
         const rowNum = row + 1;
         const colNum = col + 1;
         const key = rowNum + ':' + colNum;
         const existing = pendingCellStyleEdits.get(key) || { row: rowNum, col: colNum };
-        const merged: CellStyleEdit = { ...existing, ...style, row: rowNum, col: colNum };
-        pendingCellStyleEdits.set(key, merged);
+        const merged = normalizeStyleForStorage({ ...existing, ...style, row: rowNum, col: colNum });
+        pendingCellStyleEdits.set(key, merged as CellStyleEdit);
         scheduleAutoSave('format');
     }
 
@@ -1662,8 +2295,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         const key = rowNum + ':' + colNum;
         const existing = pendingCellStyleEdits.get(key) || { row: rowNum, col: colNum };
-        const merged: CellStyleEdit = { ...existing, ...style, row: rowNum, col: colNum };
-        pendingCellStyleEdits.set(key, merged);
+        const merged = normalizeStyleForStorage({ ...existing, ...style, row: rowNum, col: colNum });
+        pendingCellStyleEdits.set(key, merged as CellStyleEdit);
         scheduleAutoSave('format');
     }
 
@@ -1798,7 +2431,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!entry) return false;
 
         if (entry.kind === 'style') {
-            entry.before.forEach(state => applyCellUndoState(state));
+            entry.before.forEach((state: CellUndoState) => applyCellUndoState(state));
         } else {
             restoreWorksheetStateSnapshot(entry.before);
         }
@@ -1818,7 +2451,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!entry) return false;
 
         if (entry.kind === 'style') {
-            entry.after.forEach(state => applyCellUndoState(state));
+            entry.after.forEach((state: CellUndoState) => applyCellUndoState(state));
         } else {
             restoreWorksheetStateSnapshot(entry.after);
         }
@@ -1861,6 +2494,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyHorizontalAlign(value: HorizontalAlign) {
+        if (requestStyledMode(() => applyHorizontalAlign(value))) {
+            return;
+        }
+
         const cells = getEditableCellsOrToast('Select cells to align');
         if (!cells.length) return;
 
@@ -1871,6 +2508,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyVerticalAlign(value: VerticalAlign) {
+        if (requestStyledMode(() => applyVerticalAlign(value))) {
+            return;
+        }
+
         const cells = getEditableCellsOrToast('Select cells to align');
         if (!cells.length) return;
 
@@ -1881,6 +2522,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyFontSize(value: number) {
+        if (requestStyledMode(() => applyFontSize(value))) {
+            return;
+        }
+
         const cells = getEditableCellsOrToast('Select cells to set font size');
         if (!cells.length) return;
 
@@ -1905,6 +2550,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyFontFamily(value: string) {
+        if (requestStyledMode(() => applyFontFamily(value))) {
+            return;
+        }
+
         const cells = getEditableCellsOrToast('Select cells to set font family');
         if (!cells.length) return;
 
@@ -1915,6 +2564,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyWrapMode(mode: WrapMode) {
+        if (requestStyledMode(() => applyWrapMode(mode))) {
+            return;
+        }
+
         const cells = getEditableCellsOrToast('Select cells to set wrapping');
         if (!cells.length) return;
 
@@ -1959,6 +2612,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyIndent(delta: number) {
+        if (requestStyledMode(() => applyIndent(delta))) {
+            return;
+        }
+
         const cells = getEditableCellsOrToast('Select cells to indent');
         if (!cells.length) return;
 
@@ -1971,6 +2628,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyStrikeThrough() {
+        if (requestStyledMode(() => applyStrikeThrough())) {
+            return;
+        }
+
         const selection = window.getSelection();
         const hasTextSelection = !!selection && selection.rangeCount > 0 && !selection.isCollapsed;
 
@@ -2004,6 +2665,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyBorderPreset(mode: BorderMode) {
+        if (requestStyledMode(() => applyBorderPreset(mode))) {
+            return;
+        }
+
         selectedBorderMode = mode;
         const bounds = getLogicalSelectionBounds();
         if (!bounds) {
@@ -2119,6 +2784,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function applyBorderColorToSelection(color: string) {
+        if (requestStyledMode(() => applyBorderColorToSelection(color))) {
+            return;
+        }
+
         selectedBorderColor = color;
 
         const bounds = getLogicalSelectionBounds();
@@ -2197,6 +2866,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function clearFormattingOnSelection() {
+        if (requestStyledMode(() => clearFormattingOnSelection())) {
+            return;
+        }
+
         applyFormatToLogicalSelection({
             clearFormatting: true,
             border: { clear: true }
@@ -2496,39 +3169,52 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         };
     }
 
-    function applyStyleToCellFromPainter(cell: HTMLElement, style: Partial<CellStyleEdit>) {
-        if ('bgColor' in style) {
-            cell.style.backgroundColor = style.bgColor || '';
-            if (style.bgColor) {
+    function applyStyleToCellFromPainter(cell: HTMLElement, style: any) {
+        const backgroundColor = typeof style.backgroundColor === 'string' ? style.backgroundColor : (typeof style.bgColor === 'string' ? style.bgColor : '');
+        if ('backgroundColor' in style || 'bgColor' in style) {
+            cell.style.backgroundColor = backgroundColor || '';
+            if (backgroundColor) {
                 cell.removeAttribute('data-default-bg');
                 cell.removeAttribute('data-white-bg');
                 cell.removeAttribute('data-black-bg');
             }
         }
-        if ('textColor' in style) {
-            if (style.textColor) {
-                cell.style.setProperty('color', style.textColor, 'important');
+        const textColor = typeof style.color === 'string' ? style.color : (typeof style.textColor === 'string' ? style.textColor : '');
+        if ('color' in style || 'textColor' in style) {
+            if (textColor) {
+                cell.style.setProperty('color', textColor, 'important');
             } else {
                 cell.style.removeProperty('color');
             }
-            if (style.textColor) {
+            if (textColor) {
                 cell.removeAttribute('data-default-color');
             }
         }
-        if (typeof style.bold === 'boolean') {
+        if (typeof style.fontWeight === 'string') {
+            cell.style.fontWeight = style.fontWeight;
+        } else if (typeof style.bold === 'boolean') {
             cell.style.fontWeight = style.bold ? 'bold' : 'normal';
         }
-        if (typeof style.italic === 'boolean') {
+        if (typeof style.fontStyle === 'string') {
+            cell.style.fontStyle = style.fontStyle;
+        } else if (typeof style.italic === 'boolean') {
             cell.style.fontStyle = style.italic ? 'italic' : 'normal';
         }
-        if (typeof style.fontSize === 'number') {
+        if (typeof style.fontSize === 'string') {
+            cell.style.fontSize = style.fontSize;
+        } else if (typeof style.fontSize === 'number') {
             cell.style.fontSize = `${style.fontSize}pt`;
         }
         if ('fontFamily' in style) {
             cell.style.fontFamily = style.fontFamily || '';
         }
-        if (typeof style.strike === 'boolean') {
-            if (style.strike) {
+        const strike = typeof style.textDecorationLine === 'string'
+            ? style.textDecorationLine.includes('line-through')
+            : typeof style.strike === 'boolean'
+                ? style.strike
+                : undefined;
+        if (typeof strike === 'boolean') {
+            if (strike) {
                 cell.style.textDecorationLine = 'line-through';
                 cell.style.textDecorationThickness = '2px';
                 cell.style.textDecorationSkipInk = 'none';
@@ -2541,15 +3227,18 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 cell.style.textDecorationColor = '';
             }
         }
-        if (style.horizontalAlign) {
+        if (style.textAlign) {
+            cell.style.textAlign = style.textAlign;
+        } else if (style.horizontalAlign) {
             cell.style.textAlign = style.horizontalAlign;
         }
         if (style.verticalAlign) {
             cell.style.verticalAlign = style.verticalAlign;
         }
-        if (style.wrapMode) {
+        if (style.whiteSpace || style.wordWrap || style.overflow || style.wrapMode) {
             const content = cell.querySelector('.cell-content') as HTMLElement | null;
-            if (style.wrapMode === 'wrap') {
+            const wrapMode = style.wrapMode;
+            if (style.whiteSpace === 'pre-wrap' || wrapMode === 'wrap') {
                 cell.style.whiteSpace = 'pre-wrap';
                 cell.style.wordWrap = 'break-word';
                 cell.style.overflow = 'visible';
@@ -2560,7 +3249,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     content.style.overflow = 'visible';
                     content.style.textOverflow = 'clip';
                 }
-            } else if (style.wrapMode === 'overflow') {
+            } else if (style.whiteSpace === 'nowrap' && style.overflow !== 'hidden' || wrapMode === 'overflow') {
                 cell.style.whiteSpace = 'nowrap';
                 cell.style.wordWrap = 'normal';
                 cell.style.overflow = 'visible';
@@ -2584,7 +3273,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 }
             }
         }
-        if (typeof style.indent === 'number') {
+        if (typeof style.paddingLeft === 'string') {
+            cell.style.paddingLeft = style.paddingLeft;
+        } else if (typeof style.indent === 'number') {
             cell.style.paddingLeft = `${Math.max(0, style.indent) * 8}px`;
         }
         if (style.border) {
@@ -3275,6 +3966,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function shouldScheduleAutosaveForChange(kind: XlsxAutoSaveChangeKind): boolean {
+        if (isTemporaryStyleFile && (kind === 'format' || kind === 'structure')) {
+            return true;
+        }
+
         if (!currentSettings.autoSave) {
             return false;
         }
@@ -3295,6 +3990,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!row || !col) return;
 
         const value = getCellNormalizedValue(cell).replace(/\u00a0/g, '');
+        syncLocalSnapshotValue(row, col, value);
 
         if (!currentSettings.autoSave) {
             upsertPendingOutsideControlEdit(row, col, value);
@@ -3312,6 +4008,59 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             operations: [],
             isAutosave: true
         });
+    }
+
+    function persistPlainTextEdit(cell: HTMLElement) {
+        if (isVersionPreviewMode || isEditMode || !isPlainDirectEditMode()) return;
+
+        const row = parseInt(cell.getAttribute('data-rownum') || '0', 10);
+        const col = parseInt(cell.getAttribute('data-colnum') || '0', 10);
+        if (!row || !col) return;
+
+        const value = getCellNormalizedValue(cell).replace(/\u00a0/g, '');
+        syncLocalSnapshotValue(row, col, value);
+        cell.dataset.originalText = value;
+        cell.dataset.originalHtml = cell.innerHTML;
+
+        if (!currentSettings.autoSave) {
+            upsertPendingOutsideControlEdit(row, col, value);
+            showManualSaveReminderIfNeeded();
+            return;
+        }
+
+        removePendingOutsideControlEdit(row, col);
+        vscode.postMessage({
+            command: 'saveXlsxEdits',
+            sheetIndex: currentWorksheet,
+            edits: [{ row, col, value }],
+            richEdits: [],
+            styleEdits: [],
+            operations: [],
+            isAutosave: true
+        });
+    }
+
+    function syncLocalSnapshotValue(rowNumber: number, colNumber: number, value: string) {
+        const applyValue = (rows: any[] | null) => {
+            if (!rows || rowNumber <= 0 || colNumber <= 0) return;
+            const row = rows.find((entry) => Number(entry?.rowNumber) === rowNumber);
+            if (!row) return;
+
+            const existing = getCellFromRow(row, colNumber);
+            if (existing) {
+                existing.value = value;
+                return;
+            }
+
+            if (!Array.isArray(row.cells)) {
+                row.cells = [];
+            }
+            row.cells.push({ rowNumber, colNumber, value });
+            row.cells.sort((a: any, b: any) => (a.colNumber || 0) - (b.colNumber || 0));
+        };
+
+        applyValue(sourceRowsSnapshot);
+        applyValue(transformedRowsSnapshot);
     }
 
     function hasPendingXlsxEdits(): boolean {
@@ -3355,7 +4104,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         clearAutoSaveTimer();
         autoSaveTimer = setTimeout(() => {
             autoSaveTimer = null;
-            if (!currentSettings.autoSave || !isEditMode || isVersionPreviewMode || isSaving) {
+            if ((!currentSettings.autoSave && !(isTemporaryStyleFile && (kind === 'format' || kind === 'structure'))) || !isEditMode || isVersionPreviewMode || isSaving) {
                 return;
             }
             if (!hasPendingXlsxEdits()) {
@@ -3381,7 +4130,240 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function requestAllRows(): Promise<any[]> {
-        return requestRows(0, totalRows, 30000);
+        const rowCount = Math.max(0, baseTotalRows || totalRows);
+        return requestRows(0, rowCount, 30000);
+    }
+
+    function clearDataTransforms() {
+        sourceRowsSnapshot = null;
+        transformedRowsSnapshot = null;
+        activeColumnFilters.clear();
+        activeSortState = null;
+    }
+
+    function getActiveRowsSnapshot(): any[] | null {
+        if (transformedRowsSnapshot) return transformedRowsSnapshot;
+        if (sourceRowsSnapshot) return sourceRowsSnapshot;
+        return null;
+    }
+
+    function stripHtmlForDataOps(value: string): string {
+        if (!/[<&]/.test(value)) {
+            return value;
+        }
+
+        const tmp = document.createElement('div');
+        tmp.innerHTML = value;
+        return (tmp.textContent || tmp.innerText || '').replace(/\u00a0/g, ' ');
+    }
+
+    function readCellTextForDataOps(rowData: any, colZeroBased: number): string {
+        const cell = getCellFromRow(rowData, colZeroBased + 1);
+        if (!cell) return '';
+
+        const value = cell.value;
+        if (value === null || value === undefined) {
+            return '';
+        }
+
+        if (typeof value === 'string') {
+            return stripHtmlForDataOps(value);
+        }
+
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return String(value);
+        }
+
+        if (value instanceof Date) {
+            return value.toISOString();
+        }
+
+        if (typeof value === 'object') {
+            const richRuns = Array.isArray((value as any).richText) ? (value as any).richText : [];
+            if (richRuns.length > 0) {
+                return richRuns.map((run: any) => String(run?.text ?? '')).join('');
+            }
+
+            const hyperlinkText = typeof (value as any).text === 'string' ? (value as any).text : '';
+            if (hyperlinkText) {
+                return hyperlinkText;
+            }
+        }
+
+        return stripHtmlForDataOps(String(value));
+    }
+
+    function parseSortableNumber(value: string): number | null {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+
+        const negativeByParens = /^\(.*\)$/.test(trimmed);
+        const normalized = trimmed
+            .replace(/^\((.*)\)$/, '$1')
+            .replace(/[%,$\s]/g, '')
+            .replace(/,/g, '');
+        if (!normalized || normalized === '-' || normalized === '.') return null;
+
+        const parsed = Number(normalized);
+        if (!Number.isFinite(parsed)) return null;
+        return negativeByParens ? -parsed : parsed;
+    }
+
+    function parseSortableBoolean(value: string): number | null {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true' || normalized === 'yes' || normalized === '1' || normalized === 'y') return 1;
+        if (normalized === 'false' || normalized === 'no' || normalized === '0' || normalized === 'n') return 0;
+        return null;
+    }
+
+    function parseSortableDate(value: string): number | null {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (!/^\d{4}-\d{1,2}-\d{1,2}/.test(trimmed) && !/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(trimmed)) {
+            return null;
+        }
+
+        const timestamp = Date.parse(trimmed);
+        return Number.isFinite(timestamp) ? timestamp : null;
+    }
+
+    function compareDataOpValues(aText: string, bText: string, direction: SortDirection): number {
+        const factor = direction === 'asc' ? 1 : -1;
+        const a = aText.trim();
+        const b = bText.trim();
+
+        const aEmpty = a === '';
+        const bEmpty = b === '';
+        if (aEmpty && !bEmpty) return 1;
+        if (!aEmpty && bEmpty) return -1;
+        if (aEmpty && bEmpty) return 0;
+
+        const aBool = parseSortableBoolean(a);
+        const bBool = parseSortableBoolean(b);
+        if (aBool !== null && bBool !== null) {
+            return (aBool - bBool) * factor;
+        }
+
+        const aNum = parseSortableNumber(a);
+        const bNum = parseSortableNumber(b);
+        if (aNum !== null && bNum !== null) {
+            return (aNum - bNum) * factor;
+        }
+
+        const aDate = parseSortableDate(a);
+        const bDate = parseSortableDate(b);
+        if (aDate !== null && bDate !== null) {
+            return (aDate - bDate) * factor;
+        }
+
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }) * factor;
+    }
+
+    function applyDataOpsRowsToViewport(rows: any[] | null) {
+        if (rows) {
+            transformedRowsSnapshot = rows;
+            totalRows = rows.length;
+            allRowHeights = rows.map((row) => {
+                const h = Number((row as any)?.height);
+                return Number.isFinite(h) && h > 0 ? h : ROW_HEIGHT;
+            });
+        } else {
+            transformedRowsSnapshot = null;
+            totalRows = baseTotalRows;
+            allRowHeights = [...baseRowHeights];
+        }
+
+        invalidateRowMetrics();
+        rowCache.clear();
+        currentVisibleStart = 0;
+        currentVisibleEnd = 0;
+        hideHeaderContextMenu();
+        renderWorksheet(currentWorksheet);
+    }
+
+    async function ensureSourceRowsSnapshot(): Promise<boolean> {
+        if (sourceRowsSnapshot) {
+            return true;
+        }
+
+        if ((baseTotalRows || totalRows) > MAX_ROWS_FOR_CLIENT_DATA_OPS) {
+            showToast(`Filtering is limited to ${MAX_ROWS_FOR_CLIENT_DATA_OPS.toLocaleString()} rows for performance.`);
+            return false;
+        }
+
+        try {
+            setLoadingText('Loading rows for filtering...');
+            showLoading();
+            const rows = await requestAllRows();
+            sourceRowsSnapshot = Array.isArray(rows) ? rows.map((row) => cloneCellData(row)) : [];
+            return true;
+        } catch {
+            showToast('Unable to load rows for filtering');
+            return false;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function rebuildFilteredRows() {
+        if (!sourceRowsSnapshot) {
+            return;
+        }
+
+        let nextRows = [...sourceRowsSnapshot];
+        if (activeColumnFilters.size > 0) {
+            nextRows = nextRows.filter((rowData) => {
+                for (const filter of activeColumnFilters.values()) {
+                    const raw = readCellTextForDataOps(rowData, filter.columnIndex);
+                    const cellText = filter.caseSensitive ? raw : raw.toLowerCase();
+                    const query = filter.caseSensitive ? filter.query : filter.query.toLowerCase();
+
+                    if (filter.mode === 'nonEmpty') {
+                        if (!raw.trim()) {
+                            return false;
+                        }
+                        continue;
+                    }
+
+                    if (!query) {
+                        continue;
+                    }
+
+                    if (filter.mode === 'contains' && !cellText.includes(query)) {
+                        return false;
+                    }
+                    if (filter.mode === 'equals' && cellText !== query) {
+                        return false;
+                    }
+                    if (filter.mode === 'startsWith' && !cellText.startsWith(query)) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+        }
+
+        transformedRowsSnapshot = nextRows;
+
+        if (activeSortState) {
+            const { columnIndex, direction } = activeSortState;
+            transformedRowsSnapshot = [...transformedRowsSnapshot].sort((a, b) => {
+                const aText = readCellTextForDataOps(a, columnIndex);
+                const bText = readCellTextForDataOps(b, columnIndex);
+                return compareDataOpValues(aText, bText, direction);
+            });
+        }
+    }
+
+    function getHeaderIndicator(colIndex: number): string {
+        const parts: string[] = [];
+        if (activeSortState?.columnIndex === colIndex) {
+            parts.push(activeSortState.direction === 'asc' ? 'A-Z' : 'Z-A');
+        }
+        if (activeColumnFilters.has(colIndex)) {
+            parts.push('Filtered');
+        }
+        return parts.join(' • ');
     }
 
     function createRowHtml(rowData: any, rowIndex: number): string {
@@ -3575,12 +4557,28 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             return; // Current render still covers visible area
         }
 
+        const activeRows = getActiveRowsSnapshot();
+        const usingLocalRows = Array.isArray(activeRows);
+
         let needsFetch = false;
         for (let i = chunkStart; i < chunkEnd; i++) {
             if (!rowCache.has(i)) {
                 needsFetch = true;
                 break;
             }
+        }
+
+        if (needsFetch && usingLocalRows) {
+            currentVisibleStart = chunkStart;
+            currentVisibleEnd = chunkEnd;
+
+            const rows = activeRows.slice(chunkStart, chunkEnd).map((row) => cloneCellData(row));
+            if (rows.length > 0) {
+                renderVirtualRows(chunkStart, chunkStart + rows.length, rows);
+            } else {
+                renderVirtualRows(chunkStart, chunkEnd, []);
+            }
+            return;
         }
 
         if (needsFetch && !isRequestingRows) {
@@ -3667,7 +4665,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         for (let c = 1; c <= columnCount; c++) {
             const width = columnWidths[c - 1] || 80;
             html += '<th class="col-header" data-col="' + (c - 1) + '" style="width: ' + width + 'px; min-width: ' + width + 'px;">';
-            html += getExcelColumnLabel(c);
+            const indicator = getHeaderIndicator(c - 1);
+            html += '<span class="col-header-label">' + getExcelColumnLabel(c) + '</span>';
+            if (indicator) {
+                html += '<span class="col-header-indicator">' + indicator + '</span>';
+            }
             html += '<div class="col-resize-handle" data-col="' + (c - 1) + '"></div>';
             html += '</th>';
         }
@@ -3760,11 +4762,26 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         isRendering = false;
 
         const wsMeta = worksheetsMeta[index];
-        totalRows = wsMeta.totalRows || 0;
+        baseTotalRows = wsMeta.totalRows || 0;
+        baseRowHeights = wsMeta.rowHeights || [];
+
+        totalRows = baseTotalRows;
         columnCount = wsMeta.columnCount || 0;
         columnWidths = wsMeta.columnWidths || [];
         mergedCells = wsMeta.mergedCells || [];
-        allRowHeights = wsMeta.rowHeights || [];
+        allRowHeights = [...baseRowHeights];
+
+        if (sourceRowsSnapshot) {
+            rebuildFilteredRows();
+            if (activeColumnFilters.size > 0 || activeSortState) {
+                totalRows = transformedRowsSnapshot ? transformedRowsSnapshot.length : 0;
+                allRowHeights = (transformedRowsSnapshot || []).map((row) => {
+                    const h = Number((row as any)?.height);
+                    return Number.isFinite(h) && h > 0 ? h : ROW_HEIGHT;
+                });
+            }
+        }
+
         invalidateRowMetrics();
         ensureRowOffsetPrefix();
 
@@ -3927,7 +4944,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 if (isEditMode) return;
                 e.preventDefault();
                 autoFitRow(parseInt(target.dataset.row!, 10));
-            } else if (isEditMode) {
+            } else if (isEditMode || isPlainDirectEditMode()) {
                 const td = target.closest('td');
                 if (td) {
                     enterCellEditMode(td as HTMLElement);
@@ -4109,7 +5126,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             totalRows,
             rowCache,
             isCopying,
-            setIsCopying: (next) => {
+            setIsCopying: (next: boolean) => {
                 isCopying = next;
             },
             showToast,
@@ -4135,23 +5152,26 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!table) return;
 
         table.addEventListener('contextmenu', (e) => {
-            if (!isEditMode) return;
-
             const target = e.target as HTMLElement;
             const rowHeader = target.closest('th.row-header') as HTMLElement | null;
             const colHeader = target.closest('th.col-header') as HTMLElement | null;
             const cell = target.closest('td') as HTMLElement | null;
             if (!rowHeader && !colHeader && !cell) return;
 
+            const isEditLikeMode = isEditMode || isPlainDirectEditMode();
+            if (!isEditLikeMode && !colHeader) return;
+
             e.preventDefault();
             e.stopPropagation();
 
             if (cell) {
+                if (!isEditLikeMode) return;
                 showCellContextMenu(e, cell);
                 return;
             }
 
             if (rowHeader) {
+                if (!isEditLikeMode) return;
                 const row = parseInt(rowHeader.dataset.row || '-1', 10);
                 if (row >= 0) showHeaderContextMenu(e, 'row', row);
                 return;
@@ -4195,7 +5215,45 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 const controlTarget = target.closest('.xlsx-cell-checkbox, .xlsx-cell-dropdown, .xlsx-dropdown-edit-button, .xlsx-rating-star, .xlsx-cell-date') as HTMLElement | null;
                 const canEditControls = areInteractiveControlsEnabled();
 
-                if ((cellType === 'checkbox' || cellType === 'dropdown' || cellType === 'rating' || cellType === 'date') && canEditControls) {
+                if (cellType === 'checkbox' && controlTarget && canEditControls) {
+                    const row = parseInt(cellTarget.dataset.row!, 10);
+                    const col = parseInt(cellTarget.dataset.col!, 10);
+
+                    if (e.ctrlKey || e.metaKey) {
+                        selectionStart = null;
+                        selectionEnd = null;
+                        if (cellTarget.classList.contains('selected')) {
+                            cellTarget.classList.remove('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
+                            selectedCells.delete(cellTarget);
+                            if (cellTarget === activeCell) {
+                                activeCell = null;
+                            }
+                        } else {
+                            cellTarget.classList.add('selected', 'selection-top', 'selection-bottom', 'selection-left', 'selection-right');
+                            selectedCells.add(cellTarget);
+                            if (activeCell) {
+                                activeCell.classList.remove('active-cell');
+                            }
+                            cellTarget.classList.add('active-cell');
+                            activeCell = cellTarget;
+                        }
+                    } else if (e.shiftKey && activeCell) {
+                        const startRow = parseInt(activeCell.dataset.row!, 10);
+                        const startCol = parseInt(activeCell.dataset.col!, 10);
+                        selectRange(startRow, startCol, row, col);
+                    } else {
+                        clearSelection();
+                        selectCell(cellTarget);
+                        isSelecting = true;
+                        selectionStart = { row, col };
+                        selectionEnd = { row, col };
+                    }
+
+                    updateSelectionInfo();
+                    return;
+                }
+
+                if ((cellType === 'dropdown' || cellType === 'rating' || cellType === 'date') && canEditControls) {
                     if (!(e.ctrlKey || e.metaKey || e.shiftKey)) {
                         clearSelection();
                         selectCell(cellTarget);
@@ -4213,7 +5271,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 }
             }
 
-            if (isEditMode && !isHeaderInteraction) {
+            if ((isEditMode || isPlainDirectEditMode()) && !isHeaderInteraction) {
                 if (cellTarget.tagName === 'TD') {
                     if (isCellEditing && cellTarget.getAttribute('contenteditable') === 'true') {
                         return;
@@ -4231,7 +5289,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     selectedColumns.clear();
                     selectedRows.clear();
 
-                    if ((cellType === 'checkbox' || cellType === 'dropdown' || cellType === 'rating' || cellType === 'date') && controlTarget) {
+                    if ((cellType === 'dropdown' || cellType === 'rating' || cellType === 'date') && controlTarget) {
                         if (!(e.ctrlKey || e.metaKey || e.shiftKey)) {
                             clearSelection();
                             selectCell(cellTarget);
@@ -4619,8 +5677,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             if (!target) return;
             if (!(target.closest('#tableContainer') || target.closest('.toolbar') || target.closest('#xlsxTable'))) return;
 
-            if (target.closest('select') || target.closest('input') || target.closest('.xlsx-dropdown-edit-button')) {
+            // Ignore interactions with dropdown edit button and most native inputs/selects
+            // but allow pointerdown on checkbox inputs so selection can start from them.
+            if (target.closest('.xlsx-dropdown-edit-button')) {
                 return;
+            }
+
+            const selEl = target.closest('select');
+            if (selEl) return;
+
+            const inputEl = target.closest('input');
+            if (inputEl) {
+                // Allow checkbox inputs used as cell controls to participate in selection start.
+                const isCheckboxControl = inputEl.classList && inputEl.classList.contains('xlsx-cell-checkbox');
+                if (!isCheckboxControl) return;
             }
 
             const container = document.getElementById('tableContainer') as HTMLElement | null;
@@ -4649,7 +5719,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             lastMousePos = null;
             stopAutoScroll();
 
-            if (shouldStartEdit && targetToEdit && isEditMode && !isCellEditing) {
+            if (shouldStartEdit && targetToEdit && (isEditMode || isPlainDirectEditMode()) && !isCellEditing) {
                 enterCellEditMode(targetToEdit);
             }
         });
@@ -4766,12 +5836,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             }
 
             if (!isCellEditing) {
+                const canDirectTextEdit = isEditMode || isPlainDirectEditMode();
                 const key = e.key;
                 if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(key)) {
                     e.preventDefault();
                     
                     if (key === 'Enter') {
-                        if (isEditMode && activeCell) {
+                        if (canDirectTextEdit && activeCell) {
                             enterCellEditMode(activeCell);
                         } else if (activeCell) {
                             moveSelection(1, 0, e.shiftKey);
@@ -4790,12 +5861,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     return;
                 }
 
-                if (isEditMode && activeCell && e.key.length === 1 && !isCmdOrCtrl && !e.altKey) {
+                if (canDirectTextEdit && activeCell && e.key.length === 1 && !isCmdOrCtrl && !e.altKey) {
                     enterCellEditMode(activeCell);
                     return;
                 }
                 
-                if (e.key === 'F2' && isEditMode && activeCell) {
+                if (e.key === 'F2' && canDirectTextEdit && activeCell) {
                     e.preventDefault();
                     enterCellEditMode(activeCell);
                     return;
@@ -5088,9 +6159,45 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         });
     }
 
-    function applySettings(settings: any) {
+    function setSettingItemHidden(id: string, hidden: boolean) {
+        const input = document.getElementById(id);
+        const settingItem = input?.closest('.setting-item') as HTMLElement | null;
+        if (!settingItem) return;
+        settingItem.style.display = hidden ? 'none' : '';
+    }
+
+    function resetStyledOnlySettingsVisibility() {
+        const styledOnlySettingIds = [
+            'chkAllowInteractiveControlsOutsideEditMode',
+            'chkHyperlinkPreview',
+            'chkMergeWarningEnabled',
+            'radioAutoSaveAll',
+            'radioAutoSaveControlsOnly',
+            'chkShowManualSavePopup'
+        ];
+
+        styledOnlySettingIds.forEach((id) => setSettingItemHidden(id, false));
+    }
+
+    function hideStyledOnlySettingsForPlainMode() {
+        const styledOnlySettingIds = [
+            'chkAllowInteractiveControlsOutsideEditMode',
+            'chkHyperlinkPreview',
+            'chkMergeWarningEnabled',
+            'radioAutoSaveAll',
+            'radioAutoSaveControlsOnly',
+            'chkShowManualSavePopup'
+        ];
+
+        styledOnlySettingIds.forEach((id) => setSettingItemHidden(id, true));
+    }
+
+    function applySettings(settings: any, scopeOverride?: SettingsScope) {
+        const scope = scopeOverride || getCurrentSettingsScope();
         const previousSpacious = !!currentSettings.spaciousCells;
-        currentSettings = normalizeXlsxSettings(settings, currentSettings);
+        const previousSettings = getStoredSettingsForScope(scope);
+        currentSettings = normalizeSettingsForScope(scope, settings, previousSettings);
+        setStoredSettingsForScope(scope, currentSettings);
 
         if (!currentSettings.autoSave) {
             clearAutoSaveTimer();
@@ -5114,7 +6221,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             toolbarManager.setButtonVisibility('enableAsDefaultButton', currentSettings.isDefaultEditor === false);
         }
 
+        resetStyledOnlySettingsVisibility();
         syncSettingsCheckboxes(currentSettings);
+        if (scope === 'plain') {
+            hideStyledOnlySettingsForPlainMode();
+        }
 
         document.body.classList.toggle('sticky-header-enabled', !!currentSettings.stickyHeader);
         document.body.classList.toggle('first-row-as-header', !!currentSettings.firstRowIsHeader);
@@ -5140,11 +6251,15 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function postSettings() {
-        vscode.postMessage({ command: 'updateSettings', settings: currentSettings });
+        vscode.postMessage({
+            command: 'updateSettings',
+            settingsScope: getCurrentSettingsScope(),
+            settings: currentSettings
+        });
     }
 
     function enterCellEditMode(cell: HTMLElement, clearContent = false) {
-        if (!isEditMode) return;
+        if (!isEditMode && !isPlainDirectEditMode()) return;
 
         const cellType = getCellType(cell);
         if (cellType === 'checkbox') {
@@ -5155,7 +6270,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 updateCheckboxCellPresentation(cell, next);
                 const after = captureCellUndoState(cell);
                 pushSingleCellUndo(before, after);
-                scheduleAutoSave('control');
+                if (isEditMode) {
+                    scheduleAutoSave('control');
+                } else {
+                    persistInteractiveControlEdit(cell);
+                }
             }
             return;
         }
@@ -5175,7 +6294,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             updateRatingCellPresentation(cell, next);
             const after = captureCellUndoState(cell);
             pushSingleCellUndo(before, after);
-            scheduleAutoSave('control');
+            if (isEditMode) {
+                scheduleAutoSave('control');
+            } else {
+                persistInteractiveControlEdit(cell);
+            }
             return;
         }
 
@@ -5200,6 +6323,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (isCellEditing) {
             exitCellEditMode();
         }
+        cell.dataset.originalText = getCellNormalizedValue(cell);
+        cell.dataset.originalHtml = cell.innerHTML;
         activeTextEditBeforeState = captureCellUndoState(cell);
         isCellEditing = true;
         cell.setAttribute('contenteditable', 'true');
@@ -5245,7 +6370,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         if (changed) {
             pushSingleCellUndo(activeTextEditBeforeState, afterState);
-            scheduleAutoSave('text');
+            if (isEditMode) {
+                scheduleAutoSave('text');
+            } else if (editableCell && isPlainDirectEditMode()) {
+                persistPlainTextEdit(editableCell);
+            }
         }
 
         activeTextEditBeforeState = null;
@@ -5318,7 +6447,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
     }
 
-    function setEditMode(enabled: boolean) {
+    function setEditMode(enabled: boolean, preserveSelection: boolean = false) {
         if (enabled && isVersionPreviewMode) {
             showToast('Version preview is read-only');
             return;
@@ -5352,6 +6481,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         });
 
         const sheetSelector = document.getElementById('sheetSelector');
+        const editFileButton = document.getElementById('editFileButton');
         const toggleExpandButton = document.getElementById('toggleExpandButton');
         const togglePlainViewButton = document.getElementById('togglePlainViewButton');
         const versionHistoryButton = document.getElementById('versionHistoryButton');
@@ -5370,7 +6500,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const formatBackgroundColorButton = document.getElementById('formatBackgroundColorButton');
 
         if (toolbarManager) {
-            toolbarManager.setButtonVisibility('toggleTableEditButton', !isEditMode);
+            toolbarManager.setButtonVisibility('editFileButton', !!isTemporaryStyleFile && !isEditMode);
+            toolbarManager.setButtonVisibility('toggleTableEditButton', !isEditMode && !isPlainDirectEditMode());
             toolbarManager.setButtonVisibility('saveTableEditsButton', isEditMode);
             toolbarManager.setButtonVisibility('cancelTableEditsButton', isEditMode);
             toolbarManager.setButtonVisibility('insertControlButton', isEditMode);
@@ -5379,7 +6510,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             toolbarManager.setButtonVisibility('formatTextColorButton', false);
             toolbarManager.setButtonVisibility('formatBackgroundColorButton', false);
         } else {
-            if (toggleTableEditButton) toggleTableEditButton.classList.toggle('hidden', isEditMode);
+            if (toggleTableEditButton) toggleTableEditButton.classList.toggle('hidden', isEditMode || isPlainDirectEditMode());
             if (saveTableEditsButton) saveTableEditsButton.classList.toggle('hidden', !isEditMode);
             if (cancelTableEditsButton) cancelTableEditsButton.classList.toggle('hidden', !isEditMode);
             if (insertControlButton) insertControlButton.classList.toggle('hidden', !isEditMode);
@@ -5387,15 +6518,17 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             if (formatItalicButton) formatItalicButton.classList.add('hidden');
             if (formatTextColorButton) formatTextColorButton.classList.add('hidden');
             if (formatBackgroundColorButton) formatBackgroundColorButton.classList.add('hidden');
+            if (editFileButton) editFileButton.classList.toggle('hidden', !isTemporaryStyleFile || isEditMode);
         }
 
         if (editFormattingStripEl) {
             editFormattingStripEl.classList.toggle('hidden', !isEditMode);
         }
 
-        if (sheetSelector) sheetSelector.classList.toggle('hidden', isEditMode);
+        syncSheetSelectorVisibility();
         if (toggleExpandButton) toggleExpandButton.classList.remove('hidden');
-        if (togglePlainViewButton) togglePlainViewButton.classList.toggle('hidden', isEditMode);
+        if (togglePlainViewButton) togglePlainViewButton.classList.toggle('hidden', isEditMode && !isPlainView);
+        if (editFileButton) editFileButton.classList.toggle('hidden', !isTemporaryStyleFile || isEditMode);
         if (versionHistoryButton) versionHistoryButton.classList.toggle('hidden', isEditMode);
         if (openSettingsButton) openSettingsButton.classList.remove('hidden');
         if (toggleBackgroundButton) toggleBackgroundButton.classList.toggle('hidden', isEditMode);
@@ -5414,7 +6547,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             clearAutoSaveTimer();
             applyInteractiveControlState();
 
-            clearSelection();
+            if (!preserveSelection) clearSelection();
             lastEditRange = null;
             pendingWorksheetOps = [];
             pendingCellStyleEdits.clear();
@@ -5426,7 +6559,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             return;
         }
 
-        clearSelection();
+        if (!preserveSelection) clearSelection();
         editUndoStack.length = 0;
         editRedoStack.length = 0;
         hideInsertControlPopup();
@@ -5479,8 +6612,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (isAutosave && !currentSettings.autoSave) return;
 
         const table = document.querySelector('#tableContainer table');
+        const hasPendingStyleOrStructureChanges = pendingCellStyleEdits.size > 0 || pendingWorksheetOps.length > 0;
         const canSaveFromEditMode = isEditMode && !!table;
-        const canSaveOutsideEditMode = !isEditMode && pendingOutsideControlEdits.length > 0;
+        const canSaveOutsideEditMode = !isEditMode && (pendingOutsideControlEdits.length > 0 || hasPendingStyleOrStructureChanges);
 
         if (!canSaveFromEditMode && !canSaveOutsideEditMode) {
             return;
@@ -5495,7 +6629,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             if (document.activeElement && document.activeElement.tagName === 'TD') {
                 (document.activeElement as HTMLElement).blur();
             }
-            clearSelection();
+            // Don't clear the logical cell selection on save; keep selected cells highlighted.
             if (window.getSelection) {
                 window.getSelection()!.removeAllRanges();
             }
@@ -5537,6 +6671,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             pendingOutsideControlEdits.forEach((edit) => {
                 edits.push({ row: edit.row, col: edit.col, value: edit.value });
             });
+
+            styleEdits = Array.from(pendingCellStyleEdits.values());
+            operations = pendingWorksheetOps;
         }
 
         if (canSaveFromEditMode && pendingOutsideControlEdits.length > 0) {
@@ -5582,9 +6719,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     function wireSettingsUI() {
         const settings = createXlsxSettingsDefinitions(
             () => currentSettings,
-            (next) => {
-                currentSettings = next;
-                applySettings(currentSettings);
+            (next: XlsxViewSettings) => {
+                applySettings(next);
             },
             () => {
                 postSettings();
@@ -5613,6 +6749,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         sheetSelector.addEventListener('change', (e) => {
             if (isEditMode) return;
             currentWorksheet = parseInt((e.target as HTMLSelectElement).value, 10);
+            clearDataTransforms();
             clearSelection();
             renderWorksheet(currentWorksheet);
         });
@@ -5621,6 +6758,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             onFind: () => openFindOverlay(),
             textColorIcon,
             bgColorIcon,
+            onEditFile: () => {
+                if (!isTemporaryStyleFile) return;
+                vscode.postMessage({ command: 'toggleView', isTableView: false });
+            },
             onToggleTableEdit: () => setEditMode(true),
             onSaveTableEdits: () => saveEdits(true),
             onCancelTableEdits: () => {
@@ -5662,14 +6803,16 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             },
             onTogglePlainView: () => {
                 if (isEditMode) return;
-                isPlainView = !isPlainView;
-                document.body.classList.toggle('plain-view', isPlainView);
-
-                const btn = document.getElementById('togglePlainViewButton');
-                if (btn) {
-                    const labelSpan = btn.querySelector('.btn-label');
-                    if (labelSpan) labelSpan.textContent = isPlainView ? 'Styled' : 'Plain';
+                if (isPlainView && isTemporaryStyleFile) {
+                    requestStyledMode();
+                    return;
                 }
+                isPlainView = !isPlainView;
+                syncPlainViewUiState();
+                syncTemporaryFileToolbarActions();
+                // Always notify the provider so it stays in sync for all file types
+                vscode.postMessage({ command: 'setPreferredViewMode', mode: isPlainView ? 'plain' : 'styled' });
+                applySettingsForScope(getCurrentSettingsScope());
 
                 rowCache.clear();
                 currentVisibleStart = 0;
@@ -5702,8 +6845,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         // Ensure the "Plain/Styled" toggle shows the correct label on initial render
         const togglePlainViewBtn = document.getElementById('togglePlainViewButton');
         if (togglePlainViewBtn) {
-            const labelSpan = togglePlainViewBtn.querySelector('.btn-label');
-            if (labelSpan) labelSpan.textContent = isPlainView ? 'Styled' : 'Plain';
+            updatePlainViewButtonLabel();
         }
 
         wireEditFormattingControls();
@@ -5757,6 +6899,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             selector.appendChild(opt);
         });
         selector.value = '0';
+        syncSheetSelectorVisibility();
     }
 
     window.addEventListener('message', (event) => {
@@ -5764,12 +6907,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (!message || typeof message !== 'object') return;
 
         if (message.command === 'initSettings') {
-            applySettings(message.settings || {});
+            consumeIncomingSettingsPayload(message);
             return;
         }
 
         if (message.command === 'settingsUpdated') {
-            applySettings(message.settings || {});
+            consumeIncomingSettingsPayload(message);
             return;
         }
 
@@ -5787,8 +6930,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 pendingCellStyleEdits.clear();
                 clearPendingOutsideControlEdits();
                 manualSaveReminderUntil = 0;
-                if (exitAfterSave) {
-                    setEditMode(false);
+                const shouldExitAfterManualSave = !isAutosaveResult || exitAfterSave;
+                if (shouldExitAfterManualSave) {
+                    exitAfterSave = false;
+                    // Preserve selection when save requests exit so user doesn't lose context
+                    setEditMode(false, true);
                 } else if (isEditMode) {
                     captureOriginalCellValues();
                 }
@@ -5814,6 +6960,21 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             return;
         }
 
+        if (message.command === 'styleModeActivated') {
+            activateStyledMode();
+            return;
+        }
+
+        if (message.command === 'showStyleModeNotice') {
+            showStyleModeNoticePopup();
+            return;
+        }
+
+        if (message.command === 'styleModeCancelled') {
+            cancelStyledModeRequest();
+            return;
+        }
+
         // Handle rowsData response for virtual scrolling
         if (message.command === 'rowsData') {
             virtualLoader.resolveRequest(message.requestId, message.rows || []);
@@ -5825,18 +6986,23 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             const previousWorksheet = currentWorksheet;
             worksheetsMeta = Array.isArray(message.worksheets) ? message.worksheets : [];
             currentWorksheet = Math.min(Math.max(previousWorksheet, 0), Math.max(worksheetsMeta.length - 1, 0));
+            clearDataTransforms();
+
+            hasVirtualTableInit = true;
+            isTemporaryStyleFile = message.fileType === 'csv' || message.fileType === 'tsv';
+            isPlainView = message.isPlainView !== undefined ? !!message.isPlainView : isTemporaryStyleFile;
+            syncPlainViewUiState();
 
             const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : MIN_ROW_HEADER_WIDTH;
             setRowHeaderWidth(rowHeaderWidth, true);
 
             attachHandlersOnce();
+            syncTemporaryFileToolbarActions();
             populateSheetSelector();
             const selector = document.getElementById('sheetSelector') as HTMLSelectElement | null;
             if (selector) selector.value = String(currentWorksheet);
-            
-            if (currentSettings) {
-                applySettings(currentSettings);
-            }
+
+            applySettingsForScope(getCurrentSettingsScope());
             const expandBtn = document.getElementById('toggleExpandButton');
             if (expandBtn) expandBtn.setAttribute('data-state', 'default');
             setExpandedMode(false);
@@ -5879,6 +7045,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 }
             });
             currentWorksheet = Math.min(Math.max(previousWorksheet, 0), Math.max(worksheetsMeta.length - 1, 0));
+            clearDataTransforms();
 
             const rowHeaderWidth = typeof message.rowHeaderWidth === 'number' ? message.rowHeaderWidth : MIN_ROW_HEADER_WIDTH;
             setRowHeaderWidth(rowHeaderWidth, true);

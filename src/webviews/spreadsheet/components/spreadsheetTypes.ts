@@ -1,4 +1,4 @@
-import type { BorderLineStyle } from './xlsxBorderComponent';
+import type { BorderLineStyle } from './spreadsheetBorderComponent';
 
 export type StructuralOpType =
     | 'insertRowAbove'

@@ -52,6 +52,7 @@ function throttleRAF(fn: () => void): () => void {
 let isPreviewView = true;
 let isEditMode = false;
 let isPreviewEditMode = false;
+let isVersionPreviewMode = false;
 let isSaving = false;
 let shouldExitEditMode = false;
 let originalContent = '';
@@ -81,6 +82,7 @@ let currentSettings = {
     previewPosition: 'right',
     showOutline: true,
     showLineNumbers: true,
+    moveMdButtonsToEnd: false,
     isMdEnabled: true
 };
 
@@ -158,8 +160,8 @@ function wrapCodeLines(html: string): string {
 }
 
 function setButtonsEnabled(enabled: boolean) {
-    const ids = ['toggleViewButton', 'toggleEditModeButton', 'previewEditButton', 'saveEditsButton',
-        'cancelEditsButton', 'toggleBackgroundButton', 'openSettingsButton', 'disableMdEditorButton', 'versionHistoryButton'];
+    const ids = ['enableMdEditorButton', 'disableMdEditorButton', 'toggleViewButton', 'toggleEditModeButton', 'previewEditButton', 'saveEditsButton',
+        'cancelEditsButton', 'toggleBackgroundButton', 'openSettingsButton', 'versionHistoryButton'];
     ids.forEach((id) => {
         const el = $(id) as HTMLButtonElement;
         if (el) el.disabled = !enabled;
@@ -725,6 +727,57 @@ function setPreviewEditMode(enabled: boolean) {
     }
 
     updateStatusInfo();
+}
+
+function ensureVersionPreviewBanner(): HTMLElement {
+    let banner = $('versionPreviewBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'versionPreviewBanner';
+        banner.className = 'version-preview-banner hidden';
+        banner.innerHTML = `
+            <span id="versionPreviewText" class="version-preview-text"></span>
+            <div class="version-preview-actions">
+                <button id="restoreVersionButton" class="toggle-button" type="button">Restore</button>
+                <button id="cancelVersionPreviewButton" class="toggle-button" type="button">Cancel</button>
+            </div>
+        `;
+
+        const target = $('content') || document.body;
+        target.insertBefore(banner, target.firstChild || null);
+
+        const restoreBtn = $('restoreVersionButton') as HTMLButtonElement | null;
+        const cancelBtn = $('cancelVersionPreviewButton') as HTMLButtonElement | null;
+        restoreBtn?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'restoreVersion' });
+        });
+        cancelBtn?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'cancelVersionPreview' });
+        });
+    }
+
+    return banner;
+}
+
+function setVersionPreviewMode(enabled: boolean, label?: string) {
+    isVersionPreviewMode = enabled;
+    document.body.classList.toggle('version-preview-mode', enabled);
+    if (enabled) {
+        isPreviewView = true;
+        setEditMode(false);
+        setPreviewEditMode(false);
+        const banner = ensureVersionPreviewBanner();
+        const text = $('versionPreviewText');
+        if (text) {
+            text.textContent = label || 'Previewing selected version (read-only)';
+        }
+        banner.classList.remove('hidden');
+    } else {
+        const banner = $('versionPreviewBanner');
+        if (banner) {
+            banner.classList.add('hidden');
+        }
+    }
 }
 
 function performSave(exitAfterSave = false) {
@@ -1424,6 +1477,7 @@ function applySettings(settings: any, persist = false) {
     if (tocPanel) tocPanel.classList.toggle('hidden', !currentSettings.showOutline);
 
     if (toolbarManager) {
+        reorderMdToolbarButtons();
         const btn = toolbarManager.getButton('toggleTocButton');
         if (btn) btn.classList.toggle('active', !!currentSettings.showOutline);
     }
@@ -1499,6 +1553,16 @@ function initializeSettings() {
                 currentSettings.showLineNumbers = val;
                 applySettings(currentSettings, true);
             }
+        },
+        {
+            id: 'chkMoveMdButtonsToEnd',
+            label: 'Move Enable/Disable MD Buttons Near Help',
+            tooltip: 'Place the Enable/Disable MD buttons just before Help & Feedback instead of at the start of the toolbar.',
+            defaultValue: currentSettings.moveMdButtonsToEnd,
+            onChange: (val: boolean) => {
+                currentSettings.moveMdButtonsToEnd = val;
+                applySettings(currentSettings, true);
+            }
         }
     ];
 
@@ -1507,6 +1571,37 @@ function initializeSettings() {
 
     // Initialize manager
     new SettingsManager('openSettingsButton', 'settingsPanel', 'settingsCancelButton', settingsDefs);
+}
+
+function reorderMdToolbarButtons() {
+    if (!toolbarManager) return;
+
+    const toolbar = document.getElementById('toolbar');
+    const enableBtn = toolbarManager.getButton('enableMdEditorButton');
+    const disableBtn = toolbarManager.getButton('disableMdEditorButton');
+    const toggleViewBtn = toolbarManager.getButton('toggleViewButton');
+    const helpBtn = toolbarManager.getButton('helpButton');
+
+    if (!toolbar || !enableBtn || !disableBtn || !toggleViewBtn || !helpBtn) {
+        return;
+    }
+
+    const enableWrap = enableBtn.closest('.tooltip') as HTMLElement | null;
+    const disableWrap = disableBtn.closest('.tooltip') as HTMLElement | null;
+    const toggleViewWrap = toggleViewBtn.closest('.tooltip') as HTMLElement | null;
+    const helpWrap = helpBtn.closest('.tooltip') as HTMLElement | null;
+
+    if (!enableWrap || !disableWrap || !toggleViewWrap || !helpWrap) {
+        return;
+    }
+
+    if (currentSettings.moveMdButtonsToEnd) {
+        toolbar.insertBefore(enableWrap, helpWrap);
+        toolbar.insertBefore(disableWrap, helpWrap);
+    } else {
+        toolbar.insertBefore(enableWrap, toggleViewWrap);
+        toolbar.insertBefore(disableWrap, toggleViewWrap);
+    }
 }
 
 // ===== Header Height =====
@@ -1564,7 +1659,18 @@ window.addEventListener('message', (event) => {
             showToast(m.message || 'Version history failed');
             break;
 
+        case 'versionPreviewMd':
+            setVersionPreviewMode(true, m.timestamp ? `Previewing ${new Date(m.timestamp).toLocaleString()} (read-only)` : 'Previewing selected version (read-only)');
+            showToast('Previewing version');
+            break;
+
+        case 'versionPreviewCancelledMd':
+            setVersionPreviewMode(false);
+            showToast('Preview canceled');
+            break;
+
         case 'versionRestoredMd':
+            setVersionPreviewMode(false);
             showToast('Version restored');
             break;
 
@@ -1578,7 +1684,41 @@ window.addEventListener('message', (event) => {
 function wireButtons() {
     toolbarManager = new ToolbarManager('toolbar');
 
-    toolbarManager.setButtons([
+    toolbarManager.setButtons(buildToolbarButtons());
+    reorderMdToolbarButtons();
+
+    // Inject tooltip if variables are present
+    InfoTooltip.inject('toolbar', (window as any).viewImgUri, (window as any).logoSvgUri, 'GitHub Flavored Markdown');
+
+    // Theme manager
+    new ThemeManager('toggleBackgroundButton', {
+        onBeforeCycle: () => true
+    }, vscode);
+}
+
+function buildToolbarButtons() {
+    const buttons = [
+        {
+            id: 'enableMdEditorButton',
+            icon: Icons.Zap,
+            label: 'Enable MD',
+            tooltip: 'Enable Markdown Viewer for all Markdown files (Make Default)',
+            cls: 'edit-mode-hide',
+            hidden: true,
+            onClick: () => {
+                vscode.postMessage({ command: 'enableMdEditor' });
+            }
+        },
+        {
+            id: 'disableMdEditorButton',
+            icon: Icons.ZapOff,
+            label: 'Disable MD',
+            tooltip: 'Disable Markdown Viewer for all Markdown files',
+            cls: 'edit-mode-hide',
+            onClick: () => {
+                vscode.postMessage({ command: 'disableMdEditor' });
+            }
+        },
         {
             id: 'toggleViewButton',
             icon: Icons.EditFile,
@@ -1681,16 +1821,6 @@ function wireButtons() {
             }
         },
         {
-            id: 'disableMdEditorButton',
-            icon: Icons.ZapOff,
-            label: 'Disable MD',
-            tooltip: 'Disable XLSX Viewer for all Markdown files',
-            cls: 'edit-mode-hide',
-            onClick: () => {
-                vscode.postMessage({ command: 'disableMdEditor' });
-            }
-        },
-        {
             id: 'helpButton',
             icon: Icons.Help,
             tooltip: 'Help & Feedback',
@@ -1699,26 +1829,22 @@ function wireButtons() {
                 FeedbackModal.show();
             }
         },
-        {
-            id: 'enableMdEditorButton',
-            icon: Icons.Zap,
-            label: 'Enable MD',
-            tooltip: 'Enable XLSX Viewer for all Markdown files (Make Default)',
-            cls: 'edit-mode-hide',
-            hidden: true,
-            onClick: () => {
-                vscode.postMessage({ command: 'enableMdEditor' });
+    ];
+
+    if (currentSettings.moveMdButtonsToEnd) {
+        const enableButton = buttons.shift();
+        const disableButton = buttons.shift();
+        const helpIndex = buttons.findIndex((button) => button.id === 'helpButton');
+        if (enableButton && disableButton) {
+            if (helpIndex >= 0) {
+                buttons.splice(helpIndex, 0, enableButton, disableButton);
+            } else {
+                buttons.push(enableButton, disableButton);
             }
         }
-    ]);
+    }
 
-    // Inject tooltip if variables are present
-    InfoTooltip.inject('toolbar', (window as any).viewImgUri, (window as any).logoSvgUri, 'GitHub Flavored Markdown');
-
-    // Theme manager
-    new ThemeManager('toggleBackgroundButton', {
-        onBeforeCycle: () => true
-    }, vscode);
+    return buttons;
 }
 
 // ===== Keyboard Shortcuts =====

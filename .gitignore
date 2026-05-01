@@ -4,8 +4,12 @@ node_modules
 .vscode-test/
 *.vsix
 .agent
-info
 .specify
 .github/agents
 .github/prompts
 specs
+
+info
+guide
+progress
+.github/instructions

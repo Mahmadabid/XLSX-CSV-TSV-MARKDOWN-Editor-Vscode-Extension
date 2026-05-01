@@ -1,8 +1,8 @@
 {
     "name": "xlsx-viewer",
-    "displayName": "XLSX, CSV, TSV & Markdown Editor",
-    "description": "View and edit XLSX files with colors, fonts and styles from Excel files (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
-    "version": "1.8.8",
+    "displayName": "Spreadsheet, CSV, TSV & Markdown Editor",
+    "description": "View and edit spreadsheet files with colors, fonts and styles (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
+    "version": "1.8.9",
     "publisher": "muhammad-ahmad",
     "engines": {
         "vscode": "^1.60.0"
@@ -38,7 +38,7 @@
         "customEditors": [
             {
                 "viewType": "xlsxViewer.xlsx",
-                "displayName": "XLSX Viewer & Editor",
+                "displayName": "Spreadsheet Viewer & Editor",
                 "selector": [
                     {
                         "filenamePattern": "*.xlsx"
@@ -83,20 +83,20 @@
             },
             {
                 "command": "xlsx-viewer.goBackToTableView",
-                "title": "Open in Table View",
-                "category": "CSV/TSV",
-                "icon": "resources/table/table.svg"
+                "title": "Open in Spreadsheet View",
+                "category": "Spreadsheet",
+                "icon": "resources/spreadsheet/spreadsheet.svg"
             },
             {
                 "command": "xlsx-viewer.goBackToXlsxView",
-                "title": "Open in XLSX Viewer",
-                "category": "XLSX",
-                "icon": "resources/xlsx/table.svg"
+                "title": "Open in Spreadsheet Viewer",
+                "category": "Spreadsheet",
+                "icon": "resources/spreadsheet/spreadsheet.svg"
             },
             {
                 "command": "xlsx-viewer.convertFile",
                 "title": "Convert File...",
-                "category": "XLSX/CSV/TSV"
+                "category": "Spreadsheet/CSV/TSV"
             }
         ],
         "menus": {
@@ -124,7 +124,7 @@
             ]
         },
         "configuration": {
-            "title": "XLSX, CSV & TSV Editor",
+            "title": "Spreadsheet, CSV & TSV Editor",
             "properties": {
                 "xlsxViewer.csv.firstRowIsHeader": {
                     "type": "boolean",
@@ -258,6 +258,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Show the Markdown outline panel in the preview."
+                },
+                "xlsxViewer.md.moveMdButtonsToEnd": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Move the Enable/Disable MD buttons near Help & Feedback instead of keeping them at the start of the toolbar."
                 },
                 "xlsxViewer.md.showLineNumbers": {
                     "type": "boolean",

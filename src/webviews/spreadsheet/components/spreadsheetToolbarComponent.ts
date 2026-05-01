@@ -5,6 +5,7 @@ export interface CreateXlsxToolbarButtonsOptions {
     onFind: () => void;
     textColorIcon: string;
     bgColorIcon: string;
+    onEditFile: () => void;
     onToggleTableEdit: () => void;
     onSaveTableEdits: () => void;
     onCancelTableEdits: () => void;
@@ -25,6 +26,22 @@ export interface CreateXlsxToolbarButtonsOptions {
 
 export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOptions): ToolbarButton[] {
     return [
+        {
+            id: 'enableAsDefaultButton',
+            icon: Icons.Zap,
+            label: 'Set as Default',
+            tooltip: 'Make Spreadsheet Viewer the default editor for XLSX files',
+            hidden: true,
+            onClick: options.onEnableAsDefault
+        },
+        {
+            id: 'editFileButton',
+            icon: Icons.EditFile,
+            label: 'Edit File',
+            tooltip: 'Open this file in the default text editor',
+            hidden: true,
+            onClick: options.onEditFile
+        },
         {
             id: 'toggleTableEditButton',
             icon: '',
@@ -104,7 +121,7 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
         {
             id: 'openSettingsButton',
             icon: Icons.Settings,
-            tooltip: 'XLSX Settings',
+            tooltip: 'Sheet Settings',
             cls: 'icon-only',
             onClick: options.onOpenSettings
         },
@@ -142,14 +159,6 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
             tooltip: 'Help & Feedback',
             cls: 'icon-only',
             onClick: options.onHelp
-        },
-        {
-            id: 'enableAsDefaultButton',
-            icon: Icons.Zap,
-            label: 'Set as Default',
-            tooltip: 'Make XLSX Viewer the default editor for XLSX files',
-            hidden: true,
-            onClick: options.onEnableAsDefault
         }
     ];
 }

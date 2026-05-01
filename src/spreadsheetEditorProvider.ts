@@ -1,14 +1,216 @@
-import { getWebviewContent } from './xlsx/xlsxHtmlRenderer';
+import { getWebviewContent } from './spreadsheet/spreadsheetHtmlRenderer';
 import * as vscode from 'vscode';
 import * as Excel from 'exceljs';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import { VERSION_HISTORY_RETENTION_MS, getVersionHistoryDir } from './shared/versionHistory';
-import { convertARGBToRGBA, isShadeOfBlack, isShadeOfWhite } from './xlsx/xlsxUtilities';
+import { VERSION_HISTORY_RETENTION_MS, buildGroupedVersionHistoryItems as buildSharedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryDir } from './shared/versionHistory';
+import { convertARGBToRGBA, isShadeOfBlack, isShadeOfWhite } from './spreadsheet/spreadsheetUtilities';
+import { convertTabularFile, readTabularFile, detectTabularFileType, writeTabularFile, TabularFileType } from './shared/fileConversionService';
+import { StyleStorageService } from './shared/styleStorageService';
 
-export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
-    constructor(private readonly context: vscode.ExtensionContext) { }
+function borderEditToCssValue(enabled: boolean, style?: string, color?: string): string {
+    if (!enabled) return '';
+
+    const normalizedStyle = String(style || 'thin');
+    const lower = normalizedStyle.toLowerCase();
+    const width = lower.includes('thick')
+        ? '3px'
+        : lower.includes('medium')
+            ? '2px'
+            : '1px';
+    const pattern = lower.includes('double')
+        ? 'double'
+        : lower.includes('dash')
+            ? 'dashed'
+            : lower.includes('dot') || lower === 'hair'
+                ? 'dotted'
+                : 'solid';
+
+    return `${width} ${pattern} ${color || '#202124'}`;
+}
+
+function normalizeBorderForRender(border: any): any {
+    if (!border || typeof border !== 'object' || border.clear) {
+        return undefined;
+    }
+
+    const color = typeof border.color === 'string' ? border.color : '#202124';
+    const lineStyle = typeof border.style === 'string' ? border.style : 'thin';
+    const normalized: any = {};
+
+    (['top', 'right', 'bottom', 'left'] as const).forEach((side) => {
+        const value = border[side];
+        if (typeof value === 'string' && value.trim()) {
+            normalized[side] = value;
+        } else if (value === true) {
+            normalized[side] = borderEditToCssValue(true, lineStyle, color);
+        }
+    });
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function parseCssBorderForExcel(value: unknown): { style: Excel.BorderStyle; color?: string } | undefined {
+    if (typeof value !== 'string' || !value.trim()) {
+        return undefined;
+    }
+
+    const raw = value.trim();
+    const lower = raw.toLowerCase();
+    const style: Excel.BorderStyle = lower.includes('double')
+        ? 'double'
+        : lower.includes('dash')
+            ? 'dashed'
+            : lower.includes('dot')
+                ? 'dotted'
+                : lower.includes('3px') || lower.includes('thick')
+                    ? 'thick'
+                    : lower.includes('2px') || lower.includes('medium')
+                        ? 'medium'
+                        : 'thin';
+
+    const colorMatch = raw.match(/(#[0-9a-fA-F]{6}|rgba?\([^)]+\))/);
+    return {
+        style,
+        color: colorMatch ? colorMatch[1] : undefined
+    };
+}
+
+/**
+ * Normalize stored style format to CSS-renderable properties.
+ * Stored format: { bold: true, italic: false, textColor: '#000000', ... }
+ * CSS format: { fontWeight: 'bold', fontStyle: 'italic', color: '#000000', ... }
+ */
+function normalizeStoredStyle(stored: any): any {
+    if (!stored || typeof stored !== 'object') {
+        return {};
+    }
+
+    const normalized: any = {};
+
+    const copyCssProp = (prop: string) => {
+        if (stored[prop] !== undefined) {
+            normalized[prop] = stored[prop];
+        }
+    };
+
+    copyCssProp('fontWeight');
+    copyCssProp('fontStyle');
+    copyCssProp('color');
+    copyCssProp('backgroundColor');
+    copyCssProp('fontSize');
+    copyCssProp('fontFamily');
+    copyCssProp('textAlign');
+    copyCssProp('verticalAlign');
+    copyCssProp('whiteSpace');
+    copyCssProp('wordWrap');
+    copyCssProp('overflow');
+    copyCssProp('textOverflow');
+    copyCssProp('paddingLeft');
+    copyCssProp('textDecoration');
+    copyCssProp('textDecorationLine');
+    copyCssProp('textDecorationThickness');
+    copyCssProp('textDecorationSkipInk');
+
+    if (stored.bgColor && typeof stored.bgColor === 'string') {
+        normalized.backgroundColor = stored.bgColor;
+    }
+
+    // Font weight normalization
+    if (stored.bold !== undefined) {
+        normalized.fontWeight = stored.bold ? 'bold' : 'normal';
+    }
+
+    // Font style normalization
+    if (stored.italic !== undefined) {
+        normalized.fontStyle = stored.italic ? 'italic' : 'normal';
+    }
+
+    // Text decoration normalization
+    if (stored.strike !== undefined) {
+        if (stored.strike) {
+            normalized.textDecorationLine = 'line-through';
+            normalized.textDecorationThickness = '2px';
+            normalized.textDecorationSkipInk = 'none';
+        } else {
+            normalized.textDecoration = '';
+            normalized.textDecorationLine = '';
+        }
+    }
+
+    // Color normalization
+    if (stored.textColor && typeof stored.textColor === 'string') {
+        normalized.color = stored.textColor;
+    }
+
+    if (stored.color && typeof stored.color === 'string') {
+        normalized.color = stored.color;
+    }
+
+    // Background color normalization
+    if (stored.backgroundColor && typeof stored.backgroundColor === 'string') {
+        normalized.backgroundColor = stored.backgroundColor;
+    }
+
+    // Font size normalization
+    if (stored.fontSize && typeof stored.fontSize === 'number') {
+        normalized.fontSize = stored.fontSize + 'pt';
+    }
+
+    // Font family normalization
+    if (stored.fontFamily && typeof stored.fontFamily === 'string') {
+        normalized.fontFamily = stored.fontFamily;
+    }
+
+    // Text alignment normalization
+    if (stored.horizontalAlign && typeof stored.horizontalAlign === 'string') {
+        normalized.textAlign = stored.horizontalAlign;
+    }
+
+    // Vertical alignment normalization
+    if (stored.verticalAlign && typeof stored.verticalAlign === 'string') {
+        normalized.verticalAlign = stored.verticalAlign;
+    }
+
+    // Wrap mode normalization
+    if (stored.wrapMode && typeof stored.wrapMode === 'string') {
+        if (stored.wrapMode === 'wrap') {
+            normalized.whiteSpace = 'pre-wrap';
+            normalized.wordWrap = 'break-word';
+            normalized.overflow = 'visible';
+            normalized.textOverflow = 'clip';
+        } else if (stored.wrapMode === 'overflow') {
+            normalized.whiteSpace = 'nowrap';
+            normalized.wordWrap = 'normal';
+            normalized.overflow = 'visible';
+            normalized.textOverflow = 'clip';
+        } else if (stored.wrapMode === 'clip') {
+            normalized.whiteSpace = 'nowrap';
+            normalized.wordWrap = 'normal';
+            normalized.overflow = 'hidden';
+            normalized.textOverflow = 'clip';
+        }
+    }
+
+    // Indent normalization
+    if (stored.indent && typeof stored.indent === 'number') {
+        normalized.paddingLeft = stored.indent * 8 + 'px';
+    }
+
+    const renderBorder = normalizeBorderForRender(stored.border);
+    if (renderBorder) {
+        normalized.border = renderBorder;
+    }
+
+    return normalized;
+}
+
+export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorProvider {
+    private readonly styleStorage: StyleStorageService;
+    constructor(private readonly context: vscode.ExtensionContext) {
+        this.styleStorage = new StyleStorageService(context);
+    }
 
     async openCustomDocument(
         uri: vscode.Uri,
@@ -41,6 +243,10 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
         let worksheetsData: any[] = [];
         let rowHeaderWidth = 40;
         const filePath = document.uri.fsPath;
+        let currentFileType: TabularFileType = detectTabularFileType(filePath) || 'xlsx';
+        let hasActiveTemporaryStyles = false;
+        let shouldOpenDelimitedInStyledMode = false;
+        let currentIsPlainView = false;
 
         type VersionHistoryEntry = {
             id: string;
@@ -48,18 +254,599 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             fileName: string;
             byteSize: number;
             hash: string;
+            fileType: TabularFileType;
             snapshotFile: string;
         };
 
         let previewVersionId: string | null = null;
         let previewVersionTimestamp: number | null = null;
+        let restoredVersionId: string | null = null;
 
         const getHistoryDir = () => {
-            return getVersionHistoryDir(this.context.globalStorageUri.fsPath, filePath, 'xlsx');
+            return getVersionHistoryDir(this.context.globalStorageUri.fsPath, filePath, currentFileType);
         };
 
         const getHistoryIndexPath = () => path.join(getHistoryDir(), 'index.json');
         const getSnapshotPath = (snapshotFile: string) => path.join(getHistoryDir(), snapshotFile);
+        const getSnapshotFileType = (snapshotFile: string, fallbackType: TabularFileType): TabularFileType => {
+            const extension = path.extname(snapshotFile).toLowerCase().replace(/^\./, '');
+            if (extension === 'csv' || extension === 'tsv' || extension === 'xlsx') {
+                return extension;
+            }
+
+            return fallbackType;
+        };
+
+        const parseStyleKey = (key: string): { row: number; col: number } | null => {
+            const [rowText, colText] = key.split(':');
+            const row = parseInt(rowText, 10);
+            const col = parseInt(colText, 10);
+            if (!Number.isFinite(row) || !Number.isFinite(col) || row <= 0 || col <= 0) {
+                return null;
+            }
+            return { row, col };
+        };
+
+        const toARGB = (hexOrColor: unknown): string | undefined => {
+            if (typeof hexOrColor !== 'string') return undefined;
+            const value = hexOrColor.trim();
+            const hexMatch = value.match(/^#([0-9a-fA-F]{6})$/);
+            if (hexMatch) return ('FF' + hexMatch[1]).toUpperCase();
+
+            const rgbMatch = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+            if (rgbMatch) {
+                const r = Math.max(0, Math.min(255, parseInt(rgbMatch[1], 10)));
+                const g = Math.max(0, Math.min(255, parseInt(rgbMatch[2], 10)));
+                const b = Math.max(0, Math.min(255, parseInt(rgbMatch[3], 10)));
+                return ('FF' + [r, g, b].map(n => n.toString(16).padStart(2, '0')).join('')).toUpperCase();
+            }
+
+            return undefined;
+        };
+
+        const applyStyleEditToCell = (cell: Excel.Cell, styleEdit: any) => {
+            if (!styleEdit || typeof styleEdit !== 'object') {
+                return;
+            }
+
+            if (styleEdit.clearFormatting) {
+                (cell as any).fill = undefined;
+                (cell as any).font = undefined;
+                (cell as any).alignment = undefined;
+                (cell as any).border = undefined;
+            }
+
+            const bgArgb = toARGB(styleEdit.bgColor);
+            if (bgArgb) {
+                cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: bgArgb }
+                } as Excel.FillPattern;
+            }
+
+            const textArgb = toARGB(styleEdit.textColor);
+            if (textArgb) {
+                const currentFont = cell.font || {};
+                cell.font = {
+                    ...currentFont,
+                    color: { argb: textArgb }
+                } as Partial<Excel.Font>;
+            }
+
+            const nextFont: any = cell.font ? { ...cell.font } : {};
+            let hasFontEdit = false;
+            if (typeof styleEdit.fontSize === 'number' && styleEdit.fontSize > 0) {
+                nextFont.size = styleEdit.fontSize;
+                hasFontEdit = true;
+            }
+            if (typeof styleEdit.fontFamily === 'string' && styleEdit.fontFamily.trim().length > 0) {
+                nextFont.name = styleEdit.fontFamily.trim();
+                hasFontEdit = true;
+            }
+            if (typeof styleEdit.bold === 'boolean') {
+                nextFont.bold = styleEdit.bold;
+                hasFontEdit = true;
+            }
+            if (typeof styleEdit.italic === 'boolean') {
+                nextFont.italic = styleEdit.italic;
+                hasFontEdit = true;
+            }
+            if (typeof styleEdit.strike === 'boolean') {
+                nextFont.strike = styleEdit.strike;
+                hasFontEdit = true;
+            }
+            if (hasFontEdit) {
+                cell.font = nextFont as Partial<Excel.Font>;
+            }
+
+            const nextAlignment: any = cell.alignment ? { ...cell.alignment } : {};
+            let hasAlignmentEdit = false;
+            const hAlign = typeof styleEdit.horizontalAlign === 'string' ? styleEdit.horizontalAlign : '';
+            if (hAlign === 'left' || hAlign === 'center' || hAlign === 'right') {
+                nextAlignment.horizontal = hAlign;
+                hasAlignmentEdit = true;
+            }
+            const vAlign = typeof styleEdit.verticalAlign === 'string' ? styleEdit.verticalAlign : '';
+            if (vAlign === 'top' || vAlign === 'middle' || vAlign === 'bottom') {
+                nextAlignment.vertical = vAlign;
+                hasAlignmentEdit = true;
+            }
+            const wrapMode = typeof styleEdit.wrapMode === 'string' ? styleEdit.wrapMode : '';
+            if (wrapMode === 'wrap' || wrapMode === 'overflow' || wrapMode === 'clip') {
+                nextAlignment.wrapText = wrapMode === 'wrap';
+                hasAlignmentEdit = true;
+            }
+            if (typeof styleEdit.indent === 'number') {
+                nextAlignment.indent = Math.max(0, Math.round(styleEdit.indent));
+                hasAlignmentEdit = true;
+            }
+            if (hasAlignmentEdit) {
+                cell.alignment = nextAlignment as Partial<Excel.Alignment>;
+            }
+
+            if (styleEdit.border) {
+                if (styleEdit.border.clear) {
+                    (cell as any).border = undefined;
+                } else {
+                    const borderStyle = typeof styleEdit.border.style === 'string' ? styleEdit.border.style : 'thin';
+                    const allowedStyles = [
+                        'thin', 'dotted', 'dashDot', 'hair', 'dashDotDot', 'slantDashDot', 'mediumDashed', 'mediumDashDotDot', 'mediumDashDot', 'medium', 'double', 'thick'
+                    ];
+
+                    let finalBorderStyle = 'thin';
+                    const sLower = borderStyle.toLowerCase();
+
+                    if (sLower.includes('thick') && sLower.includes('dash')) finalBorderStyle = 'mediumDashed';
+                    else if (sLower.includes('thick') && sLower.includes('dot')) finalBorderStyle = 'mediumDashDot';
+                    else if (sLower.includes('medium') && sLower.includes('dash')) finalBorderStyle = 'mediumDashed';
+                    else if (sLower.includes('medium') && sLower.includes('dot')) finalBorderStyle = 'mediumDashDot';
+                    else if (sLower.includes('dashdotdot')) finalBorderStyle = 'dashDotDot';
+                    else if (sLower.includes('dashdot')) finalBorderStyle = 'dashDot';
+                    else if (sLower.includes('dashed') || sLower === 'dashed' || sLower.includes('dash')) finalBorderStyle = 'mediumDashed';
+                    else if (allowedStyles.includes(borderStyle)) finalBorderStyle = borderStyle;
+                    else if (sLower === 'thick') finalBorderStyle = 'thick';
+                    else if (sLower === 'medium') finalBorderStyle = 'medium';
+                    else if (sLower === 'dotted') finalBorderStyle = 'dotted';
+                    else if (sLower === 'double') finalBorderStyle = 'double';
+
+                    const borderColorArgb = toARGB(styleEdit.border.color) || 'FF202124';
+                    const toEdge = (enabled?: boolean) => {
+                        if (!enabled) return undefined;
+                        return { style: finalBorderStyle as any, color: { argb: borderColorArgb } };
+                    };
+
+                    cell.border = {
+                        top: toEdge(styleEdit.border.top),
+                        right: toEdge(styleEdit.border.right),
+                        bottom: toEdge(styleEdit.border.bottom),
+                        left: toEdge(styleEdit.border.left)
+                    } as any;
+                }
+            }
+        };
+
+        const applyStoredStylesToWorksheet = (worksheet: Excel.Worksheet, storedStyles: Record<string, any>) => {
+            if (!storedStyles || typeof storedStyles !== 'object') {
+                return;
+            }
+
+            for (const [key, styleEdit] of Object.entries(storedStyles)) {
+                const address = parseStyleKey(key);
+                if (!address) continue;
+
+                const cell = worksheet.getRow(address.row).getCell(address.col);
+                const cssStyle = normalizeStoredStyle(styleEdit);
+                if (cssStyle.backgroundColor) {
+                    cell.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: toARGB(cssStyle.backgroundColor) || 'FFFFFFFF' }
+                    } as Excel.FillPattern;
+                }
+
+                const currentFont = cell.font ? { ...cell.font } : {};
+                let hasFontEdit = false;
+                if (cssStyle.fontWeight) {
+                    currentFont.bold = cssStyle.fontWeight === 'bold';
+                    hasFontEdit = true;
+                }
+                if (cssStyle.fontStyle) {
+                    currentFont.italic = cssStyle.fontStyle === 'italic';
+                    hasFontEdit = true;
+                }
+                if (cssStyle.color) {
+                    currentFont.color = { argb: toARGB(cssStyle.color) || 'FF000000' };
+                    hasFontEdit = true;
+                }
+                if (cssStyle.fontSize) {
+                    const parsedSize = parseFloat(cssStyle.fontSize);
+                    if (Number.isFinite(parsedSize) && parsedSize > 0) {
+                        currentFont.size = parsedSize;
+                        hasFontEdit = true;
+                    }
+                }
+                if (cssStyle.fontFamily) {
+                    currentFont.name = cssStyle.fontFamily;
+                    hasFontEdit = true;
+                }
+                if (cssStyle.textDecorationLine === 'line-through' || String(cssStyle.textDecoration || '').includes('line-through')) {
+                    currentFont.strike = true;
+                    hasFontEdit = true;
+                }
+                if (hasFontEdit) {
+                    cell.font = currentFont as Partial<Excel.Font>;
+                }
+
+                const currentAlignment: any = cell.alignment ? { ...cell.alignment } : {};
+                let hasAlignmentEdit = false;
+                if (cssStyle.textAlign) {
+                    currentAlignment.horizontal = cssStyle.textAlign;
+                    hasAlignmentEdit = true;
+                }
+                if (cssStyle.verticalAlign) {
+                    currentAlignment.vertical = cssStyle.verticalAlign;
+                    hasAlignmentEdit = true;
+                }
+                if (typeof cssStyle.whiteSpace === 'string') {
+                    currentAlignment.wrapText = cssStyle.whiteSpace === 'pre-wrap';
+                    hasAlignmentEdit = true;
+                }
+                if (cssStyle.paddingLeft) {
+                    const indentPx = parseFloat(cssStyle.paddingLeft);
+                    if (Number.isFinite(indentPx)) {
+                        currentAlignment.indent = Math.max(0, Math.round(indentPx / 8));
+                        hasAlignmentEdit = true;
+                    }
+                }
+                if (hasAlignmentEdit) {
+                    cell.alignment = currentAlignment as Partial<Excel.Alignment>;
+                }
+
+                if (cssStyle.border) {
+                    const border = cssStyle.border as any;
+                    const toEdge = (value: unknown) => {
+                        const parsed = parseCssBorderForExcel(value);
+                        if (!parsed) return undefined;
+                        return {
+                            style: parsed.style,
+                            color: { argb: toARGB(parsed.color || cssStyle.color || '#202124') || 'FF202124' }
+                        };
+                    };
+                    cell.border = {
+                        top: toEdge(border.top),
+                        right: toEdge(border.right),
+                        bottom: toEdge(border.bottom),
+                        left: toEdge(border.left)
+                    } as any;
+                }
+            }
+        };
+
+        const remapStylesForOperation = (styles: Record<string, any>, op: any): Record<string, any> => {
+            const type = typeof op?.type === 'string' ? op.type : '';
+            const index = typeof op?.index === 'number' ? op.index : 0;
+            const row = typeof op?.row === 'number' ? op.row : 0;
+            const col = typeof op?.col === 'number' ? op.col : 0;
+
+            if (!type) {
+                return styles;
+            }
+
+            const remapped: Record<string, any> = {};
+
+            for (const [key, value] of Object.entries(styles)) {
+                const address = parseStyleKey(key);
+                if (!address) continue;
+
+                let nextRow = address.row;
+                let nextCol = address.col;
+                let keep = true;
+
+                switch (type) {
+                    case 'insertRowAbove':
+                        if (address.row >= index) nextRow = address.row + 1;
+                        break;
+                    case 'insertRowBelow':
+                        if (address.row > index) nextRow = address.row + 1;
+                        break;
+                    case 'deleteRow':
+                        if (address.row === index) {
+                            keep = false;
+                        } else if (address.row > index) {
+                            nextRow = address.row - 1;
+                        }
+                        break;
+                    case 'insertColumnLeft':
+                        if (address.col >= index) nextCol = address.col + 1;
+                        break;
+                    case 'insertColumnRight':
+                        if (address.col > index) nextCol = address.col + 1;
+                        break;
+                    case 'deleteColumn':
+                        if (address.col === index) {
+                            keep = false;
+                        } else if (address.col > index) {
+                            nextCol = address.col - 1;
+                        }
+                        break;
+                    case 'deleteCellShiftLeft':
+                        if (address.row === row && address.col === col) {
+                            keep = false;
+                        } else if (address.row === row && address.col > col) {
+                            nextCol = address.col - 1;
+                        }
+                        break;
+                    case 'deleteCellShiftUp':
+                        if (address.col === col && address.row === row) {
+                            keep = false;
+                        } else if (address.col === col && address.row > row) {
+                            nextRow = address.row - 1;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+
+                if (keep) {
+                    remapped[`${nextRow}:${nextCol}`] = value;
+                }
+            }
+
+            return remapped;
+        };
+
+        const applyDelimitedOperationsToRows = (rows: string[][], op: any) => {
+            const type = typeof op?.type === 'string' ? op.type : '';
+            const index = typeof op?.index === 'number' ? op.index : 0;
+            const row = typeof op?.row === 'number' ? op.row : 0;
+            const col = typeof op?.col === 'number' ? op.col : 0;
+
+            switch (type) {
+                case 'insertRowAbove':
+                    if (index > 0) rows.splice(index - 1, 0, []);
+                    break;
+                case 'insertRowBelow':
+                    if (index > 0) rows.splice(index, 0, []);
+                    break;
+                case 'deleteRow':
+                    if (index > 0 && index <= rows.length) rows.splice(index - 1, 1);
+                    break;
+                case 'insertColumnLeft':
+                    if (index > 0) {
+                        rows.forEach(rowData => rowData.splice(index - 1, 0, ''));
+                    }
+                    break;
+                case 'insertColumnRight':
+                    if (index > 0) {
+                        rows.forEach(rowData => rowData.splice(index, 0, ''));
+                    }
+                    break;
+                case 'deleteColumn':
+                    if (index > 0) {
+                        rows.forEach(rowData => {
+                            if (index - 1 < rowData.length) {
+                                rowData.splice(index - 1, 1);
+                            }
+                        });
+                    }
+                    break;
+                case 'deleteCellShiftLeft': {
+                    if (row > 0 && col > 0 && row <= rows.length) {
+                        const rowData = rows[row - 1];
+                        if (col - 1 < rowData.length) {
+                            rowData.splice(col - 1, 1);
+                        }
+                    }
+                    break;
+                }
+                case 'deleteCellShiftUp': {
+                    if (row > 0 && col > 0) {
+                        for (let r = row - 1; r < rows.length - 1; r++) {
+                            const nextValue = rows[r + 1][col - 1] ?? '';
+                            rows[r][col - 1] = nextValue;
+                        }
+                        const lastRow = rows[rows.length - 1];
+                        if (lastRow && col - 1 < lastRow.length) {
+                            lastRow.splice(col - 1, 1);
+                        }
+                    }
+                    break;
+                }
+            }
+        };
+
+        const applyDelimitedEditValues = (rows: string[][], edits: any[]) => {
+            for (const edit of edits) {
+                const row = typeof edit?.row === 'number' ? edit.row : 0;
+                const col = typeof edit?.col === 'number' ? edit.col : 0;
+                if (!row || !col) continue;
+
+                while (rows.length < row) {
+                    rows.push([]);
+                }
+                const rowData = rows[row - 1];
+                while (rowData.length < col) {
+                    rowData.push('');
+                }
+                rowData[col - 1] = typeof edit.value === 'string' ? edit.value : '';
+            }
+        };
+
+        const saveDelimitedFileAndStyles = async (sourceType: TabularFileType, edits: any[], richEdits: any[], styleEdits: any[], operations: any[], isAutosave: boolean) => {
+            const requiresWorkbookRefresh = edits.length > 0 || operations.length > 0 || styleEdits.length > 0 || richEdits.length > 0;
+            const { workbook: tabularData } = await readTabularFile(document.uri.fsPath, sourceType);
+            const rows = tabularData.sheets[0]?.rows ? tabularData.sheets[0].rows.map(row => [...row]) : [];
+
+            for (const op of operations) {
+                applyDelimitedOperationsToRows(rows, op);
+            }
+
+            applyDelimitedEditValues(rows, edits);
+
+            const currentStyles = this.styleStorage.hasStyles(document.uri)
+                ? ((await this.styleStorage.getStyles(document.uri)) ?? {})
+                : {};
+            let nextStyles: Record<string, any> = { ...currentStyles };
+
+            for (const op of operations) {
+                nextStyles = remapStylesForOperation(nextStyles, op);
+            }
+
+            for (const richEdit of richEdits) {
+                const row = typeof richEdit?.row === 'number' ? richEdit.row : 0;
+                const col = typeof richEdit?.col === 'number' ? richEdit.col : 0;
+                const runs = Array.isArray(richEdit?.runs) ? richEdit.runs : [];
+                if (!row || !col) continue;
+
+                const key = `${row}:${col}`;
+                const nextStyle = { ...(nextStyles[key] || {}) };
+
+                const boldValues: boolean[] = runs
+                    .filter((run: any) => typeof run?.bold === 'boolean')
+                    .map((run: any) => !!run.bold);
+                if (boldValues.length === 0) {
+                    delete nextStyle.bold;
+                } else if (boldValues.every((v: boolean) => v === boldValues[0])) {
+                    nextStyle.bold = boldValues[0];
+                } else {
+                    delete nextStyle.bold;
+                }
+
+                const italicValues: boolean[] = runs
+                    .filter((run: any) => typeof run?.italic === 'boolean')
+                    .map((run: any) => !!run.italic);
+                if (italicValues.length === 0) {
+                    delete nextStyle.italic;
+                } else if (italicValues.every((v: boolean) => v === italicValues[0])) {
+                    nextStyle.italic = italicValues[0];
+                } else {
+                    delete nextStyle.italic;
+                }
+
+                const colorValues = runs
+                    .map((run: any) => (typeof run?.color === 'string' ? String(run.color).trim() : ''))
+                    .filter((color: string) => color.length > 0);
+                if (colorValues.length === 0) {
+                    delete nextStyle.textColor;
+                } else if (colorValues.every((color: string) => color.toLowerCase() === colorValues[0].toLowerCase())) {
+                    nextStyle.textColor = colorValues[0];
+                } else {
+                    delete nextStyle.textColor;
+                }
+
+                if (Object.keys(nextStyle).length > 0) {
+                    nextStyles[key] = nextStyle;
+                } else {
+                    delete nextStyles[key];
+                }
+            }
+
+            for (const styleEdit of styleEdits) {
+                const row = typeof styleEdit?.row === 'number' ? styleEdit.row : 0;
+                const col = typeof styleEdit?.col === 'number' ? styleEdit.col : 0;
+                if (!row || !col) continue;
+
+                const key = `${row}:${col}`;
+                if (styleEdit?.clearFormatting) {
+                    delete nextStyles[key];
+                    continue;
+                }
+
+                const nextStyle = { ...(nextStyles[key] || {}) };
+                for (const [prop, value] of Object.entries(styleEdit)) {
+                    if (prop === 'row' || prop === 'col' || prop === 'clearFormatting') {
+                        continue;
+                    }
+
+                    if (value !== undefined) {
+                        nextStyle[prop] = value;
+                    }
+                }
+                nextStyles[key] = nextStyle;
+            }
+
+            await writeTabularFile(document.uri.fsPath, {
+                sheets: [{ name: 'Sheet1', rows }]
+            }, sourceType);
+
+            // Keep the full structured style state for future edits, while also
+            // requiring it to be renderable after a reopen.
+            const persistedStyles: Record<string, any> = {};
+            for (const [key, style] of Object.entries(nextStyles)) {
+                const cssStyle = normalizeStoredStyle(style);
+                if (Object.keys(cssStyle).length > 0) {
+                    persistedStyles[key] = {
+                        ...(style as Record<string, any>),
+                        ...cssStyle
+                    };
+                }
+            }
+
+            if (Object.keys(persistedStyles).length > 0) {
+                await this.styleStorage.saveStyles(document.uri, persistedStyles);
+            } else {
+                await this.styleStorage.clearStyles(document.uri);
+            }
+
+            // Keep provider-side worksheet cache in sync so plain/styled mode toggles
+            // re-render with the latest persisted style metadata.
+            if (requiresWorkbookRefresh) {
+                await loadWorkbookPayload();
+            }
+
+            try {
+                webview.postMessage({ command: 'saveResult', ok: true, isAutosave });
+            } catch {
+                // ignore
+            }
+        };
+
+        const convertCurrentFileToXlsx = async () => {
+            const sourceType = detectTabularFileType(document.uri.fsPath);
+            if (!sourceType || sourceType === 'xlsx') {
+                return;
+            }
+
+            const parsedSourcePath = path.parse(document.uri.fsPath);
+            const defaultTargetUri = vscode.Uri.file(path.join(parsedSourcePath.dir, `${parsedSourcePath.name}.xlsx`));
+            const targetUri = await vscode.window.showSaveDialog({
+                defaultUri: defaultTargetUri,
+                filters: { XLSX: ['xlsx'] }
+            });
+
+            if (!targetUri) {
+                return;
+            }
+
+            const targetPath = targetUri.fsPath.toLowerCase().endsWith('.xlsx') ? targetUri.fsPath : `${targetUri.fsPath}.xlsx`;
+
+            await convertTabularFile({
+                sourcePath: document.uri.fsPath,
+                targetPath,
+                sourceType,
+                targetType: 'xlsx'
+            });
+
+            const storedStyles = (await this.styleStorage.getStyles(document.uri)) ?? {};
+            if (Object.keys(storedStyles).length > 0) {
+                const workbook = new Excel.Workbook();
+                await workbook.xlsx.readFile(targetPath);
+                const worksheet = workbook.worksheets[0];
+                if (worksheet) {
+                    applyStoredStylesToWorksheet(worksheet, storedStyles);
+                    await workbook.xlsx.writeFile(targetPath);
+                }
+            }
+
+            await this.styleStorage.clearStyles(document.uri);
+            await this.styleStorage.clearPreferredViewMode(document.uri);
+            hasActiveTemporaryStyles = false;
+            shouldOpenDelimitedInStyledMode = false;
+
+            await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+            await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(targetPath), 'xlsxViewer.xlsx');
+        };
 
         const ensureHistoryDir = async () => {
             await fs.promises.mkdir(getHistoryDir(), { recursive: true });
@@ -132,7 +919,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                 const now = Date.now();
                 const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
-                const snapshotFile = `${id}.xlsx`;
+                const snapshotFile = `${id}.${currentFileType}`;
 
                 await ensureHistoryDir();
                 await fs.promises.writeFile(getSnapshotPath(snapshotFile), snapshotBytes);
@@ -143,6 +930,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     fileName: path.basename(filePath),
                     byteSize: snapshotBytes.length,
                     hash: snapshotHash,
+                    fileType: currentFileType,
                     snapshotFile
                 });
 
@@ -152,44 +940,130 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             }
         };
 
-        const getPersistedSettings = () => {
+        type SettingsScope = 'plain' | 'styled';
+        type PersistedSpreadsheetSettings = {
+            firstRowIsHeader: boolean;
+            stickyToolbar: boolean;
+            stickyHeader: boolean;
+            autoSave: boolean;
+            autoSaveMode: 'all' | 'controlsOnly';
+            showManualSavePopup: boolean;
+            allowInteractiveControlsOutsideEditMode: boolean;
+            hyperlinkPreview: boolean;
+            spaciousCells: boolean;
+            mergeWarningEnabled: boolean;
+            isDefaultEditor: boolean;
+        };
+        type PersistedSettingsPayload = {
+            settings: PersistedSpreadsheetSettings;
+            plainSettings: PersistedSpreadsheetSettings;
+            styledSettings: PersistedSpreadsheetSettings;
+            settingsScope: SettingsScope;
+        };
+
+        const isDefaultEditorAssociationEnabled = (associations: any, fileType: TabularFileType): boolean => {
+            const associationConfig = fileType === 'csv'
+                ? { viewType: 'xlsxViewer.csv', extension: 'csv' }
+                : fileType === 'tsv'
+                    ? { viewType: 'xlsxViewer.tsv', extension: 'tsv' }
+                    : { viewType: 'xlsxViewer.xlsx', extension: 'xlsx' };
+
+            const directPattern = `*.${associationConfig.extension}`;
+            const recursivePattern = `**/*.${associationConfig.extension}`;
+
+            if (!associations) {
+                return false;
+            }
+
+            if (Array.isArray(associations)) {
+                return associations.some((entry: any) =>
+                    entry?.viewType === associationConfig.viewType &&
+                    (entry?.filenamePattern === directPattern || entry?.filenamePattern === recursivePattern)
+                );
+            }
+
+            return associations[directPattern] === associationConfig.viewType || associations[recursivePattern] === associationConfig.viewType;
+        };
+
+        const getStyledSettings = (): PersistedSpreadsheetSettings => {
             const cfg = vscode.workspace.getConfiguration('xlsxViewer');
             const globalCfg = vscode.workspace.getConfiguration('workbench');
             const associations: any = globalCfg.get('editorAssociations');
-            let isDefault = false;
-            
-            if (associations) {
-                if (Array.isArray(associations)) {
-                    isDefault = associations.some(a => 
-                        a.viewType === 'xlsxViewer.xlsx' && 
-                        (a.filenamePattern === '*.xlsx' || a.filenamePattern === '**/*.xlsx')
-                    );
-                } else {
-                    isDefault = associations["*.xlsx"] === 'xlsxViewer.xlsx' || associations["**/*.xlsx"] === 'xlsxViewer.xlsx';
-                }
+            const autoSaveModeSetting = cfg.get<string>('xlsx.autoSaveMode', 'all');
+            return {
+                firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', false),
+                stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
+                stickyHeader: cfg.get('xlsx.stickyHeader', false),
+                autoSave: cfg.get('xlsx.autoSave', false),
+                autoSaveMode: autoSaveModeSetting === 'controlsOnly' ? 'controlsOnly' : 'all',
+                showManualSavePopup: cfg.get('xlsx.showManualSavePopup', true),
+                allowInteractiveControlsOutsideEditMode: cfg.get('xlsx.allowInteractiveControlsOutsideEditMode', true),
+                hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
+                spaciousCells: cfg.get('xlsx.spaciousCells', false),
+                mergeWarningEnabled: cfg.get('xlsx.mergeWarningEnabled', true),
+                isDefaultEditor: isDefaultEditorAssociationEnabled(associations, 'xlsx')
+            };
+        };
+
+        const getPlainSettings = (fileType: TabularFileType): PersistedSpreadsheetSettings => {
+            const cfg = vscode.workspace.getConfiguration('xlsxViewer');
+            const globalCfg = vscode.workspace.getConfiguration('workbench');
+            const associations: any = globalCfg.get('editorAssociations');
+
+            if (fileType === 'csv' || fileType === 'tsv') {
+                return {
+                    firstRowIsHeader: cfg.get(`${fileType}.firstRowIsHeader`, false),
+                    stickyToolbar: cfg.get(`${fileType}.stickyToolbar`, true),
+                    stickyHeader: cfg.get(`${fileType}.stickyHeader`, false),
+                    autoSave: cfg.get(`${fileType}.autoSave`, true),
+                    autoSaveMode: 'all',
+                    showManualSavePopup: false,
+                    allowInteractiveControlsOutsideEditMode: true,
+                    hyperlinkPreview: true,
+                    spaciousCells: cfg.get(`${fileType}.spaciousCells`, false),
+                    mergeWarningEnabled: true,
+                    isDefaultEditor: isDefaultEditorAssociationEnabled(associations, fileType)
+                };
             }
 
             return {
                 firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', false),
                 stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
-                autoSave: cfg.get('xlsx.autoSave', false),
-                autoSaveMode: cfg.get('xlsx.autoSaveMode', 'all'),
-                showManualSavePopup: cfg.get('xlsx.showManualSavePopup', true),
+                autoSave: cfg.get('xlsx.autoSave', true),
+                autoSaveMode: 'all',
+                showManualSavePopup: false,
                 allowInteractiveControlsOutsideEditMode: cfg.get('xlsx.allowInteractiveControlsOutsideEditMode', true),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
                 mergeWarningEnabled: cfg.get('xlsx.mergeWarningEnabled', true),
-                isDefaultEditor: isDefault
+                isDefaultEditor: isDefaultEditorAssociationEnabled(associations, 'xlsx')
+            };
+        };
+
+        const getPersistedSettings = (): PersistedSettingsPayload => {
+            const styledSettings = getStyledSettings();
+            const plainSettings = getPlainSettings(currentFileType);
+            if (currentFileType === 'csv' || currentFileType === 'tsv') {
+                styledSettings.isDefaultEditor = plainSettings.isDefaultEditor;
+            }
+            const settingsScope: SettingsScope = currentIsPlainView ? 'plain' : (currentFileType === 'xlsx' ? 'styled' : 'plain');
+
+            return {
+                settings: settingsScope === 'plain' ? plainSettings : styledSettings,
+                plainSettings,
+                styledSettings,
+                settingsScope
             };
         };
 
         const trySendSettings = () => {
             if (!isWebviewReady) return;
             try {
+                const persisted = getPersistedSettings();
                 webview.postMessage({
                     command: 'initSettings',
-                    settings: getPersistedSettings()
+                    ...persisted
                 });
             } catch {
                 // ignore
@@ -221,6 +1095,8 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     command: 'initVirtualTable',
                     worksheets: worksheetsMeta,
                     rowHeaderWidth,
+                    fileType: currentFileType,
+                    isPlainView: currentIsPlainView,
                     previewMode: !!previewVersionId,
                     versionId: previewVersionId,
                     timestamp: previewVersionTimestamp
@@ -230,12 +1106,66 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             }
         };
 
-        const loadWorkbookPayload = async (sourcePath: string = filePath) => {
+        const loadWorkbookPayload = async (sourcePath: string = filePath, sourceTypeOverride?: TabularFileType) => {
+            const fileType = sourceTypeOverride || detectTabularFileType(sourcePath) || 'xlsx';
+            currentFileType = fileType;
+            hasActiveTemporaryStyles = false;
+            shouldOpenDelimitedInStyledMode = false;
             const workbook = new Excel.Workbook();
-            await workbook.xlsx.readFile(sourcePath);
+            
+            if (fileType === 'xlsx') {
+                await workbook.xlsx.readFile(sourcePath);
+            } else {
+                // Load CSV/TSV data
+                const { workbook: tabularData } = await readTabularFile(sourcePath, fileType);
+                const ws = workbook.addWorksheet('Data');
+                if (tabularData.sheets.length > 0) {
+                    const rows = tabularData.sheets[0].rows;
+                    for (let r = 0; r < rows.length; r++) {
+                        const rowData = rows[r];
+                        for (let c = 0; c < rowData.length; c++) {
+                            ws.getCell(r + 1, c + 1).value = rowData[c];
+                        }
+                    }
+                }
+                
+                // Load styles from workspaceState
+                const storedStyles = this.styleStorage.hasStyles(document.uri)
+                    ? await this.styleStorage.getStyles(document.uri)
+                    : undefined;
+                if (storedStyles) {
+                    hasActiveTemporaryStyles = Object.keys(storedStyles).length > 0;
+                    // Apply styles to the ExcelJS workbook before extraction
+                    // We only store styles in a specific format.
+                    // For now, we will pass them along to the webview directly or apply them here.
+                    // Let's attach them to the workbook object so extractWorksheetData can find them
+                    (workbook as any).__storedStyles = storedStyles;
+                }
+
+                const preferredViewMode = this.styleStorage.getPreferredViewMode(document.uri);
+                shouldOpenDelimitedInStyledMode = preferredViewMode === 'styled' || hasActiveTemporaryStyles;
+            }
+
+            // Derive the initial plain-view state from file type and preferences.
+            // For XLSX: default to styled (false). For CSV/TSV: inverse of styled preference.
+            currentIsPlainView = currentFileType === 'xlsx' ? false : !shouldOpenDelimitedInStyledMode;
 
             worksheetsData = workbook.worksheets.map((worksheet, index) => {
                 const data = this.extractWorksheetData(worksheet, workbook);
+                // If we have stored styles for CSV/TSV, merge them into the extracted data
+                if ((workbook as any).__storedStyles) {
+                    const styles = (workbook as any).__storedStyles;
+                    for (const row of data.rows) {
+                        for (const cell of row.cells) {
+                            const key = `${cell.rowNumber}:${cell.colNumber}`;
+                            if (styles[key]) {
+                                // Normalize stored style format to CSS properties for rendering.
+                                const cssStyle = normalizeStoredStyle(styles[key]);
+                                cell.style = { ...cell.style, ...cssStyle };
+                            }
+                        }
+                    }
+                }
                 return {
                     name: worksheet.name,
                     index,
@@ -247,7 +1177,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             rowHeaderWidth = 40;
         };
 
-        // Listen for messages
+// Listen for messages
         webview.onDidReceiveMessage(async message => {
             if (message?.command === 'webviewReady') {
                 isWebviewReady = true;
@@ -274,10 +1204,19 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     }
 
                     const sorted = [...history].sort((a, b) => b.timestamp - a.timestamp);
+                    const oldestVersionId = sorted.length ? sorted[sorted.length - 1].id : null;
                     const picked = await vscode.window.showQuickPick(
-                        sorted.map(entry => ({
-                            label: new Date(entry.timestamp).toLocaleString(),
-                            description: `${entry.fileName} • ${(entry.byteSize / 1024).toFixed(1)} KB`,
+                        buildSharedVersionHistoryItems(sorted, (entry) => ({
+                            label: entry.id === oldestVersionId && entry.id === restoredVersionId
+                                ? 'Original File (Restored)'
+                                : entry.id === oldestVersionId
+                                    ? 'Original File'
+                                : entry.id === restoredVersionId
+                                    ? 'Restored'
+                                    : formatVersionHistoryTimestamp(entry.timestamp),
+                            description: entry.id === oldestVersionId || entry.id === restoredVersionId
+                                ? formatVersionHistoryTimestamp(entry.timestamp)
+                                : `${entry.fileName} • ${(entry.byteSize / 1024).toFixed(1)} KB`,
                             detail: `Saved ${Math.max(1, Math.round((Date.now() - entry.timestamp) / 60000))} min ago`,
                             entry
                         })),
@@ -288,7 +1227,8 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         return;
                     }
 
-                    await loadWorkbookPayload(getSnapshotPath(picked.entry.snapshotFile));
+                    const snapshotFileType = getSnapshotFileType(picked.entry.snapshotFile, picked.entry.fileType || currentFileType);
+                    await loadWorkbookPayload(getSnapshotPath(picked.entry.snapshotFile), snapshotFileType);
                     previewVersionId = picked.entry.id;
                     previewVersionTimestamp = picked.entry.timestamp;
                     trySendInit();
@@ -305,7 +1245,8 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 if (previewVersionId) {
                     previewVersionId = null;
                     previewVersionTimestamp = null;
-                    await loadWorkbookPayload();
+                    restoredVersionId = null;
+                    await loadWorkbookPayload(filePath, currentFileType);
                     trySendInit();
                     webview.postMessage({ command: 'versionPreviewCancelledXlsx' });
                 }
@@ -334,7 +1275,8 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                     previewVersionId = null;
                     previewVersionTimestamp = null;
-                    await loadWorkbookPayload();
+                    restoredVersionId = entry.id;
+                    await loadWorkbookPayload(filePath, currentFileType);
                     trySendInit();
                     await persistVersionSnapshot();
 
@@ -356,16 +1298,31 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 try {
                     const s = message.settings || {};
                     const cfg = vscode.workspace.getConfiguration('xlsxViewer');
-                    await cfg.update('xlsx.firstRowIsHeader', !!s.firstRowIsHeader, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.stickyHeader', !!s.stickyHeader, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.autoSave', !!s.autoSave, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.autoSaveMode', s.autoSaveMode === 'controlsOnly' ? 'controlsOnly' : 'all', vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.showManualSavePopup', !!s.showManualSavePopup, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.allowInteractiveControlsOutsideEditMode', !!s.allowInteractiveControlsOutsideEditMode, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.hyperlinkPreview', !!s.hyperlinkPreview, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
-                    await cfg.update('xlsx.mergeWarningEnabled', !!s.mergeWarningEnabled, vscode.ConfigurationTarget.Global);
+                    const scope = message.settingsScope === 'plain' ? 'plain' : 'styled';
+                    const isDelimitedFile = currentFileType === 'csv' || currentFileType === 'tsv';
+                    const firstRowIsHeader = !!s.firstRowIsHeader;
+                    const stickyHeader = firstRowIsHeader ? !!s.stickyHeader : false;
+
+                    if (scope === 'plain') {
+                        // Plain mode settings: limited set matching CSV/TSV plain mode defaults
+                        const prefix = isDelimitedFile ? currentFileType : 'xlsx';
+                        await cfg.update(`${prefix}.firstRowIsHeader`, firstRowIsHeader, vscode.ConfigurationTarget.Global);
+                        await cfg.update(`${prefix}.stickyToolbar`, !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
+                        await cfg.update(`${prefix}.stickyHeader`, stickyHeader, vscode.ConfigurationTarget.Global);
+                        await cfg.update(`${prefix}.autoSave`, s.autoSave !== false, vscode.ConfigurationTarget.Global);
+                        await cfg.update(`${prefix}.spaciousCells`, !!s.spaciousCells, vscode.ConfigurationTarget.Global);
+                    } else {
+                        await cfg.update('xlsx.firstRowIsHeader', firstRowIsHeader, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.stickyHeader', stickyHeader, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.autoSave', !!s.autoSave, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.autoSaveMode', s.autoSaveMode === 'controlsOnly' ? 'controlsOnly' : 'all', vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.showManualSavePopup', !!s.showManualSavePopup, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.allowInteractiveControlsOutsideEditMode', !!s.allowInteractiveControlsOutsideEditMode, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.hyperlinkPreview', !!s.hyperlinkPreview, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.mergeWarningEnabled', !!s.mergeWarningEnabled, vscode.ConfigurationTarget.Global);
+                    }
                 } catch (err) {
                     console.error('Failed to persist XLSX settings:', err);
                 }
@@ -373,21 +1330,23 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
             }
 
             if (message?.command === 'enableDefaultEditor' || message?.command === 'enableAsDefault') {
-                await vscode.commands.executeCommand('xlsx-viewer.toggleAssociation', { type: 'xlsx', enable: true });
+                const associationType = currentFileType === 'csv' || currentFileType === 'tsv' ? currentFileType : 'xlsx';
+                await vscode.commands.executeCommand('xlsx-viewer.toggleAssociation', { type: associationType, enable: true });
                 trySendSettings();
                 return;
             }
 
             if (message?.command === 'disableDefaultEditor') {
                 try {
+                    const associationType = currentFileType === 'csv' || currentFileType === 'tsv' ? currentFileType : 'xlsx';
                     const result = await vscode.window.showWarningMessage(
-                        "Are you sure you want to disable XLSX Viewer for all .xlsx files? You will be prompted to select a new default editor.",
+                        `Are you sure you want to disable Spreadsheet Viewer for all .${associationType} files? You will be prompted to select a new default editor.`,
                         "Yes, Disable",
                         "Cancel"
                     );
 
                     if (result === "Yes, Disable") {
-                        await vscode.commands.executeCommand('xlsx-viewer.toggleAssociation', { type: 'xlsx', enable: false });
+                        await vscode.commands.executeCommand('xlsx-viewer.toggleAssociation', { type: associationType, enable: false });
                         await vscode.commands.executeCommand('workbench.action.reopenWithEditor');
                     }
                 } catch (err) {
@@ -461,7 +1420,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
             if (message?.command === 'submitFeedback') {
                 try {
-                    const https = await import('https');
+                    const https = await import('node:https');
                     const formData = message.data as Record<string, string>;
                     const body = Object.entries(formData)
                         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v ?? '')}`)
@@ -472,7 +1431,7 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             path: '/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/formResponse',
                             method: 'POST',
                             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
-                        }, (res) => resolve(res.statusCode !== undefined && res.statusCode < 400));
+                        }, (res: any) => resolve((res.statusCode ?? 500) < 400));
                         req.on('error', () => resolve(false));
                         req.write(body);
                         req.end();
@@ -493,6 +1452,67 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 return;
             }
 
+            if (message?.command === 'setPreferredViewMode') {
+                try {
+                    const mode = message?.mode === 'styled' ? 'styled' : 'plain';
+                    if (currentFileType === 'csv' || currentFileType === 'tsv') {
+                        await this.styleStorage.setPreferredViewMode(document.uri, mode);
+                        shouldOpenDelimitedInStyledMode = mode === 'styled';
+                    }
+                    // Keep provider-side plain-view state in sync with the webview
+                    currentIsPlainView = mode === 'plain';
+                } catch {
+                    // ignore preferred view mode persistence errors
+                }
+                return;
+            }
+
+            if (message?.command === 'requestFreshData') {
+                try {
+                    await loadWorkbookPayload();
+                    trySendInit();
+                } catch {
+                    // ignore reload errors
+                }
+                return;
+            }
+
+            if (message?.command === 'requestStyleMode') {
+                try {
+                    if (currentFileType === 'xlsx') {
+                        webview.postMessage({ command: 'styleModeActivated' });
+                        return;
+                    }
+                    webview.postMessage({ command: 'showStyleModeNotice' });
+                } catch (err) {
+                    webview.postMessage({ command: 'styleModeCancelled' });
+                    vscode.window.showErrorMessage(`Unable to switch to styled mode: ${String(err)}`);
+                }
+                return;
+            }
+
+            if (message?.command === 'styleModeDecision') {
+                try {
+                    const decision = typeof message?.decision === 'string' ? message.decision : 'cancel';
+
+                    if (decision === 'continue') {
+                        webview.postMessage({ command: 'styleModeActivated' });
+                        return;
+                    }
+
+                    if (decision === 'convert') {
+                        await convertCurrentFileToXlsx();
+                        return;
+                    }
+
+                    webview.postMessage({ command: 'styleModeCancelled' });
+                } catch (err) {
+                    webview.postMessage({ command: 'styleModeCancelled' });
+                    vscode.window.showErrorMessage(`Unable to process style mode selection: ${String(err)}`);
+                }
+                return;
+            }
+
             if (message?.command === 'saveXlsxEdits') {
                 try {
                     if (previewVersionId) {
@@ -509,6 +1529,12 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                     if (!edits.length && !operations.length && !styleEdits.length && !richEdits.length) {
                         try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave }); } catch { }
+                        return;
+                    }
+
+                    const sourceType = detectTabularFileType(document.uri.fsPath) || 'xlsx';
+                    if (sourceType === 'csv' || sourceType === 'tsv') {
+                        await saveDelimitedFileAndStyles(sourceType, edits, richEdits, styleEdits, operations, isAutosave);
                         return;
                     }
 
@@ -960,7 +1986,8 @@ export class XLSXEditorProvider implements vscode.CustomReadonlyEditorProvider {
         const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('xlsxViewer.xlsx') || e.affectsConfiguration('xlsxViewer') || e.affectsConfiguration('workbench.editorAssociations')) {
                 try {
-                    webview.postMessage({ command: 'settingsUpdated', settings: getPersistedSettings() });
+                    const persisted = getPersistedSettings();
+                    webview.postMessage({ command: 'settingsUpdated', ...persisted });
                 } catch {
                     // ignore
                 }

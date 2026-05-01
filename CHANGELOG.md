@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.9 - Unified XLSX/CSV/TSV Webviews & fixed some bugs
+- Unified the XLSX, CSV, and TSV editors into a single webview implementation with same features and toolbar for all formats like google sheets.
+- Now just like google sheets, styles can be added to csv and tsv files as well and they will be preserved in a temporary cache for 48 hours, surviving file close and reopen.
+- Added a setting to control the visibility of the "Edit Table" button in CSV/TSV files, allowing users to choose between direct editing and table edit mode.
+- Added sort adn filter for spreadsheet files.
+- Improved version history reliability.
+
 ## v1.8.8 - System Info Editor Name & Feedback Modal Spacing
 - Added editor name detection (VS Code, Cursor, etc.) to system information in feedback modal
 
