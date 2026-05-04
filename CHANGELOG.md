@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.9.0 - Checkbox bug fix
+-- FIx a bug where 1 and 0 values in xlsx files would be rendered as checkboxes, now only cells with the "checkbox" format will be rendered as checkboxes.
+
 ## v1.8.9 - Unified XLSX/CSV/TSV Webviews & fixed some bugs
 - Unified the XLSX, CSV, and TSV editors into a single webview implementation with same features and toolbar for all formats like google sheets.
 - Now just like google sheets, styles can be added to csv and tsv files as well and they will be preserved in a temporary cache for 48 hours, surviving file close and reopen.

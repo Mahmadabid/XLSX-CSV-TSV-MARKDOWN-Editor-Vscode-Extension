@@ -2225,9 +2225,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 const isRating = this.isRatingOptionList(dropdownOptions);
                 const dateInputValue = this.toIsoDateInputValue(cell.value) || this.toIsoDateInputValue(cellValue);
                 const isDate = this.isDateValidationCell(cell) || !!dateInputValue;
-                const isCheckbox = !isRating && (this.isBooleanOptionList(dropdownOptions)
-                    || booleanFromValue !== null
-                    || (booleanFromText !== null && dropdownOptions.length === 0));
+                const isCheckbox = !isRating && this.isBooleanOptionList(dropdownOptions);
 
                 const checkboxChecked = booleanFromValue ?? booleanFromText ?? false;
                 const cellType = imageSrc
@@ -2391,10 +2389,10 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         }
 
         const normalized = String(value).trim().toLowerCase();
-        if (normalized === 'true' || normalized === 'yes' || normalized === '1' || normalized === 'y') {
+        if (normalized === 'true' || normalized === 'yes' || normalized === 'y') {
             return true;
         }
-        if (normalized === 'false' || normalized === 'no' || normalized === '0' || normalized === 'n') {
+        if (normalized === 'false' || normalized === 'no' || normalized === 'n') {
             return false;
         }
 
