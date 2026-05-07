@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { IncomingMessage } from 'http';
 import { VERSION_HISTORY_RETENTION_MS, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS, buildGroupedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryFile } from './shared/versionHistory';
 
 export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
@@ -429,7 +430,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                     path: '/forms/d/e/1FAIpQLSe5AqE_f1-WqUlQmvuPn1as3Mkn4oLjA0EDhNssetzt63ONzA/formResponse',
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
-                                }, (res) => resolve(res.statusCode !== undefined && res.statusCode < 400));
+                                }, (res: IncomingMessage) => resolve((res.statusCode ?? 0) < 400));
                                 req.on('error', () => resolve(false));
                                 req.write(body);
                                 req.end();
@@ -563,12 +564,13 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
         <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline';">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} https: 'unsafe-inline'; font-src ${cspSource} https:; script-src ${cspSource} 'unsafe-inline';">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Markdown Viewer</title>
             <link href="${themeUri}" rel="stylesheet" />
             <link href="${styleUri}" rel="stylesheet" />
             <link href="${highlightUri}" rel="stylesheet" />
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.6.0/katex.min.css" rel="stylesheet" />
             <link href="${feedbackStyleUri}" rel="stylesheet" />
             <script>
                 window.viewImgUri = "${imgUri}";

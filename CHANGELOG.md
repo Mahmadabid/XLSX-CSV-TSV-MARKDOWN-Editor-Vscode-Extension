@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.9.1 - Markdown mathemical formula rendering fix
+- Added support for rendering mathematical formulas in Markdown files using KaTex.
+
 ## v1.9.0 - Checkbox bug fix
 -- FIx a bug where 1 and 0 values in xlsx files would be rendered as checkboxes, now only cells with the "checkbox" format will be rendered as checkboxes.
 

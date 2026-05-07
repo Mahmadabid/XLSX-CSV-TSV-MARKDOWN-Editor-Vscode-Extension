@@ -19,6 +19,8 @@ import mark from 'markdown-it-mark';
 import abbr from 'markdown-it-abbr';
 // @ts-ignore
 import { full as emoji } from 'markdown-it-emoji';
+// @ts-ignore
+import katex from 'markdown-it-katex';
 
 import hljs from 'highlight.js';
 import { ThemeManager } from '../shared/themeManager';
@@ -321,6 +323,7 @@ md.use(container as any, 'success');
 
 md.use(deflist);
 md.use(footnote);
+md.use(katex);
 md.use(sub);
 md.use(sup);
 md.use(ins);
