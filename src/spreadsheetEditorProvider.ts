@@ -570,6 +570,16 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                             nextCol = address.col - 1;
                         }
                         break;
+                    case 'insertCellShiftRight':
+                        if (address.row === row && address.col >= col) {
+                            nextCol = address.col + 1;
+                        }
+                        break;
+                    case 'insertCellShiftDown':
+                        if (address.col === col && address.row >= row) {
+                            nextRow = address.row + 1;
+                        }
+                        break;
                     case 'deleteCellShiftLeft':
                         if (address.row === row && address.col === col) {
                             keep = false;
@@ -631,6 +641,43 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         });
                     }
                     break;
+                case 'insertCellShiftRight': {
+                    if (row > 0 && col > 0 && row <= rows.length) {
+                        const rowData = rows[row - 1];
+                        if (!rowData) break;
+                        while (rowData.length < col - 1) {
+                            rowData.push('');
+                        }
+                        rowData.splice(col - 1, 0, '');
+                    }
+                    break;
+                }
+                case 'insertCellShiftDown': {
+                    if (row > 0 && col > 0 && row <= rows.length) {
+                        rows.push([]);
+                        for (let r = rows.length - 2; r >= row - 1; r--) {
+                            const sourceRow = rows[r];
+                            let targetRow = rows[r + 1];
+                            if (!targetRow) {
+                                targetRow = [];
+                                rows[r + 1] = targetRow;
+                            }
+                            while (targetRow.length < col) {
+                                targetRow.push('');
+                            }
+                            const sourceValue = sourceRow && sourceRow.length >= col ? sourceRow[col - 1] : '';
+                            targetRow[col - 1] = sourceValue ?? '';
+                        }
+                        const insertRow = rows[row - 1];
+                        if (insertRow) {
+                            while (insertRow.length < col) {
+                                insertRow.push('');
+                            }
+                            insertRow[col - 1] = '';
+                        }
+                    }
+                    break;
+                }
                 case 'deleteCellShiftLeft': {
                     if (row > 0 && col > 0 && row <= rows.length) {
                         const rowData = rows[row - 1];
@@ -1573,6 +1620,36 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                                     ws.spliceColumns(index, 1);
                                 }
                                 break;
+                            case 'insertCellShiftRight': {
+                                const row = typeof op?.row === 'number' ? op.row : 0;
+                                const col = typeof op?.col === 'number' ? op.col : 0;
+                                if (!row || !col) break;
+
+                                const rowRef = ws.getRow(row);
+                                const lastColumn = Math.max(ws.columnCount, rowRef.cellCount || 0);
+                                for (let c = lastColumn + 1; c > col; c--) {
+                                    const src = rowRef.getCell(c - 1);
+                                    const dst = rowRef.getCell(c);
+                                    dst.value = src.value as any;
+                                }
+                                rowRef.getCell(col).value = null;
+                                break;
+                            }
+                            case 'insertCellShiftDown': {
+                                const row = typeof op?.row === 'number' ? op.row : 0;
+                                const col = typeof op?.col === 'number' ? op.col : 0;
+                                if (!row || !col) break;
+
+                                const lastRow = ws.rowCount;
+                                ws.spliceRows(lastRow + 1, 0, []);
+                                for (let r = lastRow + 1; r > row; r--) {
+                                    const src = ws.getRow(r - 1).getCell(col);
+                                    const dst = ws.getRow(r).getCell(col);
+                                    dst.value = src.value as any;
+                                }
+                                ws.getRow(row).getCell(col).value = null;
+                                break;
+                            }
                             case 'deleteCellShiftLeft': {
                                 const row = typeof op?.row === 'number' ? op.row : 0;
                                 const col = typeof op?.col === 'number' ? op.col : 0;

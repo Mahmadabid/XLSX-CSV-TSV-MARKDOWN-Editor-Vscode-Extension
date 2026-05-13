@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.9.2 - Fixed Cell and Header Actions
+- Fixed an issue where delete column/row actions were not working.
+- Fixed an issue where the header row toggle would not open the settings panel.
+
 ## v1.9.1 - Markdown mathemical formula rendering fix
 - Added support for rendering mathematical formulas in Markdown files using KaTex.
 

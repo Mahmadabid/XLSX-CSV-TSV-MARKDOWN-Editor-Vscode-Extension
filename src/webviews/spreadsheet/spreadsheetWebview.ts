@@ -1222,8 +1222,30 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
     }
 
+    function canApplyStructureEdits(): boolean {
+        if (isVersionPreviewMode) {
+            showToast('Version preview is read-only');
+            return false;
+        }
+        return true;
+    }
+
+    function persistStructureChange() {
+        if (isEditMode) {
+            scheduleAutoSave('structure');
+            return;
+        }
+
+        if (currentSettings.autoSave) {
+            saveEdits(false, true);
+            return;
+        }
+
+        showManualSaveReminderIfNeeded();
+    }
+
     async function applyStructureOperation(op: StructuralOp) {
-        if (!isEditMode) return;
+        if (!canApplyStructureEdits()) return;
 
         const loaded = await ensureAllRowsLoadedForStructureEdits();
         if (!loaded) return;
@@ -1338,10 +1360,72 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         pushSheetUndoEntry(beforeSnapshot, afterSnapshot);
         hideHeaderContextMenu();
         rerenderCurrentSheetFromLocalState();
+        persistStructureChange();
+    }
+
+    async function applyCellInsertOperation(type: 'insertCellShiftRight' | 'insertCellShiftDown', rowNumber: number, colNumber: number) {
+        if (!canApplyStructureEdits()) return;
+        if (rowNumber <= 0 || colNumber <= 0) return;
+
+        const loaded = await ensureAllRowsLoadedForStructureEdits();
+        if (!loaded) return;
+
+        const beforeSnapshot = captureWorksheetStateSnapshot();
+        const rows = getMutableRowsSnapshot();
+
+        if (type === 'insertCellShiftRight') {
+            const rowIndex = rowNumber - 1;
+            const row = rows[rowIndex];
+            if (!row) return;
+
+            const previousColumnCount = columnCount;
+            columnCount += 1;
+            columnWidths.splice(Math.max(0, previousColumnCount), 0, 80);
+
+            for (let col = previousColumnCount + 1; col > colNumber; col--) {
+                const prevCell = getCellFromRow(row, col - 1);
+                setCellOnRow(row, col, prevCell ? cloneCellData(prevCell) : null);
+            }
+            setCellOnRow(row, colNumber, null);
+        } else {
+            const previousTotalRows = totalRows;
+            totalRows += 1;
+            allRowHeights.push(ROW_HEIGHT);
+            rows.push({ cells: [], rowNumber: totalRows, height: ROW_HEIGHT });
+            invalidateRowMetrics();
+
+            for (let row = previousTotalRows; row >= rowNumber; row--) {
+                const srcRow = rows[row - 1];
+                let dstRow = rows[row];
+                if (!dstRow) {
+                    dstRow = { cells: [], rowNumber: row + 1, height: allRowHeights[row] || ROW_HEIGHT };
+                    rows[row] = dstRow;
+                }
+                const sourceCell = srcRow ? getCellFromRow(srcRow, colNumber) : null;
+                setCellOnRow(dstRow, colNumber, sourceCell ? cloneCellData(sourceCell) : null);
+            }
+
+            const targetRow = rows[rowNumber - 1];
+            if (targetRow) {
+                setCellOnRow(targetRow, colNumber, null);
+            }
+        }
+
+        pendingWorksheetOps.push({ type, row: rowNumber, col: colNumber });
+        normalizeRowsAfterStructureChange(rows, rowCache);
+
+        const afterSnapshot = captureWorksheetStateSnapshot();
+        pushSheetUndoEntry(beforeSnapshot, afterSnapshot);
+
+        selectedCells.clear();
+        activeCell = null;
+        hideHeaderContextMenu();
+        rerenderCurrentSheetFromLocalState();
+        persistStructureChange();
     }
 
     async function applyCellDeleteOperation(type: 'deleteCellShiftLeft' | 'deleteCellShiftUp', rowNumber: number, colNumber: number) {
-        if (!isEditMode) return;
+        if (!canApplyStructureEdits()) return;
         if (rowNumber <= 0 || colNumber <= 0) return;
 
         const loaded = await ensureAllRowsLoadedForStructureEdits();
@@ -1386,6 +1470,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         activeCell = null;
         hideHeaderContextMenu();
         rerenderCurrentSheetFromLocalState();
+        persistStructureChange();
     }
 
     function ensureHeaderContextMenu() {
@@ -1406,7 +1491,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function showHeaderContextMenu(e: MouseEvent, targetType: 'row' | 'column', targetIndexZeroBased: number) {
-        if (targetType === 'row' && !isEditMode && !isPlainDirectEditMode()) return;
+        if (targetType === 'row' && isVersionPreviewMode) {
+            showToast('Version preview is read-only');
+            return;
+        }
 
         const menu = ensureHeaderContextMenu();
         menu.innerHTML = '';
@@ -1681,7 +1769,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function showCellContextMenu(e: MouseEvent, cell: HTMLElement) {
-        if (!isEditMode && !isPlainDirectEditMode()) return;
+        if (isVersionPreviewMode) {
+            showToast('Version preview is read-only');
+            return;
+        }
 
         const menu = ensureHeaderContextMenu();
         menu.innerHTML = '';
@@ -1710,6 +1801,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         separator.className = 'header-context-separator';
         menu.appendChild(separator);
 
+        appendAction('Insert cell and shift right', () => applyCellInsertOperation('insertCellShiftRight', rowNumber, colNumber));
+        appendAction('Insert cell and shift down', () => applyCellInsertOperation('insertCellShiftDown', rowNumber, colNumber));
         appendAction('Delete cell and shift left', () => applyCellDeleteOperation('deleteCellShiftLeft', rowNumber, colNumber));
         appendAction('Delete cell and shift up', () => applyCellDeleteOperation('deleteCellShiftUp', rowNumber, colNumber));
 
@@ -5158,20 +5251,46 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             const cell = target.closest('td') as HTMLElement | null;
             if (!rowHeader && !colHeader && !cell) return;
 
-            const isEditLikeMode = isEditMode || isPlainDirectEditMode();
-            if (!isEditLikeMode && !colHeader) return;
+            if (isVersionPreviewMode && (rowHeader || cell)) {
+                showToast('Version preview is read-only');
+                return;
+            }
 
             e.preventDefault();
             e.stopPropagation();
 
             if (cell) {
-                if (!isEditLikeMode) return;
                 showCellContextMenu(e, cell);
                 return;
             }
 
             if (rowHeader) {
-                if (!isEditLikeMode) return;
+                const row = parseInt(rowHeader.dataset.row || '-1', 10);
+                if (row >= 0) showHeaderContextMenu(e, 'row', row);
+                return;
+            }
+
+            if (colHeader) {
+                const col = parseInt(colHeader.dataset.col || '-1', 10);
+                if (col >= 0) showHeaderContextMenu(e, 'column', col);
+            }
+        });
+
+        table.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest('.col-resize-handle') || target.closest('.row-resize-handle')) return;
+
+            const rowHeader = target.closest('th.row-header') as HTMLElement | null;
+            const colHeader = target.closest('th.col-header') as HTMLElement | null;
+            if (!rowHeader && !colHeader) return;
+            if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+            if (isVersionPreviewMode && rowHeader) {
+                showToast('Version preview is read-only');
+                return;
+            }
+
+            if (rowHeader) {
                 const row = parseInt(rowHeader.dataset.row || '-1', 10);
                 if (row >= 0) showHeaderContextMenu(e, 'row', row);
                 return;

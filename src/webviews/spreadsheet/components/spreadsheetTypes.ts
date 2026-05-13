@@ -10,6 +10,8 @@ export type StructuralOpType =
 
 export type WorksheetOpType =
     | StructuralOpType
+    | 'insertCellShiftRight'
+    | 'insertCellShiftDown'
     | 'deleteCellShiftLeft'
     | 'deleteCellShiftUp'
     | 'mergeRange'
