@@ -3013,6 +3013,149 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
     }
 
+    function resolveCellTypeForClear(cell: HTMLElement | null, rowIndex: number, colIndex: number): string {
+        if (cell) return getCellType(cell);
+
+        const rowData = rowCache.get(rowIndex);
+        if (!rowData) return 'text';
+
+        const cellData = getCellFromRow(rowData, colIndex + 1);
+        const rawType = typeof cellData?.cellType === 'string' ? cellData.cellType.trim().toLowerCase() : '';
+        if (rawType === 'checkbox' || rawType === 'dropdown' || rawType === 'rating' || rawType === 'date' || rawType === 'image') {
+            return rawType;
+        }
+        return 'text';
+    }
+
+    function getClearedValueForCellType(cellType: string): string {
+        if (cellType === 'checkbox') return 'FALSE';
+        if (cellType === 'rating') return '0';
+        return '';
+    }
+
+    function setPlainCellContent(cell: HTMLElement, value: string) {
+        const plainText = normalizeCellText(value || '');
+        const safeText = plainText
+            ? plainText
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+            : '&nbsp;';
+        cell.innerHTML = `<span class="cell-content">${safeText}</span>`;
+    }
+
+    function applyClearedValueToCellData(cellData: any, cellType: string, value: string) {
+        cellData.value = value;
+        if (cellType === 'checkbox') {
+            cellData.checkboxChecked = false;
+            cellData.value = 'FALSE';
+        } else if (cellType === 'rating') {
+            cellData.value = value;
+        } else if (cellType === 'image') {
+            cellData.imageSrc = '';
+        }
+
+        cellData.isEmpty = cellData.value === '';
+        if (cellData.isEmpty && cellData.hyperlink) {
+            cellData.hyperlink = '';
+        }
+    }
+
+    function applyClearedValueToDomCell(cell: HTMLElement, cellType: string, value: string) {
+        if (isPlainView) {
+            setPlainCellContent(cell, value);
+        } else if (cellType === 'checkbox') {
+            updateCheckboxCellPresentation(cell, false);
+        } else if (cellType === 'dropdown') {
+            updateDropdownCellPresentation(cell, value);
+        } else if (cellType === 'rating') {
+            updateRatingCellPresentation(cell, 0);
+        } else if (cellType === 'date') {
+            updateDateCellPresentation(cell, value);
+        } else {
+            setPlainCellContent(cell, value);
+        }
+
+        if (value === '') {
+            cell.setAttribute('data-empty', 'true');
+            cell.removeAttribute('data-hyperlink');
+        } else {
+            cell.removeAttribute('data-empty');
+        }
+    }
+
+    function clearSelectionContents() {
+        const bounds = getLogicalSelectionBounds();
+        if (!bounds) {
+            showToast('Select cells to clear');
+            return;
+        }
+
+        const cellCount = (bounds.maxRow - bounds.minRow + 1) * (bounds.maxCol - bounds.minCol + 1);
+        if (cellCount > 200000) {
+            showToast(`Selection too large (${cellCount} cells) to clear. Please select a smaller range.`);
+            return;
+        }
+
+        const beforeStates: CellUndoState[] = [];
+        const afterStates: CellUndoState[] = [];
+        let hasChanges = false;
+
+        for (let r = bounds.minRow; r <= bounds.maxRow; r++) {
+            for (let c = bounds.minCol; c <= bounds.maxCol; c++) {
+                const rowNumber = r + 1;
+                const colNumber = c + 1;
+                const domCell = document.querySelector(`td[data-row="${r}"][data-col="${c}"]`) as HTMLElement | null;
+                const cellType = resolveCellTypeForClear(domCell, r, c);
+                const clearedValue = getClearedValueForCellType(cellType);
+
+                if (domCell) {
+                    const before = captureCellUndoState(domCell);
+                    if (before) beforeStates.push(before);
+                }
+
+                const rowData = rowCache.get(r);
+                if (rowData) {
+                    let cellData = getCellFromRow(rowData, colNumber);
+                    if (!cellData) {
+                        cellData = getOrCreateRowCellData(r, c);
+                    }
+                    applyClearedValueToCellData(cellData, cellType, clearedValue);
+                }
+
+                syncLocalSnapshotValue(rowNumber, colNumber, clearedValue);
+                upsertPendingOutsideControlEdit(rowNumber, colNumber, clearedValue);
+                hasChanges = true;
+
+                if (domCell) {
+                    applyClearedValueToDomCell(domCell, cellType, clearedValue);
+                    const after = captureCellUndoState(domCell);
+                    if (after) afterStates.push(after);
+                }
+            }
+        }
+
+        if (beforeStates.length && afterStates.length) {
+            pushEditUndoEntry({ before: beforeStates, after: afterStates });
+        }
+
+        if (!hasChanges) return;
+
+        if (isEditMode) {
+            scheduleAutoSave('text');
+            return;
+        }
+
+        if (currentSettings.autoSave) {
+            saveEdits(false, true);
+            return;
+        }
+
+        showManualSaveReminderIfNeeded();
+    }
+
     async function queueMergeOperation(type: 'mergeRange' | 'unmergeRange') {
         const bounds = getLogicalSelectionBounds();
         if (!bounds) {
@@ -6015,6 +6158,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 }
             }
 
+            const canClearValues = isEditMode || isPlainDirectEditMode();
+            if ((e.key === 'Delete' || e.key === 'Backspace') && canClearValues && !isCellEditing) {
+                e.preventDefault();
+                clearSelectionContents();
+                return;
+            }
+
             if (isEditMode) {
                 if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
                     e.preventDefault();
@@ -6034,11 +6184,6 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     return;
                 }
 
-                return;
-            }
-
-            if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditMode) {
-                e.preventDefault();
                 return;
             }
 
