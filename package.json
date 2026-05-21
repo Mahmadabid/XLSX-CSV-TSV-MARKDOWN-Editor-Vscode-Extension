@@ -1,7 +1,7 @@
 {
     "name": "xlsx-viewer",
-    "displayName": "Spreadsheet, CSV, TSV & Markdown Editor",
-    "description": "View and edit spreadsheet files with colors, fonts and styles (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
+    "displayName": "XLSX, CSV, TSV & Markdown Editor",
+    "description": "View and edit xlsx files with colors, fonts and styles (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
     "version": "1.9.3",
     "publisher": "muhammad-ahmad",
     "engines": {
@@ -38,7 +38,7 @@
         "customEditors": [
             {
                 "viewType": "xlsxViewer.xlsx",
-                "displayName": "Spreadsheet Viewer & Editor",
+                "displayName": "XLSX Viewer & Editor",
                 "selector": [
                     {
                         "filenamePattern": "*.xlsx"

@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.9.4 - Name Fix
+- Reverted the accidental name change.
+
 ## v1.9.3 - Bug Fixes
 - Fixed an issue where the Backspace and Delete keys would not work in the spreadsheet editor.
 
