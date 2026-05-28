@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.5 - Support Paste, Context Menus, Markdown Flowcharts, and Copy Optimization
+- Added support for pasting spreadsheet grid data (using tab and newline delimiters).
+- Added Copy and Paste actions directly in the cell right-click context menu.
+- Optimized copying of large ranges of cells (making it instant for 10000+ cells).
+- Added Mermaid flowchart and diagram rendering support in Markdown editor and preview.
+
 ## v1.9.4 - Name Fix
 - Reverted the accidental name change.
 

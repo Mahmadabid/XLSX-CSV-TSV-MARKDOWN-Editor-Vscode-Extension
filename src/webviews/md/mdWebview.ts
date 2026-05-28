@@ -35,6 +35,43 @@ import { InfoTooltip } from '../shared/infoTooltip';
 import TurndownService from 'turndown';
 // @ts-ignore
 import { gfm } from 'turndown-plugin-gfm';
+// @ts-ignore
+import mermaid from 'mermaid';
+
+// Inline custom plugin that mimics the markdown-it-mermaid API and behavior,
+// but uses standard ES imports bundled properly by esbuild for the browser.
+function markdownItMermaid(md: any) {
+    md.mermaid = mermaid;
+    
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mermaid as any).loadPreferences = function (preferences: any) {
+        let theme = preferences.get('mermaid-theme');
+        if (theme === undefined) {
+            theme = 'default';
+        }
+        let ganttAxisFormat = preferences.get('gantt-axis-format');
+        if (ganttAxisFormat === undefined) {
+            ganttAxisFormat = '%Y-%m-%d';
+        }
+        mermaid.initialize({
+            theme: theme,
+            gantt: {
+                axisFormatter: [
+                    [
+                        ganttAxisFormat,
+                        function (date: Date) {
+                            return date.getDay() === 1;
+                        }
+                    ]
+                ]
+            }
+        } as any);
+        return {
+            'mermaid-theme': theme,
+            'gantt-axis-format': ganttAxisFormat
+        };
+    };
+}
 
 // ===== Throttle Utility =====
 function throttleRAF(fn: () => void): () => void {
@@ -306,7 +343,7 @@ const md = new MarkdownIt({
         if (lang && hljs.getLanguage(lang)) {
             try {
                 return hljs.highlight(str, { language: lang }).value;
-            } catch (__) {}
+            } catch (__) { }
         }
         return ''; // use external default escaping
     }
@@ -330,14 +367,15 @@ md.use(ins);
 md.use(mark);
 md.use(abbr);
 md.use(emoji);
+md.use(markdownItMermaid);
 
 // Inline code styling
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const defaultInlineCode = md.renderer.rules.code_inline || function(tokens: any, idx: number, options: any, env: any, self: any) {
+const defaultInlineCode = md.renderer.rules.code_inline || function (tokens: any, idx: number, options: any, env: any, self: any) {
     return self.renderToken(tokens, idx, options);
 };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-md.renderer.rules.code_inline = function(tokens: any, idx: number, options: any, env: any, self: any) {
+md.renderer.rules.code_inline = function (tokens: any, idx: number, options: any, env: any, self: any) {
     tokens[idx].attrJoin('class', 'inline-code');
     return defaultInlineCode(tokens, idx, options, env, self);
 };
@@ -361,13 +399,13 @@ md.renderer.rules.list_item_open = injectLineNumbers;
 md.renderer.rules.blockquote_open = injectLineNumbers;
 md.renderer.rules.hr = injectLineNumbers;
 
-md.renderer.rules.table_open = function(tokens: any, idx: number, options: any, env: any, self: any) {
+md.renderer.rules.table_open = function (tokens: any, idx: number, options: any, env: any, self: any) {
     tokens[idx].attrJoin('class', 'md-table');
     return injectLineNumbers(tokens, idx, options, env, self);
 };
 
 // Heading close: inject anchor links for copyable heading URLs
-md.renderer.rules.heading_close = function(tokens: any, idx: number, options: any, env: any, self: any) {
+md.renderer.rules.heading_close = function (tokens: any, idx: number, options: any, env: any, self: any) {
     const openToken = tokens[idx - 2];
     const id = openToken && openToken.type === 'heading_open' ? openToken.attrGet('id') : null;
     let anchor = '';
@@ -378,10 +416,10 @@ md.renderer.rules.heading_close = function(tokens: any, idx: number, options: an
 };
 
 // Image renderer: add zoomable class for lightbox
-const defaultImageRender = md.renderer.rules.image || function(tokens: any, idx: number, options: any, env: any, self: any) {
+const defaultImageRender = md.renderer.rules.image || function (tokens: any, idx: number, options: any, env: any, self: any) {
     return self.renderToken(tokens, idx, options);
 };
-md.renderer.rules.image = function(tokens: any, idx: number, options: any, env: any, self: any) {
+md.renderer.rules.image = function (tokens: any, idx: number, options: any, env: any, self: any) {
     tokens[idx].attrJoin('class', 'md-image zoomable');
     tokens[idx].attrSet('loading', 'lazy');
     const src = (tokens[idx].attrGet('src') || '').trim();
@@ -458,6 +496,12 @@ md.renderer.rules.fence = function (tokens: any, idx: number, options: any, env:
     const info = token.info ? md.utils.unescapeAll(token.info).trim() : '';
     const langName = info ? info.split(/\s+/g)[0] : '';
     const code = token.content || '';
+
+    const firstLine = code.trim().split(/\n/)[0].trim();
+    if (langName === 'mermaid' || langName === 'flowchart' || (langName === '' && (firstLine === 'gantt' || firstLine === 'sequenceDiagram' || /^graph (?:TB|BT|RL|LR|TD);?$/.test(firstLine)))) {
+        const dataLine = token.map && token.level === 0 ? ` data-line="${token.map[0]}"` : '';
+        return `<div class="mermaid"${dataLine}>${code}</div>`;
+    }
 
     let highlighted = '';
     if (langName && hljs.getLanguage(langName)) {
@@ -556,6 +600,30 @@ function buildToc(tokens: any[]) {
 }
 
 // ===== Rendering =====
+function renderMermaidFlowcharts() {
+    const mermaidLib = (md as any).mermaid;
+    if (!mermaidLib) return;
+
+    const isDark = document.body.classList.contains('dark-mode') ||
+        document.body.classList.contains('dark-theme') ||
+        document.body.classList.contains('vscode-dark') ||
+        (document.body.classList.contains('vscode-theme') && document.body.classList.contains('vscode-dark'));
+
+    mermaidLib.initialize({
+        startOnLoad: false,
+        theme: isDark ? 'dark' : 'default'
+    });
+
+    const nodes = document.querySelectorAll('.mermaid');
+    if (nodes.length > 0) {
+        mermaidLib.run({
+            nodes: Array.from(nodes) as any
+        }).catch((err: any) => {
+            console.error('Mermaid render error:', err);
+        });
+    }
+}
+
 function renderMarkdown(content: string) {
     const preview = $('markdownPreview');
     if (preview) {
@@ -577,6 +645,7 @@ function renderMarkdown(content: string) {
             updateProgressBar();
             reapplySearch();
             requestLocalImageResolution();
+            renderMermaidFlowcharts();
         });
     }
 }
@@ -631,9 +700,9 @@ function setEditMode(enabled: boolean) {
         } else {
             container?.classList.remove('preview-left');
         }
-        
+
         if (editor) editor.value = currentContent;
-        
+
         // Cache line height after entering edit mode
         requestAnimationFrame(() => {
             updateCachedLineHeight();
@@ -646,7 +715,7 @@ function setEditMode(enabled: boolean) {
             if (preview) preview.scrollTop = 0;
             // Scroll the container so the editor (left side) is visible
             if (container) container.scrollLeft = 0;
-            
+
             setTimeout(() => {
                 if (editor) {
                     editor.scrollTop = 0;
@@ -857,17 +926,17 @@ function onEditorInput() {
 let activeScrollSource: string | null = null; // 'editor' or 'preview' or null
 let scrollTimeout: any = null;
 let cachedDataLineElements: HTMLElement[] = [];
-let cachedPreviewLineMap: Array<{line: number, top: number}> = [];
-let cachedEditorLineMap: Array<{line: number, top: number}> = [];
+let cachedPreviewLineMap: Array<{ line: number, top: number }> = [];
+let cachedEditorLineMap: Array<{ line: number, top: number }> = [];
 let cachedEditorLineHeight = 21;
 let editorLineMeasureHost: HTMLDivElement | null = null;
 
-function normalizeLineMap(entries: Array<{line: number, top: number}>): Array<{line: number, top: number}> {
+function normalizeLineMap(entries: Array<{ line: number, top: number }>): Array<{ line: number, top: number }> {
     const sorted = entries
         .filter(entry => Number.isFinite(entry.line) && Number.isFinite(entry.top))
         .sort((a, b) => a.line - b.line || a.top - b.top);
 
-    const deduped: Array<{line: number, top: number}> = [];
+    const deduped: Array<{ line: number, top: number }> = [];
     for (const entry of sorted) {
         const last = deduped[deduped.length - 1];
         if (!last || last.line !== entry.line) {
@@ -878,7 +947,7 @@ function normalizeLineMap(entries: Array<{line: number, top: number}>): Array<{l
     return deduped;
 }
 
-function findAnchorsForTop(map: Array<{line: number, top: number}>, top: number) {
+function findAnchorsForTop(map: Array<{ line: number, top: number }>, top: number) {
     let before = map[0];
     let after = map[map.length - 1];
 
@@ -895,7 +964,7 @@ function findAnchorsForTop(map: Array<{line: number, top: number}>, top: number)
     return { before, after };
 }
 
-function findAnchorsForLine(map: Array<{line: number, top: number}>, line: number) {
+function findAnchorsForLine(map: Array<{ line: number, top: number }>, line: number) {
     let before = map[0];
     let after = map[map.length - 1];
 
@@ -912,7 +981,7 @@ function findAnchorsForLine(map: Array<{line: number, top: number}>, line: numbe
     return { before, after };
 }
 
-function interpolateLineFromTop(map: Array<{line: number, top: number}>, top: number): number {
+function interpolateLineFromTop(map: Array<{ line: number, top: number }>, top: number): number {
     if (map.length === 0) {
         return 0;
     }
@@ -929,7 +998,7 @@ function interpolateLineFromTop(map: Array<{line: number, top: number}>, top: nu
     return before.line;
 }
 
-function interpolateTopFromLine(map: Array<{line: number, top: number}>, line: number): number {
+function interpolateTopFromLine(map: Array<{ line: number, top: number }>, line: number): number {
     if (map.length === 0) {
         return 0;
     }
@@ -1475,8 +1544,8 @@ function applySettings(settings: any, persist = false) {
     // Line numbers
     document.body.classList.toggle('show-line-numbers', !!currentSettings.showLineNumbers);
 
-        const tocPanel = $('tocPanel');
-        if (container) container.classList.toggle('toc-open', !!currentSettings.showOutline);
+    const tocPanel = $('tocPanel');
+    if (container) container.classList.toggle('toc-open', !!currentSettings.showOutline);
     if (tocPanel) tocPanel.classList.toggle('hidden', !currentSettings.showOutline);
 
     if (toolbarManager) {
@@ -2992,15 +3061,15 @@ function wireResizeHandle(handle: HTMLElement, type: 'toc' | 'split') {
             const handleRect = handle.getBoundingClientRect();
             const container = $('markdownContainer');
             if (!container) return;
-            
+
             // Find the sibling panels by their visual position
             const editorWrapper = container.querySelector('.editor-wrapper') as HTMLElement;
             const preview = $('markdownPreview');
             if (!editorWrapper || !preview) return;
-            
+
             const editorRect = editorWrapper.getBoundingClientRect();
             const previewRect = preview.getBoundingClientRect();
-            
+
             // Determine which is visually left vs right of the handle
             if (editorRect.left < handleRect.left) {
                 startLeftWidth = editorRect.width;
@@ -3215,7 +3284,7 @@ function wireEditor() {
         }
 
         // Auto-close pairs when wrapping selected text
-        const pairs: {[key: string]: string} = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
+        const pairs: { [key: string]: string } = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
         if (pairs[e.key]) {
             const start = editor.selectionStart;
             const end = editor.selectionEnd;
@@ -3351,7 +3420,7 @@ function wirePreviewInteractions() {
         const link = target.closest('a') as HTMLAnchorElement | null;
         if (link && link.href) {
             const href = link.getAttribute('href') || '';
-            
+
             // Handle external links
             if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:')) {
                 e.preventDefault();
@@ -3359,19 +3428,19 @@ function wirePreviewInteractions() {
                 vscode.postMessage({ command: 'openExternal', url: href });
                 return;
             }
-            
+
             // Handle anchor links (same document)
             if (href.startsWith('#')) {
                 // Let the browser handle anchor navigation
                 return;
             }
-            
+
             // Handle relative links to other files
             if (href && !href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('mailto:')) {
                 e.preventDefault();
                 e.stopPropagation();
-                vscode.postMessage({ 
-                    command: 'openRelativeFile', 
+                vscode.postMessage({
+                    command: 'openRelativeFile',
                     href: href,
                     documentUri: documentUri
                 });
@@ -3562,6 +3631,12 @@ updateHeaderHeight();
 // Ensure settings are applied once toolbar is ready
 if (currentSettings) {
     applySettings(currentSettings);
+}
+
+if ((md as any).mermaid) {
+    (md as any).mermaid.initialize({
+        startOnLoad: false
+    });
 }
 
 vscode.postMessage({ command: 'webviewReady' });

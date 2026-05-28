@@ -168,8 +168,25 @@ export async function copySelectionToClipboard(ctx: XlsxCopyContext): Promise<vo
         const sortedRows = Array.from(rowSet).sort((a, b) => a - b);
         const sortedCols = Array.from(colSet).sort((a, b) => a - b);
 
+        // Pre-compile a nested Map of 0-based rowIndex -> 0-based colIndex -> cell value
+        const cacheMap = new Map<number, Map<number, string>>();
+        ctx.rowCache.forEach((rowData, rowIndex) => {
+            const colMap = new Map<number, string>();
+            if (rowData && Array.isArray(rowData.cells)) {
+                rowData.cells.forEach((cell: any) => {
+                    const colIndex = (cell.colNumber || 1) - 1;
+                    colMap.set(colIndex, cell.value || '');
+                });
+            }
+            cacheMap.set(rowIndex, colMap);
+        });
+
         for (const r of sortedRows) {
             const lineParts = sortedCols.map(c => {
+                const rowMap = cacheMap.get(r);
+                if (rowMap && rowMap.has(c)) {
+                    return ctx.normalizeCellText(rowMap.get(c));
+                }
                 const cell = document.querySelector('td[data-row="' + r + '"][data-col="' + c + '"]');
                 return ctx.normalizeCellText(cell ? (cell.textContent || '') : '');
             });

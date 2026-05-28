@@ -245,6 +245,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     // Copy state (CSV-parity: avoid concurrent copies)
     let isCopying = false;
+    let pasteListenerAttached = false;
 
     type XlsxAutoSaveChangeKind = 'text' | 'control' | 'format' | 'structure';
 
@@ -1780,7 +1781,6 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const rowNumber = parseInt(cell.getAttribute('data-rownum') || '0', 10);
         const colNumber = parseInt(cell.getAttribute('data-colnum') || '0', 10);
         if (!rowNumber || !colNumber) return;
-
         const appendAction = (label: string, onClick: () => void, cls = 'header-context-item') => {
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -1791,6 +1791,34 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             });
             menu.appendChild(btn);
         };
+
+        appendAction('Copy', () => {
+            hideHeaderContextMenu();
+            copySelectionToClipboard();
+        });
+        appendAction('Paste', async () => {
+            hideHeaderContextMenu();
+            if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    pasteTextAtSelection(text);
+                } catch (err) {
+                    const text = prompt('Paste content:');
+                    if (text !== null) {
+                        pasteTextAtSelection(text);
+                    }
+                }
+            } else {
+                const text = prompt('Paste content:');
+                if (text !== null) {
+                    pasteTextAtSelection(text);
+                }
+            }
+        });
+
+        const topSeparator = document.createElement('div');
+        topSeparator.className = 'header-context-separator';
+        menu.appendChild(topSeparator);
 
         appendAction('Insert row above', () => applyStructureOperation({ type: 'insertRowAbove', index: rowNumber }));
         appendAction('Insert row below', () => applyStructureOperation({ type: 'insertRowBelow', index: rowNumber }));
@@ -5371,6 +5399,100 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         });
     }
 
+    function pasteTextAtSelection(text: string) {
+        const bounds = getLogicalSelectionBounds();
+        if (!bounds) {
+            showToast('Select a cell to paste');
+            return;
+        }
+
+        const startRow = bounds.minRow;
+        const startCol = bounds.minCol;
+
+        // Parse plain text content using tabs (\t) as column separators and newlines (\n) as row separators.
+        const lines = text.split(/\r?\n/);
+        if (lines.length > 0 && lines[lines.length - 1] === '') {
+            lines.pop();
+        }
+        const grid = lines.map(line => line.split('\t'));
+
+        if (grid.length === 0 || grid[0].length === 0) {
+            return;
+        }
+
+        const beforeSnapshot = captureWorksheetStateSnapshot();
+        let anyChanged = false;
+        const editsList: Array<{ row: number; col: number; value: string }> = [];
+
+        for (let r = 0; r < grid.length; r++) {
+            const rowIndex = startRow + r;
+            if (rowIndex >= totalRows) continue;
+            const rowNumber = rowIndex + 1;
+
+            for (let c = 0; c < grid[r].length; c++) {
+                const colIndex = startCol + c;
+                if (colIndex >= columnCount) continue;
+                const colNumber = colIndex + 1;
+
+                const rawValue = grid[r][c];
+                const cellData = getOrCreateRowCellData(rowIndex, colIndex);
+                const cellType = cellData.cellType || 'text';
+
+                let parsedValue = rawValue;
+                if (cellType === 'checkbox') {
+                    parsedValue = parseBooleanCellValue(rawValue) ? 'TRUE' : 'FALSE';
+                } else if (cellType === 'rating') {
+                    parsedValue = String(normalizeRatingValue(rawValue));
+                } else if (cellType === 'date') {
+                    parsedValue = normalizeDateInputValue(rawValue);
+                } else if (cellType === 'dropdown') {
+                    parsedValue = rawValue.trim();
+                }
+
+                if (cellData.value !== parsedValue) {
+                    cellData.value = parsedValue;
+                    syncLocalSnapshotValue(rowNumber, colNumber, parsedValue);
+                    upsertPendingOutsideControlEdit(rowNumber, colNumber, parsedValue);
+                    editsList.push({ row: rowNumber, col: colNumber, value: parsedValue });
+                    anyChanged = true;
+                }
+            }
+        }
+
+        if (anyChanged) {
+            const afterSnapshot = captureWorksheetStateSnapshot();
+            pushSheetUndoEntry(beforeSnapshot, afterSnapshot);
+
+            // Trigger a complete table redraw
+            rerenderCurrentSheetFromLocalState();
+
+            // Re-select the pasted range
+            const endRow = Math.min(totalRows - 1, startRow + grid.length - 1);
+            const endCol = Math.min(columnCount - 1, startCol + grid[0].length - 1);
+            selectRange(startRow, startCol, endRow, endCol);
+
+            // Save or schedule auto-save according to settings
+            if (isEditMode) {
+                scheduleAutoSave('text');
+            } else {
+                if (currentSettings.autoSave) {
+                    editsList.forEach(e => removePendingOutsideControlEdit(e.row, e.col));
+                    vscode.postMessage({
+                        command: 'saveXlsxEdits',
+                        sheetIndex: currentWorksheet,
+                        edits: editsList,
+                        richEdits: [],
+                        styleEdits: [],
+                        operations: [],
+                        isAutosave: true
+                    });
+                } else {
+                    showManualSaveReminderIfNeeded();
+                }
+            }
+        }
+    }
+
     function invertColor(color: string) {
         const match = String(color || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
         if (!match) return color;
@@ -5386,6 +5508,25 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const tableContainer = document.getElementById('tableContainer');
         const table = tableContainer ? tableContainer.querySelector('table') : null;
         if (!table) return;
+
+        if (!pasteListenerAttached) {
+            pasteListenerAttached = true;
+            document.addEventListener('paste', (e) => {
+                if (isCellEditing) return;
+                const activeEl = document.activeElement;
+                if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+                    if (!activeEl.closest('#xlsxTable')) {
+                        return;
+                    }
+                }
+                const clipboardData = e.clipboardData;
+                if (!clipboardData) return;
+                const text = clipboardData.getData('text/plain');
+                if (text) {
+                    pasteTextAtSelection(text);
+                }
+            });
+        }
 
         table.addEventListener('contextmenu', (e) => {
             const target = e.target as HTMLElement;
