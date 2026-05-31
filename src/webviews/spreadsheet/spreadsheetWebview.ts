@@ -1707,6 +1707,33 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
             const colIndex = targetIndexZeroBased;
             appendSeparator();
+
+            // First row as header checkbox
+            const headerCheckboxLabel = document.createElement('label');
+            headerCheckboxLabel.className = 'header-context-checkbox-item';
+            headerCheckboxLabel.addEventListener('click', (event) => event.stopPropagation());
+            headerCheckboxLabel.addEventListener('mousedown', (event) => event.stopPropagation());
+
+            const headerCheckbox = document.createElement('input');
+            headerCheckbox.type = 'checkbox';
+            headerCheckbox.className = 'header-context-checkbox';
+            headerCheckbox.checked = !!currentSettings.firstRowIsHeader;
+
+            const labelText = document.createTextNode('First row as header');
+
+            headerCheckboxLabel.appendChild(headerCheckbox);
+            headerCheckboxLabel.appendChild(labelText);
+
+            headerCheckbox.addEventListener('change', async () => {
+                applySettings({ ...currentSettings, firstRowIsHeader: headerCheckbox.checked });
+                postSettings();
+                if (sourceRowsSnapshot) {
+                    rebuildFilteredRows();
+                    applyDataOpsRowsToViewport(activeSortState || activeColumnFilters.size > 0 ? transformedRowsSnapshot : null);
+                }
+            });
+
+            menu.appendChild(headerCheckboxLabel);
             
             // Show visual indicators for active sorts
             const isAscSorted = activeSortState?.columnIndex === colIndex && activeSortState?.direction === 'asc';
@@ -4574,7 +4601,15 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             return;
         }
 
-        let nextRows = [...sourceRowsSnapshot];
+        let headerRow: any = null;
+        let rowsToProcess = [...sourceRowsSnapshot];
+
+        if (currentSettings.firstRowIsHeader && sourceRowsSnapshot.length > 0) {
+            headerRow = sourceRowsSnapshot[0];
+            rowsToProcess = sourceRowsSnapshot.slice(1);
+        }
+
+        let nextRows = rowsToProcess;
         if (activeColumnFilters.size > 0) {
             nextRows = nextRows.filter((rowData) => {
                 for (const filter of activeColumnFilters.values()) {
@@ -4607,15 +4642,19 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             });
         }
 
-        transformedRowsSnapshot = nextRows;
-
         if (activeSortState) {
             const { columnIndex, direction } = activeSortState;
-            transformedRowsSnapshot = [...transformedRowsSnapshot].sort((a, b) => {
+            nextRows = [...nextRows].sort((a, b) => {
                 const aText = readCellTextForDataOps(a, columnIndex);
                 const bText = readCellTextForDataOps(b, columnIndex);
                 return compareDataOpValues(aText, bText, direction);
             });
+        }
+
+        if (headerRow) {
+            transformedRowsSnapshot = [headerRow, ...nextRows];
+        } else {
+            transformedRowsSnapshot = nextRows;
         }
     }
 

@@ -2,7 +2,7 @@
     "name": "xlsx-viewer",
     "displayName": "XLSX, CSV, TSV & Markdown Editor",
     "description": "View and edit xlsx files with colors, fonts and styles (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
-    "version": "1.9.5",
+    "version": "1.9.6",
     "publisher": "muhammad-ahmad",
     "engines": {
         "vscode": "^1.60.0"
@@ -128,7 +128,7 @@
             "properties": {
                 "xlsxViewer.csv.firstRowIsHeader": {
                     "type": "boolean",
-                    "default": false,
+                    "default": true,
                     "description": "Treat the first row of CSV files as a header (makes the first row bold)."
                 },
                 "xlsxViewer.csv.stickyHeader": {
@@ -153,7 +153,7 @@
                 },
                 "xlsxViewer.tsv.firstRowIsHeader": {
                     "type": "boolean",
-                    "default": false,
+                    "default": true,
                     "description": "Treat the first row of TSV files as a header (makes the first row bold)."
                 },
                 "xlsxViewer.tsv.stickyHeader": {
@@ -183,7 +183,7 @@
                 },
                 "xlsxViewer.xlsx.firstRowIsHeader": {
                     "type": "boolean",
-                    "default": false,
+                    "default": true,
                     "description": "Treat the first row of XLSX files as a header (makes the first row bold)."
                 },
                 "xlsxViewer.xlsx.stickyHeader": {

@@ -1038,7 +1038,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             const associations: any = globalCfg.get('editorAssociations');
             const autoSaveModeSetting = cfg.get<string>('xlsx.autoSaveMode', 'all');
             return {
-                firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', false),
+                firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', true),
                 stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
                 autoSave: cfg.get('xlsx.autoSave', false),
@@ -1059,7 +1059,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
 
             if (fileType === 'csv' || fileType === 'tsv') {
                 return {
-                    firstRowIsHeader: cfg.get(`${fileType}.firstRowIsHeader`, false),
+                    firstRowIsHeader: cfg.get(`${fileType}.firstRowIsHeader`, true),
                     stickyToolbar: cfg.get(`${fileType}.stickyToolbar`, true),
                     stickyHeader: cfg.get(`${fileType}.stickyHeader`, false),
                     autoSave: cfg.get(`${fileType}.autoSave`, true),
@@ -1074,7 +1074,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             }
 
             return {
-                firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', false),
+                firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', true),
                 stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
                 autoSave: cfg.get('xlsx.autoSave', true),

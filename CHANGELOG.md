@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.6 - Column Header Sort Menu Checkbox
+- Added a "First row as header" checkbox directly in the column context menu above the sort options.
+- Prevented the header row from being sorted or filtered when "First row as header" is checked.
+- Changed default setting of "First row as header" to checked (true) for CSV, TSV, and XLSX files.
+
 ## v1.9.5 - Support Paste, Context Menus, Markdown Flowcharts, and Copy Optimization
 - Added support for pasting spreadsheet grid data (using tab and newline delimiters).
 - Added Copy and Paste actions directly in the cell right-click context menu.

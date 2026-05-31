@@ -15,7 +15,7 @@ export interface XlsxViewSettings {
 }
 
 export const defaultXlsxViewSettings: XlsxViewSettings = {
-    firstRowIsHeader: false,
+    firstRowIsHeader: true,
     stickyToolbar: true,
     stickyHeader: false,
     autoSave: false,

@@ -1220,6 +1220,35 @@ body.edit-mode td[contenteditable="true"] *::-moz-selection {
     background: var(--row-hover-bg);
 }
 
+.header-context-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--text-color);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+.header-context-checkbox-item:hover {
+    background: var(--row-hover-bg);
+}
+
+.header-context-checkbox {
+    cursor: pointer;
+    margin: 0;
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent-color);
+}
+
 .header-context-separator {
     height: 1px;
     margin: 6px 4px;
