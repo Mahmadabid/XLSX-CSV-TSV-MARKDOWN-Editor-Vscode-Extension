@@ -247,6 +247,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         let hasActiveTemporaryStyles = false;
         let shouldOpenDelimitedInStyledMode = false;
         let currentIsPlainView = false;
+        let isSaving = false;
 
         type VersionHistoryEntry = {
             id: string;
@@ -1302,6 +1303,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
 
             if (message?.command === 'restoreVersion') {
                 try {
+                    isSaving = true;
                     const versionId = typeof message.versionId === 'string' ? message.versionId : '';
                     if (!versionId) {
                         return;
@@ -1337,6 +1339,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         command: 'versionHistoryError',
                         message: `Restore failed: ${String(err)}`
                     });
+                } finally {
+                    isSaving = false;
                 }
                 return;
             }
@@ -1562,6 +1566,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
 
             if (message?.command === 'saveXlsxEdits') {
                 try {
+                    isSaving = true;
                     if (previewVersionId) {
                         webview.postMessage({ command: 'saveResult', ok: false, error: 'Preview mode is read-only' });
                         return;
@@ -2055,6 +2060,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave }); } catch { }
                 } catch (err) {
                     try { webview.postMessage({ command: 'saveResult', ok: false, error: String(err), isAutosave: !!message?.isAutosave }); } catch { }
+                } finally {
+                    isSaving = false;
                 }
             }
         });
@@ -2071,6 +2078,25 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             }
         });
         webviewPanel.onDidDispose(() => configChangeDisposable.dispose());
+
+        const watcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(vscode.Uri.file(path.dirname(filePath)), path.basename(filePath))
+        );
+        const watcherDisposable = watcher.onDidChange(async () => {
+            if (isSaving) {
+                return;
+            }
+            try {
+                await loadWorkbookPayload();
+                trySendInit();
+            } catch {
+                // ignore reload errors
+            }
+        });
+        webviewPanel.onDidDispose(() => {
+            watcherDisposable.dispose();
+            watcher.dispose();
+        });
 
         try {
             await loadWorkbookPayload();

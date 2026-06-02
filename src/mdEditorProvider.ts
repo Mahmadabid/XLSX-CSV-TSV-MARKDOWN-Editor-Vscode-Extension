@@ -39,6 +39,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             let previewVersionTimestamp: number | null = null;
             let previewVersionContent: string | null = null;
             let restoredVersionId: string | null = null;
+            let isSaving = false;
 
             const getHistoryFilePath = () => {
                 return getVersionHistoryFile(this.context.globalStorageUri.fsPath, filePath, 'md');
@@ -238,6 +239,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                     case 'saveMarkdown':
                         try {
+                            isSaving = true;
                             const text = typeof message.text === 'string' ? message.text : '';
                             await vscode.workspace.fs.writeFile(document.uri, Buffer.from(text, 'utf8'));
                             currentContent = text;
@@ -245,6 +247,8 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: true });
                         } catch (err) {
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: String(err) });
+                        } finally {
+                            isSaving = false;
                         }
                         break;
 
@@ -329,6 +333,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
                             case 'restoreVersion':
                                 try {
+                                    isSaving = true;
                                     const versionId = typeof message.versionId === 'string' ? message.versionId : previewVersionId || '';
                                     if (!versionId) {
                                         break;
@@ -363,6 +368,8 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                         command: 'versionHistoryError',
                                         message: `Version history failed: ${String(err)}`
                                     });
+                                } finally {
+                                    isSaving = false;
                                 }
                                 break;
 
@@ -534,9 +541,27 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 } catch { }
             });
 
+            const watcher = vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(vscode.Uri.file(path.dirname(filePath)), path.basename(filePath))
+            );
+            const watcherDisposable = watcher.onDidChange(async () => {
+                if (isSaving) {
+                    return;
+                }
+                try {
+                    const content = await fs.promises.readFile(filePath, 'utf-8');
+                    currentContent = content;
+                    webviewPanel.webview.postMessage(buildInitMarkdownPayload(content));
+                } catch {
+                    // ignore reload errors
+                }
+            });
+
             webviewPanel.onDidDispose(() => {
                 configChangeDisposable.dispose();
                 themeChangeDisposable.dispose();
+                watcherDisposable.dispose();
+                watcher.dispose();
                 if (versionSnapshotDebounceTimer) {
                     clearTimeout(versionSnapshotDebounceTimer);
                     versionSnapshotDebounceTimer = null;
