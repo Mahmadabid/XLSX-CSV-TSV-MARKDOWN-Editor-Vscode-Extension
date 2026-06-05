@@ -1734,37 +1734,37 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             });
 
             menu.appendChild(headerCheckboxLabel);
-            
+
             // Show visual indicators for active sorts
             const isAscSorted = activeSortState?.columnIndex === colIndex && activeSortState?.direction === 'asc';
             const isDescSorted = activeSortState?.columnIndex === colIndex && activeSortState?.direction === 'desc';
-            
+
             appendAction('Sort A to Z' + (isAscSorted ? ' ✓' : ''), async () => {
                 const ready = await ensureSourceRowsSnapshot();
                 if (!ready) return;
-                
+
                 if (isAscSorted) {
                     // Already sorted A-Z, toggle off
                     activeSortState = null;
                 } else {
                     activeSortState = { columnIndex: colIndex, direction: 'asc' };
                 }
-                
+
                 rebuildFilteredRows();
                 applyDataOpsRowsToViewport(activeSortState || activeColumnFilters.size > 0 ? transformedRowsSnapshot : null);
             });
-            
+
             appendAction('Sort Z to A' + (isDescSorted ? ' ✓' : ''), async () => {
                 const ready = await ensureSourceRowsSnapshot();
                 if (!ready) return;
-                
+
                 if (isDescSorted) {
                     // Already sorted Z-A, toggle off
                     activeSortState = null;
                 } else {
                     activeSortState = { columnIndex: colIndex, direction: 'desc' };
                 }
-                
+
                 rebuildFilteredRows();
                 applyDataOpsRowsToViewport(activeSortState || activeColumnFilters.size > 0 ? transformedRowsSnapshot : null);
             });
@@ -2180,7 +2180,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         // If it's more than 200k cells, we might need a warning, but let's allow it
         const maxCells = 200000;
         const cellCount = (bounds.maxRow - bounds.minRow + 1) * (bounds.maxCol - bounds.minCol + 1);
-        
+
         if (cellCount > maxCells) {
             showToast(`Selection too large (${cellCount} cells) for individual formatting. Please select a smaller range.`);
             return;
@@ -2192,16 +2192,24 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 const rowNum = r + 1;
                 const colNum = c + 1;
                 const key = rowNum + ':' + colNum;
-                
+
                 let targetStyle = { ...styleChanges };
 
                 if (mode === 'toggle' && toggleKey) {
                     const currentPending = pendingCellStyleEdits.get(key);
                     const domCell = document.querySelector(`td[data-row="${r}"][data-col="${c}"]`) as HTMLElement | null;
                     let currentlyEnabled = false;
-                    
-                    if (currentPending && currentPending[toggleKey] !== undefined) {
-                        currentlyEnabled = !!currentPending[toggleKey];
+
+                    if (currentPending) {
+                        if (toggleKey === 'bold') {
+                            currentlyEnabled = currentPending.fontWeight === 'bold';
+                        } else if (toggleKey === 'italic') {
+                            currentlyEnabled = currentPending.fontStyle === 'italic';
+                        } else if (toggleKey === 'strike') {
+                            currentlyEnabled = !!(currentPending.textDecorationLine?.includes('line-through') || currentPending.textDecoration?.includes('line-through'));
+                        } else if (currentPending[toggleKey] !== undefined) {
+                            currentlyEnabled = !!currentPending[toggleKey];
+                        }
                     } else if (domCell) {
                         // Extract from DOM
                         if (toggleKey === 'bold') currentlyEnabled = domCell.style.fontWeight === 'bold';
@@ -2226,7 +2234,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 });
 
                 recordLogicalStyleEdit(r, c, targetStyle);
-                
+
                 if (domCell) {
                     applyStyleToCellFromPainter(domCell, targetStyle);
                     afterStates.push({
@@ -2307,7 +2315,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             const col = parseInt(activeCell.dataset.col || '0', 10);
             return { minRow: row, maxRow: row, minCol: col, maxCol: col };
         }
-        
+
         return null;
     }
 
@@ -2416,7 +2424,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             };
         }
 
-        const stored: Record<string, any> = { ...style };
+        const stored: Record<string, any> = {
+            row: style.row,
+            col: style.col
+        };
         const css = styleToRendererCss(style);
 
         for (const [key, value] of Object.entries(css)) {
@@ -2426,6 +2437,25 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         return stored;
     }
 
+    function updateRowCacheStyle(row: number, col: number, style: Partial<CellStyleEdit>) {
+        const cellData = getOrCreateRowCellData(row, col);
+        if (cellData) {
+            const normalized = styleToRendererCss(style);
+            cellData.style = { ...cellData.style, ...normalized };
+            if ('backgroundColor' in normalized) {
+                cellData.hasDefaultBg = !normalized.backgroundColor;
+            }
+            if ('color' in normalized) {
+                cellData.isDefaultColor = !normalized.color;
+            }
+            if (style.clearFormatting) {
+                cellData.style = {};
+                cellData.hasDefaultBg = true;
+                cellData.isDefaultColor = true;
+            }
+        }
+    }
+
     function recordLogicalStyleEdit(row: number, col: number, style: Partial<CellStyleEdit>) {
         const rowNum = row + 1;
         const colNum = col + 1;
@@ -2433,6 +2463,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const existing = pendingCellStyleEdits.get(key) || { row: rowNum, col: colNum };
         const merged = normalizeStyleForStorage({ ...existing, ...style, row: rowNum, col: colNum });
         pendingCellStyleEdits.set(key, merged as CellStyleEdit);
+        updateRowCacheStyle(row, col, style);
         scheduleAutoSave('format');
     }
 
@@ -2445,6 +2476,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const existing = pendingCellStyleEdits.get(key) || { row: rowNum, col: colNum };
         const merged = normalizeStyleForStorage({ ...existing, ...style, row: rowNum, col: colNum });
         pendingCellStyleEdits.set(key, merged as CellStyleEdit);
+        updateRowCacheStyle(rowNum - 1, colNum - 1, style);
         scheduleAutoSave('format');
     }
 
@@ -2852,7 +2884,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
                 // Prepare border style
                 const existingBorder = pendingStyle?.border || (domCell ? copyFormattingFromCell(domCell).border : null) || { top: false, right: false, bottom: false, left: false, style: selectedBorderLineStyle, color: selectedBorderColor };
-                
+
                 const border: BorderStyleEdit = {
                     ...existingBorder,
                     clear: false,
@@ -4223,7 +4255,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function showManualSaveReminderIfNeeded() {
-        if (isEditMode || isVersionPreviewMode || currentSettings.autoSave || !currentSettings.showManualSavePopup) {
+        const isAutosaveOff = !currentSettings.autoSave;
+        const shouldShowForPlain = isPlainView && !isVersionPreviewMode && isAutosaveOff;
+        const shouldShowForStyled = !isPlainView && !isEditMode && !isVersionPreviewMode && isAutosaveOff && currentSettings.showManualSavePopup;
+
+        if (!shouldShowForPlain && !shouldShowForStyled) {
             return;
         }
 
@@ -4233,7 +4269,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
 
         manualSaveReminderUntil = now + 2500;
-        showToast('Autosave is off. Press Ctrl/Cmd+S to save.', false, 1300);
+        showToast('Autosave is off. Press Ctrl/Cmd+S to save or enable it in settings', false, 1800);
     }
 
     function upsertPendingOutsideControlEdit(row: number, col: number, value: string) {
@@ -4302,7 +4338,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function persistPlainTextEdit(cell: HTMLElement) {
-        if (isVersionPreviewMode || isEditMode || !isPlainDirectEditMode()) return;
+        if (isVersionPreviewMode || isEditMode) return;
 
         const row = parseInt(cell.getAttribute('data-rownum') || '0', 10);
         const col = parseInt(cell.getAttribute('data-colnum') || '0', 10);
@@ -4384,7 +4420,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function scheduleAutoSave(kind: XlsxAutoSaveChangeKind = 'text') {
-        if (!isEditMode || isVersionPreviewMode || isSaving) return;
+        if (!isEditMode || isVersionPreviewMode || isSaving) {
+            if (isPlainView && !isVersionPreviewMode && !currentSettings.autoSave) {
+                showManualSaveReminderIfNeeded();
+            }
+            return;
+        }
         if (!shouldScheduleAutosaveForChange(kind)) {
             if (!currentSettings.autoSave) {
                 showManualSaveReminderIfNeeded();
@@ -4819,7 +4860,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     async function updateVisibleRows() {
         if (isRendering) return;
-        
+
         const container = getTableContainer();
         if (!container || totalRows === 0) return;
 
@@ -4839,7 +4880,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         // Align to chunk boundaries
         let chunkStart = Math.floor(bufferedStart / CHUNK_SIZE) * CHUNK_SIZE;
         let chunkEnd = Math.ceil(bufferedEnd / CHUNK_SIZE) * CHUNK_SIZE;
-        
+
         // Clamp to totalRows
         chunkEnd = Math.min(totalRows, chunkEnd);
 
@@ -5247,7 +5288,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 if (isEditMode) return;
                 e.preventDefault();
                 autoFitRow(parseInt(target.dataset.row!, 10));
-            } else if (isEditMode || isPlainDirectEditMode()) {
+            } else if (!isVersionPreviewMode) {
                 const td = target.closest('td');
                 if (td) {
                     enterCellEditMode(td as HTMLElement);
@@ -5713,7 +5754,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 }
             }
 
-            if ((isEditMode || isPlainDirectEditMode()) && !isHeaderInteraction) {
+            if (!isVersionPreviewMode && !isHeaderInteraction) {
                 if (cellTarget.tagName === 'TD') {
                     if (isCellEditing && cellTarget.getAttribute('contenteditable') === 'true') {
                         return;
@@ -6161,7 +6202,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             lastMousePos = null;
             stopAutoScroll();
 
-            if (shouldStartEdit && targetToEdit && (isEditMode || isPlainDirectEditMode()) && !isCellEditing) {
+            if (shouldStartEdit && targetToEdit && !isVersionPreviewMode && !isCellEditing) {
                 enterCellEditMode(targetToEdit);
             }
         });
@@ -6278,11 +6319,11 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             }
 
             if (!isCellEditing) {
-                const canDirectTextEdit = isEditMode || isPlainDirectEditMode();
+                const canDirectTextEdit = !isVersionPreviewMode;
                 const key = e.key;
                 if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(key)) {
                     e.preventDefault();
-                    
+
                     if (key === 'Enter') {
                         if (canDirectTextEdit && activeCell) {
                             enterCellEditMode(activeCell);
@@ -6307,7 +6348,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     enterCellEditMode(activeCell);
                     return;
                 }
-                
+
                 if (e.key === 'F2' && canDirectTextEdit && activeCell) {
                     e.preventDefault();
                     enterCellEditMode(activeCell);
@@ -6703,7 +6744,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function enterCellEditMode(cell: HTMLElement, clearContent = false) {
-        if (!isEditMode && !isPlainDirectEditMode()) return;
+        if (isVersionPreviewMode) return;
 
         const cellType = getCellType(cell);
         if (cellType === 'checkbox') {
@@ -6774,7 +6815,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         cell.setAttribute('contenteditable', 'true');
         cell.setAttribute('spellcheck', 'false');
         cell.focus();
-        
+
         if (clearContent) {
             cell.textContent = '';
         } else {
@@ -6815,8 +6856,19 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (changed) {
             pushSingleCellUndo(activeTextEditBeforeState, afterState);
             if (isEditMode) {
+                if (editableCell) {
+                    const rowNum = parseInt(editableCell.getAttribute('data-rownum') || '0', 10);
+                    const colNum = parseInt(editableCell.getAttribute('data-colnum') || '0', 10);
+                    if (rowNum && colNum) {
+                        const cellData = getOrCreateRowCellData(rowNum - 1, colNum - 1);
+                        if (cellData) {
+                            const current = getCellNormalizedValue(editableCell).replace(/\u00a0/g, '');
+                            cellData.value = current;
+                        }
+                    }
+                }
                 scheduleAutoSave('text');
-            } else if (editableCell && isPlainDirectEditMode()) {
+            } else if (editableCell && !isVersionPreviewMode) {
                 persistPlainTextEdit(editableCell);
             }
         }
@@ -6826,23 +6878,23 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     async function moveSelection(rowDelta: number, colDelta: number, shiftKey: boolean) {
         if (!activeCell) return;
-        
+
         let currentR = parseInt(activeCell.getAttribute('data-row') || '0', 10);
         let currentC = parseInt(activeCell.getAttribute('data-col') || '0', 10);
-        
+
         if (shiftKey && selectionEnd) {
             currentR = selectionEnd.row;
             currentC = selectionEnd.col;
         }
-        
+
         let nextR = currentR + rowDelta;
         let nextC = currentC + colDelta;
-        
+
         nextR = Math.max(0, Math.min(totalRows - 1, nextR));
         nextC = Math.max(0, Math.min(columnCount - 1, nextC));
-        
+
         let nextCell = document.querySelector(`td[data-row="${nextR}"][data-col="${nextC}"]`) as HTMLElement;
-        
+
         if (!nextCell) {
             const container = getTableContainer();
             if (container) {
@@ -6856,9 +6908,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (nextCell) {
             if (shiftKey) {
                 if (!selectionStart) {
-                    selectionStart = { 
-                        row: parseInt(activeCell.getAttribute('data-row') || '0', 10), 
-                        col: parseInt(activeCell.getAttribute('data-col') || '0', 10) 
+                    selectionStart = {
+                        row: parseInt(activeCell.getAttribute('data-row') || '0', 10),
+                        col: parseInt(activeCell.getAttribute('data-col') || '0', 10)
                     };
                 }
                 selectionEnd = { row: nextR, col: nextC };
@@ -6868,20 +6920,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 selectionEnd = { row: nextR, col: nextC };
                 selectionManager.selectCell(nextCell);
             }
-            
+
             const container = getTableContainer();
             if (container) {
                 const cellRect = nextCell.getBoundingClientRect();
                 const containerRect = container.getBoundingClientRect();
                 const headerOffset = 30;
                 const rowHeaderOffset = 50;
-                
+
                 if (cellRect.bottom > containerRect.bottom) {
                     container.scrollTop += cellRect.bottom - containerRect.bottom + 10;
                 } else if (cellRect.top < containerRect.top + headerOffset) {
                     container.scrollTop -= (containerRect.top + headerOffset) - cellRect.top + 10;
                 }
-                
+
                 if (cellRect.right > containerRect.right) {
                     container.scrollLeft += cellRect.right - containerRect.right + 10;
                 } else if (cellRect.left < containerRect.left + rowHeaderOffset) {
@@ -6933,6 +6985,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const toggleBackgroundButton = document.getElementById('toggleBackgroundButton');
         const helpButton = document.getElementById('helpButton');
         const convertFileButton = document.getElementById('convertFileButton');
+        const refreshButton = document.getElementById('refreshButton');
 
         const toggleTableEditButton = document.getElementById('toggleTableEditButton');
         const saveTableEditsButton = document.getElementById('saveTableEditsButton');
@@ -6953,6 +7006,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             toolbarManager.setButtonVisibility('formatItalicButton', false);
             toolbarManager.setButtonVisibility('formatTextColorButton', false);
             toolbarManager.setButtonVisibility('formatBackgroundColorButton', false);
+            toolbarManager.setButtonVisibility('refreshButton', !isEditMode);
         } else {
             if (toggleTableEditButton) toggleTableEditButton.classList.toggle('hidden', isEditMode || isPlainDirectEditMode());
             if (saveTableEditsButton) saveTableEditsButton.classList.toggle('hidden', !isEditMode);
@@ -6978,6 +7032,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         if (toggleBackgroundButton) toggleBackgroundButton.classList.toggle('hidden', isEditMode);
         if (helpButton) helpButton.classList.toggle('hidden', isEditMode);
         if (convertFileButton) convertFileButton.classList.toggle('hidden', isEditMode);
+        if (refreshButton) refreshButton.classList.toggle('hidden', isEditMode);
 
         reorderToolbarAroundFind(isEditMode);
 
@@ -7068,14 +7123,16 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         isSaving = true;
         exitAfterSave = canSaveFromEditMode && !isAutosave ? !!shouldExit : false;
         if (canSaveFromEditMode) {
-            setButtonsEnabled(false);
+            if (!isAutosave) {
+                setButtonsEnabled(false);
 
-            if (document.activeElement && document.activeElement.tagName === 'TD') {
-                (document.activeElement as HTMLElement).blur();
-            }
-            // Don't clear the logical cell selection on save; keep selected cells highlighted.
-            if (window.getSelection) {
-                window.getSelection()!.removeAllRanges();
+                if (document.activeElement && document.activeElement.tagName === 'TD') {
+                    (document.activeElement as HTMLElement).blur();
+                }
+                // Don't clear the logical cell selection on save; keep selected cells highlighted.
+                if (window.getSelection) {
+                    window.getSelection()!.removeAllRanges();
+                }
             }
         }
 
@@ -7106,6 +7163,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
                 if (current !== original) {
                     edits.push({ row, col, value: current });
+                    const cellData = getOrCreateRowCellData(row - 1, col - 1);
+                    if (cellData) {
+                        cellData.value = current;
+                        if (cellType === 'checkbox') {
+                            cellData.checkboxChecked = parseBooleanCellValue(current) === true;
+                        }
+                    }
                 }
             });
 
@@ -7113,6 +7177,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             operations = pendingWorksheetOps;
         } else {
             pendingOutsideControlEdits.forEach((edit) => {
+                const cellData = getOrCreateRowCellData(edit.row - 1, edit.col - 1);
+                if (cellData) {
+                    cellData.value = edit.value;
+                }
                 edits.push({ row: edit.row, col: edit.col, value: edit.value });
             });
 
@@ -7122,6 +7190,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         if (canSaveFromEditMode && pendingOutsideControlEdits.length > 0) {
             pendingOutsideControlEdits.forEach((edit) => {
+                const cellData = getOrCreateRowCellData(edit.row - 1, edit.col - 1);
+                if (cellData) {
+                    cellData.value = edit.value;
+                }
                 const existingIndex = edits.findIndex((candidate) => candidate.row === edit.row && candidate.col === edit.col);
                 if (existingIndex >= 0) {
                     edits[existingIndex].value = edit.value;
@@ -7197,7 +7269,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             clearSelection();
             renderWorksheet(currentWorksheet);
         });
-        
+
         toolbar.setButtons(createXlsxToolbarButtons({
             onFind: () => openFindOverlay(),
             textColorIcon,
@@ -7230,8 +7302,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             },
             onFormatBold: () => applyEditFormatting('bold'),
             onFormatItalic: () => applyEditFormatting('italic'),
-            onFormatTextColor: () => {},
-            onFormatBackgroundColor: () => {},
+            onFormatTextColor: () => { },
+            onFormatBackgroundColor: () => { },
             onToggleExpand: () => {
                 const btn = document.getElementById('toggleExpandButton');
                 const state = btn?.getAttribute('data-state') || 'default';
@@ -7267,8 +7339,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 if (isEditMode) return;
                 vscode.postMessage({ command: 'showVersionHistory' });
             },
-            onOpenSettings: () => {},
-            onToggleBackground: () => {},
+            onOpenSettings: () => { },
+            onToggleBackground: () => { },
             onHelp: () => {
                 FeedbackModal.show();
             },
@@ -7278,6 +7350,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             },
             onEnableAsDefault: () => {
                 vscode.postMessage({ command: 'enableAsDefault' });
+            },
+            onRefresh: () => {
+                if (isEditMode) return;
+                vscode.postMessage({ command: 'requestFreshData' });
             }
         }));
 
@@ -7328,7 +7404,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         worksheetsMeta.forEach((ws, i) => {
             const opt = document.createElement('option');
             opt.value = String(i);
-            
+
             // Format name to "Sheet X" if generic
             let name = ws.name || `Sheet ${i + 1}`;
             const genericRegex = /^sheet\s*(\d+)$/i;
@@ -7338,7 +7414,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     name = `Sheet ${match[1]}`;
                 }
             }
-            
+
             opt.textContent = name;
             selector.appendChild(opt);
         });
@@ -7374,6 +7450,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 pendingCellStyleEdits.clear();
                 clearPendingOutsideControlEdits();
                 manualSaveReminderUntil = 0;
+
                 const shouldExitAfterManualSave = !isAutosaveResult || exitAfterSave;
                 if (shouldExitAfterManualSave) {
                     exitAfterSave = false;

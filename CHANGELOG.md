@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.9.8 - Styled Mode Simple Editing
+- Allowed simple direct editing in spreadsheet styled mode without entering full table edit mode, matching the plain mode behavior.
+- Added a refresh button to the toolbar to manually refresh the file from disk.
+
 ## v1.9.7 - Live Reload Support
 - Added live-reload support to automatically refresh the spreadsheet and markdown editors when files are modified externally (e.g., via Notepad or another external tool).
 - Added filesystem watchers to track disk updates for spreadsheet (.xlsx, .csv, .tsv) and markdown (.md) documents.

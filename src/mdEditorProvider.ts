@@ -237,6 +237,18 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         }
                         break;
 
+                    case 'requestFreshData':
+                        try {
+                            const content = await fs.promises.readFile(filePath, 'utf-8');
+                            currentContent = content;
+                            webviewPanel.webview.postMessage(buildInitMarkdownPayload(content));
+                            vscode.window.showInformationMessage('Markdown reloaded from disk.');
+                        } catch (err) {
+                            vscode.window.showErrorMessage(`Error reading Markdown file: ${err}`);
+                        }
+                        break;
+
+
                     case 'saveMarkdown':
                         try {
                             isSaving = true;

@@ -56,17 +56,35 @@ export interface WorksheetOp {
 export interface CellStyleEdit {
     row: number;
     col: number;
+    // Logical/Editor properties
     bgColor?: string;
     textColor?: string;
     bold?: boolean;
     italic?: boolean;
-    fontSize?: number;
+    fontSize?: number | string;
     fontFamily?: string;
     strike?: boolean;
     horizontalAlign?: HorizontalAlign;
-    verticalAlign?: VerticalAlign;
+    verticalAlign?: VerticalAlign | string;
     wrapMode?: WrapMode;
     indent?: number;
+
+    // CSS Properties
+    backgroundColor?: string;
+    color?: string;
+    fontWeight?: string;
+    fontStyle?: string;
+    textDecoration?: string;
+    textDecorationLine?: string;
+    textDecorationThickness?: string;
+    textDecorationSkipInk?: string;
+    textAlign?: string;
+    whiteSpace?: string;
+    wordWrap?: string;
+    overflow?: string;
+    textOverflow?: string;
+    paddingLeft?: string;
+
     border?: BorderStyleEdit;
     clearFormatting?: boolean;
 }

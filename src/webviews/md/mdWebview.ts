@@ -42,7 +42,7 @@ import mermaid from 'mermaid';
 // but uses standard ES imports bundled properly by esbuild for the browser.
 function markdownItMermaid(md: any) {
     md.mermaid = mermaid;
-    
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mermaid as any).loadPreferences = function (preferences: any) {
         let theme = preferences.get('mermaid-theme');
@@ -1779,6 +1779,15 @@ function buildToolbarButtons() {
             hidden: true,
             onClick: () => {
                 vscode.postMessage({ command: 'enableMdEditor' });
+            }
+        },
+        {
+            id: 'refreshButton',
+            icon: Icons.Refresh,
+            tooltip: 'Reload file from disk',
+            cls: 'icon-only edit-mode-hide',
+            onClick: () => {
+                vscode.postMessage({ command: 'requestFreshData' });
             }
         },
         {

@@ -248,6 +248,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         let shouldOpenDelimitedInStyledMode = false;
         let currentIsPlainView = false;
         let isSaving = false;
+        let lastSaveTime = 0;
 
         type VersionHistoryEntry = {
             id: string;
@@ -607,6 +608,124 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             return remapped;
         };
 
+        const remapMergesForOperation = (
+            merges: { startRow: number; startCol: number; endRow: number; endCol: number }[],
+            op: any
+        ): { startRow: number; startCol: number; endRow: number; endCol: number }[] => {
+            const type = typeof op?.type === 'string' ? op.type : '';
+            const index = typeof op?.index === 'number' ? op.index : 0;
+            const row = typeof op?.row === 'number' ? op.row : 0;
+            const col = typeof op?.col === 'number' ? op.col : 0;
+
+            if (!type) {
+                return merges;
+            }
+
+            const remapped: { startRow: number; startCol: number; endRow: number; endCol: number }[] = [];
+
+            for (const merge of merges) {
+                let { startRow, startCol, endRow, endCol } = merge;
+                let keep = true;
+
+                switch (type) {
+                    case 'insertRowAbove':
+                        if (startRow >= index) startRow += 1;
+                        if (endRow >= index) endRow += 1;
+                        break;
+                    case 'insertRowBelow':
+                        if (startRow > index) startRow += 1;
+                        if (endRow > index) endRow += 1;
+                        break;
+                    case 'deleteRow':
+                        if (startRow === index && endRow === index) {
+                            keep = false;
+                        } else {
+                            if (startRow > index) {
+                                startRow -= 1;
+                            }
+                            if (endRow >= index) {
+                                endRow -= 1;
+                            }
+                            if (endRow < startRow) {
+                                keep = false;
+                            }
+                        }
+                        break;
+                    case 'insertColumnLeft':
+                        if (startCol >= index) startCol += 1;
+                        if (endCol >= index) endCol += 1;
+                        break;
+                    case 'insertColumnRight':
+                        if (startCol > index) startCol += 1;
+                        if (endCol > index) endCol += 1;
+                        break;
+                    case 'deleteColumn':
+                        if (startCol === index && endCol === index) {
+                            keep = false;
+                        } else {
+                            if (startCol > index) {
+                                startCol -= 1;
+                            }
+                            if (endCol >= index) {
+                                endCol -= 1;
+                            }
+                            if (endCol < startCol) {
+                                keep = false;
+                            }
+                        }
+                        break;
+                    case 'insertCellShiftRight':
+                        if (row >= startRow && row <= endRow && col <= endCol) {
+                            if (col <= startCol) {
+                                startCol += 1;
+                                endCol += 1;
+                            } else {
+                                keep = false;
+                            }
+                        }
+                        break;
+                    case 'insertCellShiftDown':
+                        if (col >= startCol && col <= endCol && row <= endRow) {
+                            if (row <= startRow) {
+                                startRow += 1;
+                                endRow += 1;
+                            } else {
+                                keep = false;
+                            }
+                        }
+                        break;
+                    case 'deleteCellShiftLeft':
+                        if (row >= startRow && row <= endRow && col <= endCol) {
+                            if (col < startCol) {
+                                startCol -= 1;
+                                endCol -= 1;
+                            } else {
+                                keep = false;
+                            }
+                        }
+                        break;
+                    case 'deleteCellShiftUp':
+                        if (col >= startCol && col <= endCol && row <= endRow) {
+                            if (row < startRow) {
+                                startRow -= 1;
+                                endRow -= 1;
+                            } else {
+                                keep = false;
+                            }
+                        }
+                        break;
+                    default:
+                        break;
+                }
+
+                if (keep && startRow <= endRow && startCol <= endCol) {
+                    remapped.push({ startRow, startCol, endRow, endCol });
+                }
+            }
+
+            return remapped;
+        };
+
         const applyDelimitedOperationsToRows = (rows: string[][], op: any) => {
             const type = typeof op?.type === 'string' ? op.type : '';
             const index = typeof op?.index === 'number' ? op.index : 0;
@@ -732,13 +851,61 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
 
             applyDelimitedEditValues(rows, edits);
 
-            const currentStyles = this.styleStorage.hasStyles(document.uri)
-                ? ((await this.styleStorage.getStyles(document.uri)) ?? {})
-                : {};
-            let nextStyles: Record<string, any> = { ...currentStyles };
+            const metadata = (await this.styleStorage.getMetadata(document.uri)) || { cells: {}, merges: [] };
+            let cells = metadata.cells || {};
+            let merges = metadata.merges || [];
+
+            let nextStyles: Record<string, any> = {};
+            let nextControls: Record<string, any> = {};
+
+            for (const [key, cellMeta] of Object.entries(cells)) {
+                if (cellMeta?.style) {
+                    nextStyles[key] = cellMeta.style;
+                }
+                if (cellMeta?.control) {
+                    nextControls[key] = cellMeta.control;
+                }
+            }
 
             for (const op of operations) {
                 nextStyles = remapStylesForOperation(nextStyles, op);
+                nextControls = remapStylesForOperation(nextControls, op);
+                merges = remapMergesForOperation(merges, op);
+
+                const opType = typeof op?.type === 'string' ? op.type : '';
+                if (opType === 'mergeRange') {
+                    const startRow = typeof op?.startRow === 'number' ? op.startRow : 0;
+                    const startCol = typeof op?.startCol === 'number' ? op.startCol : 0;
+                    const endRow = typeof op?.endRow === 'number' ? op.endRow : 0;
+                    const endCol = typeof op?.endCol === 'number' ? op.endCol : 0;
+                    if (startRow && startCol && endRow && endCol) {
+                        merges = merges.filter(m => !(m.startRow === startRow && m.startCol === startCol && m.endRow === endRow && m.endCol === endCol));
+                        merges.push({ startRow, startCol, endRow, endCol });
+                    }
+                } else if (opType === 'unmergeRange') {
+                    const startRow = typeof op?.startRow === 'number' ? op.startRow : 0;
+                    const startCol = typeof op?.startCol === 'number' ? op.startCol : 0;
+                    const endRow = typeof op?.endRow === 'number' ? op.endRow : 0;
+                    const endCol = typeof op?.endCol === 'number' ? op.endCol : 0;
+                    if (startRow && startCol && endRow && endCol) {
+                        merges = merges.filter(m => !(m.startRow === startRow && m.startCol === startCol && m.endRow === endRow && m.endCol === endCol));
+                    }
+                } else if (opType === 'insertControl') {
+                    const row = typeof op?.row === 'number' ? op.row : 0;
+                    const col = typeof op?.col === 'number' ? op.col : 0;
+                    const controlType = typeof op?.controlType === 'string' ? op.controlType : '';
+                    const defaultValue = typeof op?.defaultValue === 'string' ? op.defaultValue : '';
+                    const dropdownOptions = Array.isArray(op?.dropdownOptions)
+                        ? op.dropdownOptions.map((v: any) => String(v ?? '').trim()).filter((v: string) => !!v)
+                        : [];
+                    if (row && col && controlType) {
+                        nextControls[`${row}:${col}`] = {
+                            controlType,
+                            dropdownOptions: dropdownOptions.length ? dropdownOptions : undefined,
+                            defaultValue
+                        };
+                    }
+                }
             }
 
             for (const richEdit of richEdits) {
@@ -817,25 +984,31 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             await writeTabularFile(document.uri.fsPath, {
                 sheets: [{ name: 'Sheet1', rows }]
             }, sourceType);
+            lastSaveTime = Date.now();
 
-            // Keep the full structured style state for future edits, while also
-            // requiring it to be renderable after a reopen.
-            const persistedStyles: Record<string, any> = {};
-            for (const [key, style] of Object.entries(nextStyles)) {
-                const cssStyle = normalizeStoredStyle(style);
-                if (Object.keys(cssStyle).length > 0) {
-                    persistedStyles[key] = {
-                        ...(style as Record<string, any>),
-                        ...cssStyle
-                    };
+            const finalCells: Record<string, { style?: any; control?: any }> = {};
+            for (const key of new Set([...Object.keys(nextStyles), ...Object.keys(nextControls)])) {
+                const style = nextStyles[key];
+                const cssStyle = style ? normalizeStoredStyle(style) : null;
+                const control = nextControls[key];
+
+                const entry: { style?: any; control?: any } = {};
+                if (cssStyle && Object.keys(cssStyle).length > 0) {
+                    entry.style = cssStyle;
+                }
+                if (control) {
+                    entry.control = control;
+                }
+
+                if (Object.keys(entry).length > 0) {
+                    finalCells[key] = entry;
                 }
             }
 
-            if (Object.keys(persistedStyles).length > 0) {
-                await this.styleStorage.saveStyles(document.uri, persistedStyles);
-            } else {
-                await this.styleStorage.clearStyles(document.uri);
-            }
+            await this.styleStorage.saveMetadata(document.uri, {
+                cells: finalCells,
+                merges
+            });
 
             // Keep provider-side worksheet cache in sync so plain/styled mode toggles
             // re-render with the latest persisted style metadata.
@@ -1160,7 +1333,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             hasActiveTemporaryStyles = false;
             shouldOpenDelimitedInStyledMode = false;
             const workbook = new Excel.Workbook();
-            
+
             if (fileType === 'xlsx') {
                 await workbook.xlsx.readFile(sourcePath);
             } else {
@@ -1176,22 +1349,73 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         }
                     }
                 }
-                
-                // Load styles from workspaceState
-                const storedStyles = this.styleStorage.hasStyles(document.uri)
-                    ? await this.styleStorage.getStyles(document.uri)
-                    : undefined;
-                if (storedStyles) {
-                    hasActiveTemporaryStyles = Object.keys(storedStyles).length > 0;
-                    // Apply styles to the ExcelJS workbook before extraction
-                    // We only store styles in a specific format.
-                    // For now, we will pass them along to the webview directly or apply them here.
-                    // Let's attach them to the workbook object so extractWorksheetData can find them
-                    (workbook as any).__storedStyles = storedStyles;
-                }
 
                 const preferredViewMode = this.styleStorage.getPreferredViewMode(document.uri);
-                shouldOpenDelimitedInStyledMode = preferredViewMode === 'styled' || hasActiveTemporaryStyles;
+                shouldOpenDelimitedInStyledMode = preferredViewMode === 'styled';
+
+                const metadata = await this.styleStorage.getMetadata(document.uri);
+                if (metadata) {
+                    if (metadata.merges && metadata.merges.length > 0) {
+                        for (const merge of metadata.merges) {
+                            try {
+                                ws.mergeCells(merge.startRow, merge.startCol, merge.endRow, merge.endCol);
+                            } catch { }
+                        }
+                    }
+
+                    if (metadata.cells) {
+                        for (const [key, cellMeta] of Object.entries(metadata.cells)) {
+                            if (cellMeta?.control) {
+                                const address = parseStyleKey(key);
+                                if (!address) continue;
+                                const cell = ws.getRow(address.row).getCell(address.col);
+                                const { controlType, dropdownOptions, defaultValue } = cellMeta.control;
+                                if (controlType === 'checkbox') {
+                                    cell.dataValidation = {
+                                        type: 'list',
+                                        allowBlank: true,
+                                        formulae: ['"TRUE,FALSE"']
+                                    } as any;
+                                } else if (controlType === 'dropdown' && dropdownOptions) {
+                                    const inline = dropdownOptions.join(',');
+                                    cell.dataValidation = {
+                                        type: 'list',
+                                        allowBlank: true,
+                                        formulae: [`"${inline}"`]
+                                    } as any;
+                                } else if (controlType === 'rating') {
+                                    cell.dataValidation = {
+                                        type: 'list',
+                                        allowBlank: true,
+                                        formulae: ['"1,2,3,4,5"']
+                                    } as any;
+                                } else if (controlType === 'date') {
+                                    cell.dataValidation = {
+                                        type: 'date',
+                                        operator: 'between',
+                                        allowBlank: true,
+                                        formulae: [new Date(1900, 0, 1), new Date(2199, 11, 31)]
+                                    } as any;
+                                }
+                            }
+                        }
+                    }
+
+                    const storedStyles: Record<string, any> = {};
+                    if (metadata.cells) {
+                        for (const [key, cellMeta] of Object.entries(metadata.cells)) {
+                            if (cellMeta?.style) {
+                                storedStyles[key] = cellMeta.style;
+                            }
+                        }
+                    }
+                    hasActiveTemporaryStyles = Object.keys(storedStyles).length > 0;
+                    (workbook as any).__storedStyles = storedStyles;
+
+                    const hasMergesOrControls = (metadata.merges && metadata.merges.length > 0) ||
+                        (metadata.cells && Object.values(metadata.cells).some(c => !!c?.control));
+                    shouldOpenDelimitedInStyledMode = preferredViewMode === 'styled' || hasActiveTemporaryStyles || !!hasMergesOrControls;
+                }
             }
 
             // Derive the initial plain-view state from file type and preferences.
@@ -1210,6 +1434,22 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                                 // Normalize stored style format to CSS properties for rendering.
                                 const cssStyle = normalizeStoredStyle(styles[key]);
                                 cell.style = { ...cell.style, ...cssStyle };
+
+                                // Update default/theme flags so stylesheet "!important" rules
+                                // do not override the custom inline styling.
+                                if (cssStyle.backgroundColor) {
+                                    cell.hasDefaultBg = false;
+                                    cell.hasWhiteBackground = isShadeOfWhite(cssStyle.backgroundColor);
+                                    cell.hasBlackBackground = isShadeOfBlack(cssStyle.backgroundColor);
+                                    cell.isEmpty = false;
+                                }
+                                if (cssStyle.color) {
+                                    cell.isDefaultColor = false;
+                                    cell.originalColor = cssStyle.color;
+                                }
+                                if (cssStyle.border) {
+                                    cell.hasDefaultBorder = false;
+                                }
                             }
                         }
                     }
@@ -1225,7 +1465,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             rowHeaderWidth = 40;
         };
 
-// Listen for messages
+        // Listen for messages
         webview.onDidReceiveMessage(async message => {
             if (message?.command === 'webviewReady') {
                 isWebviewReady = true;
@@ -1259,9 +1499,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                                 ? 'Original File (Restored)'
                                 : entry.id === oldestVersionId
                                     ? 'Original File'
-                                : entry.id === restoredVersionId
-                                    ? 'Restored'
-                                    : formatVersionHistoryTimestamp(entry.timestamp),
+                                    : entry.id === restoredVersionId
+                                        ? 'Restored'
+                                        : formatVersionHistoryTimestamp(entry.timestamp),
                             description: entry.id === oldestVersionId || entry.id === restoredVersionId
                                 ? formatVersionHistoryTimestamp(entry.timestamp)
                                 : `${entry.fileName} • ${(entry.byteSize / 1024).toFixed(1)} KB`,
@@ -1997,14 +2237,14 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                             } else {
                                 const borderStyle = typeof s.border.style === 'string'
                                     ? s.border.style : 'thin';
-                                    
+
                                 const allowedStyles = [
                                     "thin", "dotted", "dashDot", "hair", "dashDotDot", "slantDashDot", "mediumDashed", "mediumDashDotDot", "mediumDashDot", "medium", "double", "thick"
                                 ];
-                                
+
                                 let finalBorderStyle = 'thin';
                                 const sLower = borderStyle.toLowerCase();
-                                
+
                                 if (sLower.includes('thick') && sLower.includes('dash')) finalBorderStyle = 'mediumDashed'; // no thickDashed in exceljs? mediumDashed is closest
                                 else if (sLower.includes('thick') && sLower.includes('dot')) finalBorderStyle = 'mediumDashDot';
                                 else if (sLower.includes('medium') && sLower.includes('dash')) finalBorderStyle = 'mediumDashed';
@@ -2038,6 +2278,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     }
 
                     await workbook.xlsx.writeFile(document.uri.fsPath);
+                    lastSaveTime = Date.now();
                     await persistVersionSnapshot();
                     previewVersionId = null;
                     previewVersionTimestamp = null;
@@ -2055,7 +2296,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         }
                     } else {
                         // For pure text/style edits, update worksheetsData internally but don't force a full webview re-render
-                        await loadWorkbookPayload(); 
+                        await loadWorkbookPayload();
                     }
                     try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave }); } catch { }
                 } catch (err) {
@@ -2083,7 +2324,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             new vscode.RelativePattern(vscode.Uri.file(path.dirname(filePath)), path.basename(filePath))
         );
         const watcherDisposable = watcher.onDidChange(async () => {
-            if (isSaving) {
+            if (isSaving || Date.now() - lastSaveTime < 1000) {
                 return;
             }
             try {
@@ -2933,7 +3174,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     if (isBlack) {
                         hasBlackBorder = true;
                     }
-                    
+
                     // Check for white borders
                     const isWhite = isShadeOfWhite(originalColor);
                     if (isWhite) {
