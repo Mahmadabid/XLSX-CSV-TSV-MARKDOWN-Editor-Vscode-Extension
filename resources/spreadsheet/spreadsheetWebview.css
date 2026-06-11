@@ -1565,3 +1565,29 @@ body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-
     z-index: 20;
     background-color: var(--header-bg);
 }
+
+/* Enable explicit wrapping in non-edit mode */
+body:not(.edit-mode) #xlsxTable td[style*="white-space: pre-wrap"] {
+    white-space: pre-wrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}
+body:not(.edit-mode) #xlsxTable td[style*="white-space: pre-wrap"] .cell-content {
+    white-space: pre-wrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}
+
+/* Default wrap settings styles */
+body.text-wrap-enabled #xlsxTable td:not([style*="white-space: nowrap"]) {
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}
+body.text-wrap-enabled #xlsxTable td:not([style*="white-space: nowrap"]) .cell-content {
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}

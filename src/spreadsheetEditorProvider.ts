@@ -1174,6 +1174,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             spaciousCells: boolean;
             mergeWarningEnabled: boolean;
             isDefaultEditor: boolean;
+            textWrap: boolean;
         };
         type PersistedSettingsPayload = {
             settings: PersistedSpreadsheetSettings;
@@ -1222,7 +1223,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
                 mergeWarningEnabled: cfg.get('xlsx.mergeWarningEnabled', true),
-                isDefaultEditor: isDefaultEditorAssociationEnabled(associations, 'xlsx')
+                isDefaultEditor: isDefaultEditorAssociationEnabled(associations, 'xlsx'),
+                textWrap: cfg.get('xlsx.textWrap', false)
             };
         };
 
@@ -1243,7 +1245,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     hyperlinkPreview: true,
                     spaciousCells: cfg.get(`${fileType}.spaciousCells`, false),
                     mergeWarningEnabled: true,
-                    isDefaultEditor: isDefaultEditorAssociationEnabled(associations, fileType)
+                    isDefaultEditor: isDefaultEditorAssociationEnabled(associations, fileType),
+                    textWrap: cfg.get(`${fileType}.textWrap`, false)
                 };
             }
 
@@ -1258,7 +1261,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
                 mergeWarningEnabled: cfg.get('xlsx.mergeWarningEnabled', true),
-                isDefaultEditor: isDefaultEditorAssociationEnabled(associations, 'xlsx')
+                isDefaultEditor: isDefaultEditorAssociationEnabled(associations, 'xlsx'),
+                textWrap: cfg.get('xlsx.textWrap', false)
             };
         };
 
@@ -1602,6 +1606,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         await cfg.update(`${prefix}.stickyHeader`, stickyHeader, vscode.ConfigurationTarget.Global);
                         await cfg.update(`${prefix}.autoSave`, s.autoSave !== false, vscode.ConfigurationTarget.Global);
                         await cfg.update(`${prefix}.spaciousCells`, !!s.spaciousCells, vscode.ConfigurationTarget.Global);
+                        await cfg.update(`${prefix}.textWrap`, !!s.textWrap, vscode.ConfigurationTarget.Global);
                     } else {
                         await cfg.update('xlsx.firstRowIsHeader', firstRowIsHeader, vscode.ConfigurationTarget.Global);
                         await cfg.update('xlsx.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
@@ -1613,6 +1618,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         await cfg.update('xlsx.hyperlinkPreview', !!s.hyperlinkPreview, vscode.ConfigurationTarget.Global);
                         await cfg.update('xlsx.spaciousCells', !!s.spaciousCells, vscode.ConfigurationTarget.Global);
                         await cfg.update('xlsx.mergeWarningEnabled', !!s.mergeWarningEnabled, vscode.ConfigurationTarget.Global);
+                        await cfg.update('xlsx.textWrap', !!s.textWrap, vscode.ConfigurationTarget.Global);
                     }
                 } catch (err) {
                     console.error('Failed to persist XLSX settings:', err);

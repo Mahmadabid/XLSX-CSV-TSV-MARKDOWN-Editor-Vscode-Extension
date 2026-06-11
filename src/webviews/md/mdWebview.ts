@@ -31,6 +31,7 @@ import { Utils } from '../shared/utils';
 import { Icons } from '../shared/icons';
 import { vscode, debounce } from '../shared/common';
 import { FeedbackModal } from '../shared/feedbackModal';
+import { ProjectsModal } from '../shared/projectsModal';
 import { InfoTooltip } from '../shared/infoTooltip';
 import TurndownService from 'turndown';
 // @ts-ignore
@@ -1899,6 +1900,15 @@ function buildToolbarButtons() {
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 vscode.postMessage({ command: 'showVersionHistory' });
+            }
+        },
+        {
+            id: 'projectsButton',
+            icon: Icons.Link,
+            tooltip: 'Other Projects',
+            cls: 'icon-only edit-mode-hide',
+            onClick: () => {
+                ProjectsModal.show();
             }
         },
         {

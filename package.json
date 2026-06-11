@@ -2,7 +2,7 @@
     "name": "xlsx-viewer",
     "displayName": "XLSX, CSV, TSV & Markdown Editor",
     "description": "View and edit xlsx files with colors, fonts and styles (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
-    "version": "1.9.8",
+    "version": "1.9.9",
     "publisher": "muhammad-ahmad",
     "engines": {
         "vscode": "^1.60.0"
@@ -151,6 +151,11 @@
                     "default": false,
                     "description": "Increase cell padding and height for a more spacious view."
                 },
+                "xlsxViewer.csv.textWrap": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable text wrapping in CSV cells by default."
+                },
                 "xlsxViewer.tsv.firstRowIsHeader": {
                     "type": "boolean",
                     "default": true,
@@ -175,6 +180,11 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Increase cell padding and height for a more spacious view."
+                },
+                "xlsxViewer.tsv.textWrap": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable text wrapping in TSV cells by default."
                 },
                 "xlsxViewer.xlsx.stickyToolbar": {
                     "type": "boolean",
@@ -224,6 +234,11 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Increase cell padding and height for a more spacious view."
+                },
+                "xlsxViewer.xlsx.textWrap": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable text wrapping in XLSX cells by default."
                 },
                 "xlsxViewer.xlsx.mergeWarningEnabled": {
                     "type": "boolean",

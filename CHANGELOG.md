@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.9 - Text Wrap Settings & Projects Modal
+- Added a default "Text Wrap" setting (defaulting to off) for XLSX, CSV, and TSV files.
+- Added a right-click context menu "Text Wrap" toggle for cells, rows, and columns to wrap specific selections.
+- Optimized text wrap settings application to be smooth and CSS-only, avoiding a visible blank screen/flicker.
+- Added a toolbar button before Help & Feedback that lists other open source projects (`openpart` and `vibed-puppet`) in a beautiful modal, across all 4 editor formats (XLSX, CSV, TSV, Markdown).
+
 ## v1.9.8 - Styled Mode Simple Editing
 - Allowed simple direct editing in spreadsheet styled mode without entering full table edit mode, matching the plain mode behavior.
 - Added a refresh button to the toolbar to manually refresh the file from disk.

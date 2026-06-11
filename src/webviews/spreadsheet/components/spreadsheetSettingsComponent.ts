@@ -12,6 +12,7 @@ export interface XlsxViewSettings {
     spaciousCells: boolean;
     mergeWarningEnabled: boolean;
     isDefaultEditor?: boolean;
+    textWrap: boolean;
 }
 
 export const defaultXlsxViewSettings: XlsxViewSettings = {
@@ -25,7 +26,8 @@ export const defaultXlsxViewSettings: XlsxViewSettings = {
     hyperlinkPreview: true,
     spaciousCells: false,
     mergeWarningEnabled: true,
-    isDefaultEditor: true
+    isDefaultEditor: true,
+    textWrap: false
 };
 
 export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): XlsxViewSettings {
@@ -40,7 +42,8 @@ export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): Xl
         hyperlinkPreview: next && typeof next.hyperlinkPreview === 'boolean' ? next.hyperlinkPreview : previous.hyperlinkPreview,
         spaciousCells: next && typeof next.spaciousCells === 'boolean' ? next.spaciousCells : previous.spaciousCells,
         mergeWarningEnabled: next && typeof next.mergeWarningEnabled === 'boolean' ? next.mergeWarningEnabled : previous.mergeWarningEnabled,
-        isDefaultEditor: next && typeof next.isDefaultEditor === 'boolean' ? next.isDefaultEditor : previous.isDefaultEditor
+        isDefaultEditor: next && typeof next.isDefaultEditor === 'boolean' ? next.isDefaultEditor : previous.isDefaultEditor,
+        textWrap: next && typeof next.textWrap === 'boolean' ? next.textWrap : previous.textWrap
     };
 
     if (!normalized.firstRowIsHeader) {
@@ -61,6 +64,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
     const chkOutsideControls = document.getElementById('chkAllowInteractiveControlsOutsideEditMode') as HTMLInputElement | null;
     const chkHyperlink = document.getElementById('chkHyperlinkPreview') as HTMLInputElement | null;
     const chkSpacious = document.getElementById('chkSpaciousCells') as HTMLInputElement | null;
+    const chkTextWrap = document.getElementById('chkTextWrap') as HTMLInputElement | null;
     const chkMergeWarning = document.getElementById('chkMergeWarningEnabled') as HTMLInputElement | null;
 
     if (chkHeader) chkHeader.checked = !!settings.firstRowIsHeader;
@@ -80,6 +84,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
     if (chkOutsideControls) chkOutsideControls.checked = !!settings.allowInteractiveControlsOutsideEditMode;
     if (chkHyperlink) chkHyperlink.checked = !!settings.hyperlinkPreview;
     if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
+    if (chkTextWrap) chkTextWrap.checked = !!settings.textWrap;
     if (chkMergeWarning) chkMergeWarning.checked = !!settings.mergeWarningEnabled;
 
     const autoSaveEnabled = !!settings.autoSave;
@@ -177,6 +182,15 @@ export function createXlsxSettingsDefinitions(
                 applyAndPersist({ spaciousCells: val });
             },
             defaultValue: getSettings().spaciousCells
+        },
+        {
+            id: 'chkTextWrap',
+            label: 'Text Wrap',
+            tooltip: 'Enable text wrapping in cells by default.',
+            onChange: (val: boolean) => {
+                applyAndPersist({ textWrap: val });
+            },
+            defaultValue: getSettings().textWrap
         },
         {
             id: 'chkMergeWarningEnabled',

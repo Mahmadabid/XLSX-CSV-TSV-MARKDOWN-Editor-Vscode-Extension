@@ -14,6 +14,7 @@ import { createXlsxRowHtml, getExcelColumnLabel, renderDropdownCellContent } fro
 import { XlsxSelectionManager } from './components/spreadsheetSelectionComponent';
 import { createXlsxToolbarButtons } from './components/spreadsheetToolbarComponent';
 import { FeedbackModal } from '../shared/feedbackModal';
+import { ProjectsModal } from '../shared/projectsModal';
 import {
     XlsxViewSettings,
     defaultXlsxViewSettings,
@@ -1524,6 +1525,31 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             menu.appendChild(btn);
         });
 
+        // Add Text wrap menu option for row/column selection
+        const menuSeparator = document.createElement('div');
+        menuSeparator.className = 'header-context-separator';
+        menu.appendChild(menuSeparator);
+
+        const sampleCell = targetType === 'row'
+            ? document.querySelector(`td[data-row="${targetIndexZeroBased}"][data-col="0"]`) as HTMLElement | null
+            : document.querySelector(`td[data-row="0"][data-col="${targetIndexZeroBased}"]`) as HTMLElement | null;
+        const isWrapped = sampleCell ? sampleCell.style.whiteSpace === 'pre-wrap' : false;
+
+        const wrapBtn = document.createElement('button');
+        wrapBtn.type = 'button';
+        wrapBtn.className = 'header-context-item';
+        wrapBtn.textContent = isWrapped ? '✓ Text wrap' : 'Text wrap';
+        wrapBtn.addEventListener('click', () => {
+            hideHeaderContextMenu();
+            const nextMode: WrapMode = isWrapped ? 'overflow' : 'wrap';
+            if (targetType === 'row') {
+                applyWrapModeToRange(targetIndexZeroBased, targetIndexZeroBased, 0, columnCount - 1, nextMode);
+            } else {
+                applyWrapModeToRange(0, totalRows - 1, targetIndexZeroBased, targetIndexZeroBased, nextMode);
+            }
+        });
+        menu.appendChild(wrapBtn);
+
         if (targetType === 'column') {
             const appendSeparator = () => {
                 const separator = document.createElement('div');
@@ -1840,6 +1866,24 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 if (text !== null) {
                     pasteTextAtSelection(text);
                 }
+            }
+        });
+
+        const isWrapped = cell.style.whiteSpace === 'pre-wrap';
+        appendAction(isWrapped ? '✓ Text wrap' : 'Text wrap', () => {
+            hideHeaderContextMenu();
+            const nextMode: WrapMode = isWrapped ? 'overflow' : 'wrap';
+            const targets = getEditTargetCells();
+            const inSelection = targets.some(c => c === cell);
+            if (inSelection) {
+                const bounds = getLogicalSelectionBounds();
+                if (bounds) {
+                    applyWrapModeToRange(bounds.minRow, bounds.maxRow, bounds.minCol, bounds.maxCol, nextMode);
+                }
+            } else {
+                const r = parseInt(cell.getAttribute('data-row') || '0', 10);
+                const c = parseInt(cell.getAttribute('data-col') || '0', 10);
+                applyWrapModeToRange(r, r, c, c, nextMode);
             }
         });
 
@@ -2789,6 +2833,56 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             }
             recordCellStyleEdit(cell, { wrapMode: mode });
         });
+    }
+
+    function applyWrapModeToRange(minRow: number, maxRow: number, minCol: number, maxCol: number, wrapMode: WrapMode) {
+        if (requestStyledMode(() => applyWrapModeToRange(minRow, maxRow, minCol, maxCol, wrapMode))) {
+            return;
+        }
+
+        const beforeStates: CellUndoState[] = [];
+        const afterStates: CellUndoState[] = [];
+
+        for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
+                const rowNum = r + 1;
+                const colNum = c + 1;
+                const key = rowNum + ':' + colNum;
+
+                const pendingStyle = pendingCellStyleEdits.has(key) ? cloneCellStyleEdit(pendingCellStyleEdits.get(key)) : null;
+                const domCell = document.querySelector(`td[data-row="${r}"][data-col="${c}"]`) as HTMLElement | null;
+
+                beforeStates.push({
+                    row: r, col: c, key,
+                    styleAttr: domCell ? (domCell.getAttribute('style') || '') : '',
+                    innerHtml: domCell ? domCell.innerHTML : '',
+                    pendingStyle
+                });
+
+                recordLogicalStyleEdit(r, c, { wrapMode });
+
+                if (domCell) {
+                    applyStyleToCellFromPainter(domCell, { wrapMode });
+                    afterStates.push({
+                        row: r, col: c, key,
+                        styleAttr: domCell.getAttribute('style') || '',
+                        innerHtml: domCell.innerHTML,
+                        pendingStyle: cloneCellStyleEdit(pendingCellStyleEdits.get(key))
+                    });
+                } else {
+                    afterStates.push({
+                        row: r, col: c, key,
+                        styleAttr: '',
+                        innerHtml: '',
+                        pendingStyle: cloneCellStyleEdit(pendingCellStyleEdits.get(key))
+                    });
+                }
+            }
+        }
+
+        if (beforeStates.length && afterStates.length) {
+            pushEditUndoEntry({ before: beforeStates, after: afterStates });
+        }
     }
 
     function applyIndent(delta: number) {
@@ -6680,6 +6774,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     function applySettings(settings: any, scopeOverride?: SettingsScope) {
         const scope = scopeOverride || getCurrentSettingsScope();
         const previousSpacious = !!currentSettings.spaciousCells;
+        const previousTextWrap = !!currentSettings.textWrap;
         const previousSettings = getStoredSettingsForScope(scope);
         currentSettings = normalizeSettingsForScope(scope, settings, previousSettings);
         setStoredSettingsForScope(scope, currentSettings);
@@ -6715,6 +6810,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         document.body.classList.toggle('sticky-header-enabled', !!currentSettings.stickyHeader);
         document.body.classList.toggle('first-row-as-header', !!currentSettings.firstRowIsHeader);
         document.body.classList.toggle('spacious-cells', !!currentSettings.spaciousCells);
+        document.body.classList.toggle('text-wrap-enabled', !!currentSettings.textWrap);
 
         applyToolbarLayout(toolbarManager, {
             stickyToolbar: !!currentSettings.stickyToolbar,
@@ -7343,6 +7439,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             onToggleBackground: () => { },
             onHelp: () => {
                 FeedbackModal.show();
+            },
+            onProjects: () => {
+                ProjectsModal.show();
             },
             onConvertFile: () => {
                 if (isEditMode) return;
