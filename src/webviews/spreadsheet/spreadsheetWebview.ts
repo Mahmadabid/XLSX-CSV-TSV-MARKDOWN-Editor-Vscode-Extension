@@ -4922,10 +4922,21 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             });
         }
 
-        const topSpacerHeight = getRowTopOffset(startIndex);
+        const isHeaderStickyAndActive = !!currentSettings.firstRowIsHeader;
+        let topSpacerHeight = 0;
+        if (isHeaderStickyAndActive && startIndex > 0) {
+            topSpacerHeight = getRowHeightRange(1, startIndex);
+        } else {
+            topSpacerHeight = getRowTopOffset(startIndex);
+        }
         const bottomSpacerHeight = getRowHeightRange(endIndex, totalRows);
 
         let html = '';
+
+        if (isHeaderStickyAndActive && startIndex > 0) {
+            const headerRowData = rowCache.get(0) || { cells: [], rowNumber: 1 };
+            html += createRowHtml(headerRowData, 0);
+        }
 
         if (topSpacerHeight > 0) {
             html += '<tr class="virtual-spacer top-spacer"><td colspan="' + (columnCount + 1) + '" style="height: ' + topSpacerHeight + 'px; padding: 0; border: none;"></td></tr>';
@@ -4986,29 +4997,41 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
 
         // Skip if we're already showing these rows (with some tolerance)
-        if (chunkStart === currentVisibleStart && chunkEnd === currentVisibleEnd) {
+        // BUT only if we don't need to fetch row 0
+        const needsRowZeroFetch = !!currentSettings.firstRowIsHeader && !rowCache.has(0);
+        if (chunkStart === currentVisibleStart && chunkEnd === currentVisibleEnd && !needsRowZeroFetch) {
             return;
         }
 
         // Check if current range still covers what we need
-        if (currentVisibleStart <= bufferedStart && currentVisibleEnd >= bufferedEnd) {
+        if (currentVisibleStart <= bufferedStart && currentVisibleEnd >= bufferedEnd && !needsRowZeroFetch) {
             return; // Current render still covers visible area
         }
 
         const activeRows = getActiveRowsSnapshot();
         const usingLocalRows = Array.isArray(activeRows);
 
-        let needsFetch = false;
+        let needsMainFetch = false;
         for (let i = chunkStart; i < chunkEnd; i++) {
             if (!rowCache.has(i)) {
-                needsFetch = true;
+                needsMainFetch = true;
                 break;
             }
         }
 
+        const needsFetch = needsMainFetch || needsRowZeroFetch;
+
         if (needsFetch && usingLocalRows) {
             currentVisibleStart = chunkStart;
             currentVisibleEnd = chunkEnd;
+
+            // Ensure row 0 is cached if needed
+            if (currentSettings.firstRowIsHeader && !rowCache.has(0)) {
+                const headerRow = activeRows[0];
+                if (headerRow) {
+                    rowCache.set(0, cloneCellData(headerRow));
+                }
+            }
 
             const rows = activeRows.slice(chunkStart, chunkEnd).map((row) => cloneCellData(row));
             if (rows.length > 0) {
@@ -5026,7 +5049,23 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             isRequestingRows = true;
 
             try {
-                const rows = await requestRows(chunkStart, chunkEnd);
+                // Fetch row 0 first if needed
+                if (needsRowZeroFetch) {
+                    const zeroRowResult = await requestRows(0, 1);
+                    if (zeroRowResult && zeroRowResult[0]) {
+                        rowCache.set(0, zeroRowResult[0]);
+                    }
+                }
+
+                let rows: any[] = [];
+                if (needsMainFetch) {
+                    rows = await requestRows(chunkStart, chunkEnd);
+                } else {
+                    // If we only needed row 0, we can construct the chunk rows from cache
+                    for (let i = chunkStart; i < chunkEnd; i++) {
+                        rows.push(rowCache.get(i) || { cells: [], rowNumber: i + 1 });
+                    }
+                }
 
                 if (rows && rows.length > 0) {
                     currentVisibleStart = chunkStart;
@@ -5063,6 +5102,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         container.removeEventListener('scroll', onScroll);
         container.addEventListener('scroll', onScroll, { passive: true });
         activeScrollContainer = container;
+        currentVisibleStart = -1;
+        currentVisibleEnd = -1;
         updateVisibleRows();
     }
 

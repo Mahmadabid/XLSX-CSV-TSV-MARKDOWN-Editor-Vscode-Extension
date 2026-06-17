@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.9.91 - Sticky Header Layout and Border Fixes
+- Fixed sticky header disappearing when scrolling past the first few rows (virtual scrolling logic now keeps row 0 rendered).
+- Fixed the row header "1" cell not staying sticky when the header is sticky.
+
 ## v1.9.9 - Text Wrap Settings & Projects Modal
 - Added a default "Text Wrap" setting (defaulting to off) for XLSX, CSV, and TSV files.
 - Added a right-click context menu "Text Wrap" toggle for cells, rows, and columns to wrap specific selections.

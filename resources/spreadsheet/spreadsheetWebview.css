@@ -457,6 +457,7 @@ body.edit-mode #xlsxTable td[contenteditable="true"] .cell-content {
 #tableContainer {
     height: 100%;
     min-height: 0;
+    overflow-anchor: none;
 }
 
 .table-scroll {
@@ -465,11 +466,12 @@ body.edit-mode #xlsxTable td[contenteditable="true"] .cell-content {
     overflow: auto;
     position: relative;
     -webkit-overflow-scrolling: touch;
+    overflow-anchor: none;
 }
 
 /* Table */
 table {
-    border-collapse: collapse;
+    border-collapse: separate;
     width: max-content;
     min-width: 0;
     table-layout: fixed;
@@ -480,6 +482,7 @@ table {
     border-radius: 0;
     overflow: visible;
     background-color: var(--bg-color);
+    overflow-anchor: none;
 }
 
 body.spacious-cells #xlsxTable td {
@@ -1337,30 +1340,30 @@ body.first-row-as-header tbody tr.header-row td .cell-content * {
 body.sticky-header-enabled tbody tr.header-row td,
 body.sticky-header-enabled tbody tr.header-row th {
     position: sticky !important;
-    top: 21px;
+    top: 24px;
     z-index: 10;
 }
 
 body.spacious-cells.sticky-header-enabled tbody tr.header-row td,
 body.spacious-cells.sticky-header-enabled tbody tr.header-row th {
     position: sticky !important;
-    top: 21px;
+    top: 28px;
     z-index: 10;
 }
 
 body.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky !important;
-    top: 21px;
+    top: 24px;
     left: 0 !important;
-    z-index: 20;
+    z-index: 30;
     background-color: var(--header-bg);
 }
 
 body.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky !important;
-    top: 21px;
+    top: 28px;
     left: 0 !important;
-    z-index: 20;
+    z-index: 30;
     background-color: var(--header-bg);
 }
 
@@ -1478,7 +1481,7 @@ body.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
    Removes all XLSX styling to display like CSV/TSV
    ========================= */
 body.plain-view table {
-    border-collapse: collapse;
+    border-collapse: separate;
     width: max-content;
     min-width: 0;
     table-layout: fixed;
@@ -1489,6 +1492,7 @@ body.plain-view table {
     border-radius: 0;
     overflow: visible;
     background-color: var(--bg-color);
+    overflow-anchor: none;
 }
 
 body.plain-view.spacious-cells #xlsxTable th,
@@ -1537,7 +1541,7 @@ body.plain-view.first-row-as-header tbody tr.header-row td {
 body.plain-view.sticky-header-enabled tbody tr.header-row td,
 body.plain-view.sticky-header-enabled tbody tr.header-row th {
     position: sticky;
-    top: 21px;
+    top: 24px;
     z-index: 10;
     background-color: var(--header-bg);
 }
@@ -1545,24 +1549,24 @@ body.plain-view.sticky-header-enabled tbody tr.header-row th {
 body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row td,
 body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row th {
     position: sticky;
-    top: 21px;
+    top: 28px;
     z-index: 10;
     background-color: var(--header-bg);
 }
 
 body.plain-view.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky;
-    top: 21px;
+    top: 24px;
     left: 0 !important;
-    z-index: 20;
+    z-index: 30;
     background-color: var(--header-bg);
 }
 
 body.plain-view.spacious-cells.sticky-header-enabled tbody tr.header-row th.row-header {
     position: sticky;
-    top: 21px;
+    top: 28px;
     left: 0 !important;
-    z-index: 20;
+    z-index: 30;
     background-color: var(--header-bg);
 }
 
