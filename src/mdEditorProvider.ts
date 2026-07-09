@@ -400,24 +400,32 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         try {
                             const href = typeof message.href === 'string' ? message.href : '';
                             const docUri = typeof message.documentUri === 'string' ? message.documentUri : '';
-                            
+
                             if (!href || !docUri) {
                                 break;
                             }
-                            
-                            // Parse the document URI to get the file path
+
                             const currentDocUri = vscode.Uri.parse(docUri);
                             const currentDir = path.dirname(currentDocUri.fsPath);
-                            
-                            // Remove any anchor/hash from the href
-                            const hrefWithoutAnchor = href.split('#')[0];
-                            
-                            // Resolve the relative path
+
+                            const hashIndex = href.indexOf('#');
+                            const hrefWithoutAnchor = hashIndex !== -1 ? href.slice(0, hashIndex) : href;
+                            const anchor = hashIndex !== -1 ? href.slice(hashIndex + 1) : '';
+
                             const resolvedPath = path.resolve(currentDir, hrefWithoutAnchor);
                             const targetUri = vscode.Uri.file(resolvedPath);
-                            
-                            // Open the file
-                            await vscode.commands.executeCommand('vscode.open', targetUri);
+
+                            // Parse #L1669 style line anchors
+                            const lineMatch = anchor.match(/^L(\d+)/);
+                            if (lineMatch) {
+                                const lineNum = parseInt(lineMatch[1], 10) - 1;
+                                const doc = await vscode.workspace.openTextDocument(targetUri);
+                                await vscode.window.showTextDocument(doc, {
+                                    selection: new vscode.Range(lineNum, 0, lineNum, 0)
+                                });
+                            } else {
+                                await vscode.commands.executeCommand('vscode.open', targetUri);
+                            }
                         } catch (err) {
                             vscode.window.showErrorMessage(`Failed to open file: ${err}`);
                         }
