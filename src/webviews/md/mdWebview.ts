@@ -39,6 +39,7 @@ import { gfm } from 'turndown-plugin-gfm';
 // @ts-ignore
 import mermaid from 'mermaid';
 
+
 // Inline custom plugin that mimics the markdown-it-mermaid API and behavior,
 // but uses standard ES imports bundled properly by esbuild for the browser.
 function markdownItMermaid(md: any) {
@@ -1890,6 +1891,57 @@ function buildToolbarButtons() {
                     navigator.clipboard.writeText(preview.innerHTML)
                         .then(() => showToast('HTML copied'))
                         .catch(() => showToast('Copy failed'));
+                }
+            }
+        },
+        {
+            id: 'exportPdfButton',
+            icon: Icons.ExportPdf,
+            tooltip: 'Export to PDF',
+            cls: 'icon-only edit-mode-hide',
+            onClick: () => {
+                const preview = $('markdownPreview');
+                if (preview) {
+                    // Inject print styles so the backend puppeteer can print cleanly
+                    const printStyle = document.createElement('style');
+                    printStyle.id = 'markdown-print-style-override';
+                    printStyle.innerHTML = `
+                        @media print {
+                            body * {
+                                visibility: hidden;
+                            }
+                            #markdownContainer, #markdownPreview, #markdownPreview * {
+                                visibility: visible;
+                            }
+                            #markdownPreview {
+                                position: absolute;
+                                left: 0;
+                                top: 0;
+                                width: 100%;
+                            }
+                            .code-copy {
+                                display: none !important;
+                            }
+                            .markdown-preview {
+                                background: #ffffff !important;
+                                color: #000000 !important;
+                            }
+                        }
+                    `;
+                    document.head.appendChild(printStyle);
+                    
+                    // Send entire HTML to backend
+                    vscode.postMessage({
+                        command: 'exportPdfHtml',
+                        html: document.documentElement.outerHTML
+                    });
+                    
+                    // Remove the style immediately so it doesn't affect the user
+                    document.head.removeChild(printStyle);
+                    
+                    showToast('Exporting PDF... Please wait.');
+                } else {
+                    showToast('Preview not available.');
                 }
             }
         },

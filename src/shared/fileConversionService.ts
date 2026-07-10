@@ -1,6 +1,27 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as Excel from 'exceljs';
+import * as vscode from 'vscode';
+
+let csvSeparatorOverride: string | undefined = undefined;
+
+export function setCsvSeparatorOverride(separator: string | undefined): void {
+    csvSeparatorOverride = separator;
+}
+
+function getCsvDelimiter(): string {
+    if (csvSeparatorOverride) {
+        return csvSeparatorOverride;
+    }
+    try {
+        const config = vscode.workspace.getConfiguration('xlsxViewer');
+        return config.get<string>('csv.separator', ',');
+    } catch {
+        // Fallback for environments where vscode configuration isn't available
+    }
+    return ',';
+}
+
 
 export type TabularFileType = string;
 
@@ -206,13 +227,17 @@ function sanitizeWorksheetName(name: string, index: number, usedNames: Set<strin
     return candidate;
 }
 
-function createDelimitedConverter(type: string, label: string, delimiter: string): TabularFileConverter {
+function createDelimitedConverter(type: string, label: string, defaultDelimiter: string): TabularFileConverter {
     return {
         type,
         label,
         extension: type,
         async read(filePath: string): Promise<TabularWorkbookData> {
             const content = await fs.promises.readFile(filePath, 'utf8');
+            let delimiter = defaultDelimiter;
+            if (type === 'csv') {
+                delimiter = getCsvDelimiter();
+            }
             return {
                 sheets: [{
                     name: 'Sheet1',
@@ -223,6 +248,10 @@ function createDelimitedConverter(type: string, label: string, delimiter: string
         async write(filePath: string, workbook: TabularWorkbookData): Promise<void> {
             const normalized = normalizeWorkbook(workbook);
             const rows = normalized.sheets[0]?.rows ?? [];
+            let delimiter = defaultDelimiter;
+            if (type === 'csv') {
+                delimiter = getCsvDelimiter();
+            }
             const content = serializeDelimitedRows(rows, delimiter);
             await fs.promises.writeFile(filePath, content, 'utf8');
         }

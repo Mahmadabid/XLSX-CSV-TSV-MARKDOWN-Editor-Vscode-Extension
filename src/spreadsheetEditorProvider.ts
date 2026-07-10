@@ -6,7 +6,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { VERSION_HISTORY_RETENTION_MS, buildGroupedVersionHistoryItems as buildSharedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryDir } from './shared/versionHistory';
 import { convertARGBToRGBA, isShadeOfBlack, isShadeOfWhite } from './spreadsheet/spreadsheetUtilities';
-import { convertTabularFile, readTabularFile, detectTabularFileType, writeTabularFile, TabularFileType } from './shared/fileConversionService';
+import { convertTabularFile, readTabularFile, detectTabularFileType, writeTabularFile, TabularFileType, setCsvSeparatorOverride } from './shared/fileConversionService';
 import { StyleStorageService } from './shared/styleStorageService';
 
 function borderEditToCssValue(enabled: boolean, style?: string, color?: string): string {
@@ -225,6 +225,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         webviewPanel: vscode.WebviewPanel,
         token: vscode.CancellationToken
     ): Promise<void> {
+        setCsvSeparatorOverride(undefined);
         const webview = webviewPanel.webview;
 
         webview.options = {
@@ -1175,6 +1176,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             mergeWarningEnabled: boolean;
             isDefaultEditor: boolean;
             textWrap: boolean;
+            csvSeparator?: string;
         };
         type PersistedSettingsPayload = {
             settings: PersistedSpreadsheetSettings;
@@ -1246,7 +1248,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     spaciousCells: cfg.get(`${fileType}.spaciousCells`, false),
                     mergeWarningEnabled: true,
                     isDefaultEditor: isDefaultEditorAssociationEnabled(associations, fileType),
-                    textWrap: cfg.get(`${fileType}.textWrap`, false)
+                    textWrap: cfg.get(`${fileType}.textWrap`, false),
+                    csvSeparator: fileType === 'csv' ? cfg.get<string>('csv.separator', ',') as any : undefined
                 };
             }
 
@@ -1607,6 +1610,14 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         await cfg.update(`${prefix}.autoSave`, s.autoSave !== false, vscode.ConfigurationTarget.Global);
                         await cfg.update(`${prefix}.spaciousCells`, !!s.spaciousCells, vscode.ConfigurationTarget.Global);
                         await cfg.update(`${prefix}.textWrap`, !!s.textWrap, vscode.ConfigurationTarget.Global);
+                        if (currentFileType === 'csv' && (s.csvSeparator === ',' || s.csvSeparator === ';')) {
+                            setCsvSeparatorOverride(s.csvSeparator);
+                            await cfg.update('csv.separator', s.csvSeparator, vscode.ConfigurationTarget.Global);
+                            // Reload immediately so delimiter change takes effect without reopening
+                            await loadWorkbookPayload();
+                            trySendSettings();
+                            trySendInit();
+                        }
                     } else {
                         await cfg.update('xlsx.firstRowIsHeader', firstRowIsHeader, vscode.ConfigurationTarget.Global);
                         await cfg.update('xlsx.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
@@ -2087,12 +2098,24 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         const raw = String(value || '').trim();
                         if (!raw) return null;
 
+                        const ymdMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+                        if (ymdMatch) {
+                            return new Date(Date.UTC(parseInt(ymdMatch[1], 10), parseInt(ymdMatch[2], 10) - 1, parseInt(ymdMatch[3], 10)));
+                        }
+                        const mdyMatch = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+                        if (mdyMatch) {
+                            let year = parseInt(mdyMatch[3], 10);
+                            if (year < 100) {
+                                year += year < 50 ? 2000 : 1900;
+                            }
+                            return new Date(Date.UTC(year, parseInt(mdyMatch[1], 10) - 1, parseInt(mdyMatch[2], 10)));
+                        }
+
                         const parsed = new Date(raw);
                         if (Number.isNaN(parsed.getTime())) {
                             return null;
                         }
-
-                        return parsed;
+                        return new Date(Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
                     };
 
                     for (const edit of edits) {
@@ -2804,26 +2827,35 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         } else if (typeof value === 'string') {
             const raw = value.trim();
             if (!raw) return '';
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) && !/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(raw)) {
-                return '';
-            }
-            const parsed = new Date(raw);
-            if (!Number.isNaN(parsed.getTime())) {
-                asDate = parsed;
+            
+            // Try robustly parsing standard ISO (YYYY-MM-DD) or common US (MM/DD/YYYY) formats in UTC
+            const ymdMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+            if (ymdMatch) {
+                asDate = new Date(Date.UTC(parseInt(ymdMatch[1], 10), parseInt(ymdMatch[2], 10) - 1, parseInt(ymdMatch[3], 10)));
+            } else {
+                const mdyMatch = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+                if (mdyMatch) {
+                    let year = parseInt(mdyMatch[3], 10);
+                    if (year < 100) {
+                        year += year < 50 ? 2000 : 1900;
+                    }
+                    asDate = new Date(Date.UTC(year, parseInt(mdyMatch[1], 10) - 1, parseInt(mdyMatch[2], 10)));
+                } else {
+                    const parsed = new Date(raw);
+                    if (!Number.isNaN(parsed.getTime())) {
+                        asDate = parsed;
+                    }
+                }
             }
         }
 
-        if (!asDate) {
+        if (!asDate || Number.isNaN(asDate.getTime())) {
             return '';
         }
 
-        if (Number.isNaN(asDate.getTime())) {
-            return '';
-        }
-
-        const yyyy = asDate.getFullYear();
-        const mm = String(asDate.getMonth() + 1).padStart(2, '0');
-        const dd = String(asDate.getDate()).padStart(2, '0');
+        const yyyy = asDate.getUTCFullYear();
+        const mm = String(asDate.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(asDate.getUTCDate()).padStart(2, '0');
         return `${yyyy}-${mm}-${dd}`;
     }
 
@@ -3039,10 +3071,10 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             }).join('');
         } else if (cell.type === Excel.ValueType.Date) {
             const dateValue = cell.value as Date;
-            return dateValue.toLocaleDateString();
+            return dateValue.toLocaleDateString(undefined, { timeZone: 'UTC' });
         } else if (cell.value instanceof Date) {
             // Additional check for Date objects
-            return cell.value.toLocaleDateString();
+            return cell.value.toLocaleDateString(undefined, { timeZone: 'UTC' });
         } else if (typeof cell.value === 'boolean') {
             return cell.value ? 'TRUE' : 'FALSE';
         } else {

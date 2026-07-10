@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.92 - PDF Export, CSV Separators & Date Offsets
+- Implemented high-fidelity PDF Export functionality for Markdown previews using headless Puppeteer-Core, resolving UI freezing and style/font rendering issues.
+- Added CSV delimiter options allowing users to configure and toggle between comma (,) and semicolon (;) separators.
+- Resolved timezone offset issues where Excel dates displayed one day behind for certain timezones.
+
 ## v1.9.91 - Sticky Header Layout and Border Fixes
 - Fixed sticky header disappearing when scrolling past the first few rows (virtual scrolling logic now keeps row 0 rendered).
 - Fixed the row header "1" cell not staying sticky when the header is sticky.

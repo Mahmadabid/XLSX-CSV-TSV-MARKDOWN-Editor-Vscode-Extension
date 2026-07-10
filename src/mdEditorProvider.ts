@@ -396,6 +396,96 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         }
                         break;
 
+                    case 'exportPdfHtml':
+                        try {
+                            const html = typeof message.html === 'string' ? message.html : '';
+                            if (!html) break;
+                            
+                            const defaultUri = vscode.Uri.file(filePath.replace(/\.md$/i, '.pdf'));
+                            const saveUri = await vscode.window.showSaveDialog({
+                                defaultUri,
+                                filters: { 'PDF Files': ['pdf'] },
+                                title: 'Export Markdown Preview to PDF'
+                            });
+                            
+                            if (!saveUri) break;
+
+                            vscode.window.withProgress({
+                                location: vscode.ProgressLocation.Notification,
+                                title: "Exporting PDF...",
+                                cancellable: false
+                            }, async (progress) => {
+                                try {
+                                    const puppeteer = require('puppeteer-core');
+                                    const os = require('os');
+                                    const fs = require('fs');
+                                    
+                                    const platform = os.platform();
+                                    let paths: string[] = [];
+                                    if (platform === 'win32') {
+                                        paths = [
+                                            process.env['PROGRAMFILES'] + '\\Google\\Chrome\\Application\\chrome.exe',
+                                            process.env['PROGRAMFILES(X86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
+                                            process.env['LOCALAPPDATA'] + '\\Google\\Chrome\\Application\\chrome.exe',
+                                            process.env['PROGRAMFILES'] + '\\Microsoft\\Edge\\Application\\msedge.exe',
+                                            process.env['PROGRAMFILES(X86)'] + '\\Microsoft\\Edge\\Application\\msedge.exe'
+                                        ];
+                                    } else if (platform === 'darwin') {
+                                        paths = [
+                                            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                                            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+                                        ];
+                                    } else {
+                                        paths = [
+                                            '/usr/bin/google-chrome',
+                                            '/usr/bin/google-chrome-stable',
+                                            '/usr/bin/chromium-browser',
+                                            '/usr/bin/chromium'
+                                        ];
+                                    }
+                                    
+                                    const executablePath = paths.find(p => fs.existsSync(p));
+                                    if (!executablePath) {
+                                        throw new Error('Could not find Google Chrome or Microsoft Edge installation on your system.');
+                                    }
+
+                                    const browser = await puppeteer.launch({
+                                        executablePath,
+                                        headless: true,
+                                        args: ['--headless=new', '--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox', '--window-position=-2400,-2400']
+                                    });
+                                    const page = await browser.newPage();
+                                    
+                                    // Inject base styles to ensure correct font size and full width
+                                    const processedHtml = html + `<style>
+                                        :root, html, body { font-size: 16px !important; margin: 0 !important; padding: 0 !important; background: white !important; }
+                                        #markdownPreview { width: 100% !important; max-width: 100% !important; padding: 20px !important; }
+                                    </style>`;
+                                    
+                                    await page.setContent(processedHtml, { waitUntil: 'networkidle0' });
+                                    
+                                    // Make sure background graphics are printed and we use the @media print CSS
+                                    const pdfBuffer = await page.pdf({
+                                        format: 'A4',
+                                        scale: 1.1,
+                                        printBackground: true,
+                                        margin: { top: '1.5cm', right: '1.5cm', bottom: '1.5cm', left: '1.5cm' }
+                                    });
+                                    
+                                    await browser.close();
+                                    
+                                    await vscode.workspace.fs.writeFile(saveUri, pdfBuffer);
+                                    vscode.window.showInformationMessage('Markdown successfully exported to PDF!');
+                                } catch (err) {
+                                    vscode.window.showErrorMessage(`Failed to export PDF: ${err}`);
+                                }
+                            });
+                        } catch (err) {
+                            vscode.window.showErrorMessage(`Failed to export PDF: ${err}`);
+                        }
+                        break;
+
+
                     case 'openRelativeFile':
                         try {
                             const href = typeof message.href === 'string' ? message.href : '';
@@ -409,15 +499,35 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             const currentDocUri = vscode.Uri.parse(docUri);
                             const currentDir = path.dirname(currentDocUri.fsPath);
                             
-                            // Remove any anchor/hash from the href
-                            const hrefWithoutAnchor = href.split('#')[0];
+                            // Extract line anchor if any
+                            let lineNum: number | undefined;
+                            const hashIndex = href.indexOf('#');
+                            const anchor = hashIndex !== -1 ? href.substring(hashIndex + 1) : '';
+                            const hrefWithoutAnchor = hashIndex !== -1 ? href.substring(0, hashIndex) : href;
+                            
+                            const lineMatch = anchor.match(/^[Ll](\d+)$/);
+                            if (lineMatch) {
+                                lineNum = parseInt(lineMatch[1], 10);
+                            }
                             
                             // Resolve the relative path
                             const resolvedPath = path.resolve(currentDir, hrefWithoutAnchor);
                             const targetUri = vscode.Uri.file(resolvedPath);
                             
-                            // Open the file
-                            await vscode.commands.executeCommand('vscode.open', targetUri);
+                            if (lineNum !== undefined && lineNum > 0) {
+                                try {
+                                    const doc = await vscode.workspace.openTextDocument(targetUri);
+                                    const pos = new vscode.Position(lineNum - 1, 0);
+                                    const selection = new vscode.Range(pos, pos);
+                                    await vscode.window.showTextDocument(doc, { selection });
+                                } catch {
+                                    // Fallback to standard open if we cannot open as a text document
+                                    await vscode.commands.executeCommand('vscode.open', targetUri);
+                                }
+                            } else {
+                                // Open the file
+                                await vscode.commands.executeCommand('vscode.open', targetUri);
+                            }
                         } catch (err) {
                             vscode.window.showErrorMessage(`Failed to open file: ${err}`);
                         }
@@ -601,7 +711,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
         <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} https: 'unsafe-inline'; font-src ${cspSource} https:; script-src ${cspSource} 'unsafe-inline';">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} https: 'unsafe-inline'; font-src ${cspSource} https:; script-src ${cspSource} 'unsafe-inline' 'unsafe-eval';">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Markdown Viewer</title>
             <link href="${themeUri}" rel="stylesheet" />

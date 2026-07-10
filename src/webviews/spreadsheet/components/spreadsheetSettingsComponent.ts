@@ -13,6 +13,7 @@ export interface XlsxViewSettings {
     mergeWarningEnabled: boolean;
     isDefaultEditor?: boolean;
     textWrap: boolean;
+    csvSeparator?: ',' | ';';
 }
 
 export const defaultXlsxViewSettings: XlsxViewSettings = {
@@ -27,7 +28,8 @@ export const defaultXlsxViewSettings: XlsxViewSettings = {
     spaciousCells: false,
     mergeWarningEnabled: true,
     isDefaultEditor: true,
-    textWrap: false
+    textWrap: false,
+    csvSeparator: ','
 };
 
 export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): XlsxViewSettings {
@@ -43,7 +45,8 @@ export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): Xl
         spaciousCells: next && typeof next.spaciousCells === 'boolean' ? next.spaciousCells : previous.spaciousCells,
         mergeWarningEnabled: next && typeof next.mergeWarningEnabled === 'boolean' ? next.mergeWarningEnabled : previous.mergeWarningEnabled,
         isDefaultEditor: next && typeof next.isDefaultEditor === 'boolean' ? next.isDefaultEditor : previous.isDefaultEditor,
-        textWrap: next && typeof next.textWrap === 'boolean' ? next.textWrap : previous.textWrap
+        textWrap: next && typeof next.textWrap === 'boolean' ? next.textWrap : previous.textWrap,
+        csvSeparator: next && (next.csvSeparator === ',' || next.csvSeparator === ';') ? next.csvSeparator : (previous.csvSeparator || ',')
     };
 
     if (!normalized.firstRowIsHeader) {
@@ -53,7 +56,7 @@ export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): Xl
     return normalized;
 }
 
-export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
+export function syncSettingsCheckboxes(settings: XlsxViewSettings, fileType?: string): void {
     const chkHeader = document.getElementById('chkHeaderRow') as HTMLInputElement | null;
     const chkSticky = document.getElementById('chkStickyHeader') as HTMLInputElement | null;
     const chkToolbar = document.getElementById('chkStickyToolbar') as HTMLInputElement | null;
@@ -66,6 +69,9 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
     const chkSpacious = document.getElementById('chkSpaciousCells') as HTMLInputElement | null;
     const chkTextWrap = document.getElementById('chkTextWrap') as HTMLInputElement | null;
     const chkMergeWarning = document.getElementById('chkMergeWarningEnabled') as HTMLInputElement | null;
+
+    const radioCsvSeparatorComma = document.getElementById('radioCsvSeparatorComma') as HTMLInputElement | null;
+    const radioCsvSeparatorSemicolon = document.getElementById('radioCsvSeparatorSemicolon') as HTMLInputElement | null;
 
     if (chkHeader) chkHeader.checked = !!settings.firstRowIsHeader;
     if (chkSticky) {
@@ -87,10 +93,16 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
     if (chkTextWrap) chkTextWrap.checked = !!settings.textWrap;
     if (chkMergeWarning) chkMergeWarning.checked = !!settings.mergeWarningEnabled;
 
+    if (radioCsvSeparatorComma) radioCsvSeparatorComma.checked = settings.csvSeparator !== ';';
+    if (radioCsvSeparatorSemicolon) radioCsvSeparatorSemicolon.checked = settings.csvSeparator === ';';
+
     const autoSaveEnabled = !!settings.autoSave;
     const manualSaveItem = chkManualSavePopup?.closest('.setting-item') as HTMLElement | null;
     const autoSaveAllItem = radioAutoSaveAll?.closest('.setting-item') as HTMLElement | null;
     const autoSaveControlsItem = radioAutoSaveControlsOnly?.closest('.setting-item') as HTMLElement | null;
+
+    const commaItem = radioCsvSeparatorComma?.closest('.setting-item') as HTMLElement | null;
+    const semicolonItem = radioCsvSeparatorSemicolon?.closest('.setting-item') as HTMLElement | null;
 
     if (manualSaveItem) {
         manualSaveItem.style.display = autoSaveEnabled ? 'none' : 'inline-flex';
@@ -100,6 +112,13 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings): void {
     }
     if (autoSaveControlsItem) {
         autoSaveControlsItem.style.display = autoSaveEnabled ? 'inline-flex' : 'none';
+    }
+
+    if (commaItem) {
+        commaItem.style.display = fileType === 'csv' ? 'inline-flex' : 'none';
+    }
+    if (semicolonItem) {
+        semicolonItem.style.display = fileType === 'csv' ? 'inline-flex' : 'none';
     }
 }
 
@@ -245,6 +264,30 @@ export function createXlsxSettingsDefinitions(
                 applyAndPersist({ showManualSavePopup: val });
             },
             defaultValue: getSettings().showManualSavePopup
+        },
+        {
+            id: 'radioCsvSeparatorComma',
+            label: 'CSV Delimiter: Comma (,)',
+            tooltip: 'Use comma as separator when saving CSV files.',
+            inputType: 'radio',
+            groupName: 'csvSeparatorMode',
+            value: ',',
+            onChange: (val: string) => {
+                applyAndPersist({ csvSeparator: ',' });
+            },
+            defaultValue: getSettings().csvSeparator !== ';'
+        },
+        {
+            id: 'radioCsvSeparatorSemicolon',
+            label: 'CSV Delimiter: Semicolon (;)',
+            tooltip: 'Use semicolon as separator when saving CSV files.',
+            inputType: 'radio',
+            groupName: 'csvSeparatorMode',
+            value: ';',
+            onChange: (val: string) => {
+                applyAndPersist({ csvSeparator: ';' });
+            },
+            defaultValue: getSettings().csvSeparator === ';'
         }
     ];
 }

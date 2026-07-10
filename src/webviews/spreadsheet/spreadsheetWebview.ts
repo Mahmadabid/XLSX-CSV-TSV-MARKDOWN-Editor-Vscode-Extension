@@ -216,6 +216,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     // Plain view mode (removes all XLSX styling)
     let isPlainView = false;
     let isTemporaryStyleFile = false;
+    let loadedFileType = 'xlsx';
     let styleModeRequestPending = false;
     let pendingStyleModeAction: (() => void) | null = null;
 
@@ -4190,14 +4191,34 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
         if (isoMatch) return raw;
 
-        const parsed = new Date(raw);
-        if (Number.isNaN(parsed.getTime())) {
+        const ymdMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        let parsed: Date | null = null;
+        if (ymdMatch) {
+            parsed = new Date(Date.UTC(parseInt(ymdMatch[1], 10), parseInt(ymdMatch[2], 10) - 1, parseInt(ymdMatch[3], 10)));
+        } else {
+            const mdyMatch = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+            if (mdyMatch) {
+                let year = parseInt(mdyMatch[3], 10);
+                if (year < 100) {
+                    year += year < 50 ? 2000 : 1900;
+                }
+                parsed = new Date(Date.UTC(year, parseInt(mdyMatch[1], 10) - 1, parseInt(mdyMatch[2], 10)));
+            } else {
+                const rawParsed = new Date(raw);
+                if (!Number.isNaN(rawParsed.getTime())) {
+                    const isUtcStr = raw.includes('Z') || raw.includes('T');
+                    parsed = isUtcStr ? rawParsed : new Date(Date.UTC(rawParsed.getFullYear(), rawParsed.getMonth(), rawParsed.getDate()));
+                }
+            }
+        }
+
+        if (!parsed || Number.isNaN(parsed.getTime())) {
             return '';
         }
 
-        const yyyy = parsed.getFullYear();
-        const mm = String(parsed.getMonth() + 1).padStart(2, '0');
-        const dd = String(parsed.getDate()).padStart(2, '0');
+        const yyyy = parsed.getUTCFullYear();
+        const mm = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(parsed.getUTCDate()).padStart(2, '0');
         return `${yyyy}-${mm}-${dd}`;
     }
 
@@ -6843,7 +6864,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
 
         resetStyledOnlySettingsVisibility();
-        syncSettingsCheckboxes(currentSettings);
+        syncSettingsCheckboxes(currentSettings, loadedFileType);
         if (scope === 'plain') {
             hideStyledOnlySettingsForPlainMode();
         }
@@ -7651,6 +7672,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
             hasVirtualTableInit = true;
             isTemporaryStyleFile = message.fileType === 'csv' || message.fileType === 'tsv';
+            loadedFileType = message.fileType || 'xlsx';
             isPlainView = message.isPlainView !== undefined ? !!message.isPlainView : isTemporaryStyleFile;
             syncPlainViewUiState();
 
