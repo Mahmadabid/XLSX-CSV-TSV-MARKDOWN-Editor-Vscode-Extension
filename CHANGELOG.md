@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.9.93 - Date Parsing Fixes for Non-Date Values
+- Fixed an issue where plain digits, fractions (e.g., "1/2"), ranges (e.g., "1-2"), and alphanumeric codes (e.g., "EVT-001") were incorrectly parsed and converted into dates in CSV, TSV, and XLSX sheets.
+
 ## v1.9.92 - PDF Export, CSV Separators & Date Offsets
 - Implemented high-fidelity PDF Export functionality for Markdown previews using headless Puppeteer-Core, resolving UI freezing and style/font rendering issues.
 - Added CSV delimiter options allowing users to configure and toggle between comma (,) and semicolon (;) separators.

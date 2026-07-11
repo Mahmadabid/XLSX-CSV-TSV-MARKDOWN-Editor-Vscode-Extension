@@ -107,10 +107,23 @@ function normalizeDateInputValue(value: unknown): string {
             }
             parsed = new Date(Date.UTC(year, parseInt(mdyMatch[1], 10) - 1, parseInt(mdyMatch[2], 10)));
         } else {
-            const rawParsed = new Date(raw);
-            if (!Number.isNaN(rawParsed.getTime())) {
-                const isUtcStr = raw.includes('Z') || raw.includes('T');
-                parsed = isUtcStr ? rawParsed : new Date(Date.UTC(rawParsed.getFullYear(), rawParsed.getMonth(), rawParsed.getDate()));
+            const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
+            const monthNames = '(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*';
+            const textualRegex1 = new RegExp(`^${monthNames} \\d{1,2},? \\d{4}$`, 'i');
+            const textualRegex2 = new RegExp(`^\\d{1,2} ${monthNames} \\d{4}$`, 'i');
+            const textualRegex3 = new RegExp(`^\\d{4} ${monthNames} \\d{1,2}$`, 'i');
+            const textualRegex4 = new RegExp(`^[a-z]{3},? \\d{1,2} ${monthNames} \\d{4}`, 'i');
+            
+            if (isoRegex.test(raw) ||
+                textualRegex1.test(raw) ||
+                textualRegex2.test(raw) ||
+                textualRegex3.test(raw) ||
+                textualRegex4.test(raw)) {
+                const rawParsed = new Date(raw);
+                if (!Number.isNaN(rawParsed.getTime())) {
+                    const isUtcStr = raw.includes('Z') || raw.includes('T');
+                    parsed = isUtcStr ? rawParsed : new Date(Date.UTC(rawParsed.getFullYear(), rawParsed.getMonth(), rawParsed.getDate()));
+                }
             }
         }
     }

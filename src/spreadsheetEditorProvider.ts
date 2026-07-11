@@ -2841,9 +2841,22 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     }
                     asDate = new Date(Date.UTC(year, parseInt(mdyMatch[1], 10) - 1, parseInt(mdyMatch[2], 10)));
                 } else {
-                    const parsed = new Date(raw);
-                    if (!Number.isNaN(parsed.getTime())) {
-                        asDate = parsed;
+                    const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
+                    const monthNames = '(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*';
+                    const textualRegex1 = new RegExp(`^${monthNames} \\d{1,2},? \\d{4}$`, 'i');
+                    const textualRegex2 = new RegExp(`^\\d{1,2} ${monthNames} \\d{4}$`, 'i');
+                    const textualRegex3 = new RegExp(`^\\d{4} ${monthNames} \\d{1,2}$`, 'i');
+                    const textualRegex4 = new RegExp(`^[a-z]{3},? \\d{1,2} ${monthNames} \\d{4}`, 'i');
+                    
+                    if (isoRegex.test(raw) ||
+                        textualRegex1.test(raw) ||
+                        textualRegex2.test(raw) ||
+                        textualRegex3.test(raw) ||
+                        textualRegex4.test(raw)) {
+                        const parsed = new Date(raw);
+                        if (!Number.isNaN(parsed.getTime())) {
+                            asDate = parsed;
+                        }
                     }
                 }
             }
