@@ -28,6 +28,7 @@ import { SettingsManager } from '../shared/settingsManager';
 import { ToolbarManager } from '../shared/toolbarManager';
 import { applyToolbarLayout } from '../shared/toolbarLayout';
 import { Utils } from '../shared/utils';
+import { MdToPdfExporter } from './mdToPdfExporter';
 import { Icons } from '../shared/icons';
 import { vscode, debounce } from '../shared/common';
 import { FeedbackModal } from '../shared/feedbackModal';
@@ -38,7 +39,6 @@ import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 // @ts-ignore
 import mermaid from 'mermaid';
-
 
 // Inline custom plugin that mimics the markdown-it-mermaid API and behavior,
 // but uses standard ES imports bundled properly by esbuild for the browser.
@@ -1901,48 +1901,27 @@ function buildToolbarButtons() {
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 const preview = $('markdownPreview');
-                if (preview) {
-                    // Inject print styles so the backend puppeteer can print cleanly
-                    const printStyle = document.createElement('style');
-                    printStyle.id = 'markdown-print-style-override';
-                    printStyle.innerHTML = `
-                        @media print {
-                            body * {
-                                visibility: hidden;
-                            }
-                            #markdownContainer, #markdownPreview, #markdownPreview * {
-                                visibility: visible;
-                            }
-                            #markdownPreview {
-                                position: absolute;
-                                left: 0;
-                                top: 0;
-                                width: 100%;
-                            }
-                            .code-copy {
-                                display: none !important;
-                            }
-                            .markdown-preview {
-                                background: #ffffff !important;
-                                color: #000000 !important;
-                            }
-                        }
-                    `;
-                    document.head.appendChild(printStyle);
-                    
-                    // Send entire HTML to backend
-                    vscode.postMessage({
-                        command: 'exportPdfHtml',
-                        html: document.documentElement.outerHTML
-                    });
-                    
-                    // Remove the style immediately so it doesn't affect the user
-                    document.head.removeChild(printStyle);
-                    
-                    showToast('Exporting PDF... Please wait.');
-                } else {
+                if (!preview) {
                     showToast('Preview not available.');
+                    return;
                 }
+
+                showToast('Generating PDF... Please wait.');
+
+                setTimeout(async () => {
+                    try {
+                        const blob = await MdToPdfExporter.exportToPdf(preview);
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const base64Data = (reader.result as string).split(',')[1];
+                            vscode.postMessage({ command: 'savePdfData', data: base64Data });
+                        };
+                        reader.readAsDataURL(blob);
+                    } catch (err: any) {
+                        console.error('PDF export error:', err);
+                        showToast('Failed to generate PDF: ' + (err?.message || err));
+                    }
+                }, 50);
             }
         },
         {

@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.9.94 - Native PDF Exporter Module
+- Added `MdToPdfExporter` for fast client-side PDF export (< 50ms) with selectable text (`puppeteer-core` and `html2canvas` removed).
+- Fixed heading `#` permalink text, emoji garbled characters, and added SVG rasterization for Mermaid diagrams.
+
 ## v1.9.93 - Date Parsing Fixes for Non-Date Values
 - Fixed an issue where plain digits, fractions (e.g., "1/2"), ranges (e.g., "1-2"), and alphanumeric codes (e.g., "EVT-001") were incorrectly parsed and converted into dates in CSV, TSV, and XLSX sheets.
 
