@@ -14,6 +14,7 @@ export interface XlsxViewSettings {
     isDefaultEditor?: boolean;
     textWrap: boolean;
     csvSeparator?: ',' | ';';
+    textDirection?: 'auto' | 'ltr' | 'rtl';
 }
 
 export const defaultXlsxViewSettings: XlsxViewSettings = {
@@ -29,7 +30,8 @@ export const defaultXlsxViewSettings: XlsxViewSettings = {
     mergeWarningEnabled: true,
     isDefaultEditor: true,
     textWrap: false,
-    csvSeparator: ','
+    csvSeparator: ',',
+    textDirection: 'auto'
 };
 
 export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): XlsxViewSettings {
@@ -46,7 +48,8 @@ export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): Xl
         mergeWarningEnabled: next && typeof next.mergeWarningEnabled === 'boolean' ? next.mergeWarningEnabled : previous.mergeWarningEnabled,
         isDefaultEditor: next && typeof next.isDefaultEditor === 'boolean' ? next.isDefaultEditor : previous.isDefaultEditor,
         textWrap: next && typeof next.textWrap === 'boolean' ? next.textWrap : previous.textWrap,
-        csvSeparator: next && (next.csvSeparator === ',' || next.csvSeparator === ';') ? next.csvSeparator : (previous.csvSeparator || ',')
+        csvSeparator: next && (next.csvSeparator === ',' || next.csvSeparator === ';') ? next.csvSeparator : (previous.csvSeparator || ','),
+        textDirection: next && (next.textDirection === 'rtl' || next.textDirection === 'ltr' || next.textDirection === 'auto') ? next.textDirection : (previous.textDirection || 'auto')
     };
 
     if (!normalized.firstRowIsHeader) {

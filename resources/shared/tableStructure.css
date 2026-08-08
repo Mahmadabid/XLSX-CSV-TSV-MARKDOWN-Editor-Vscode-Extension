@@ -214,3 +214,50 @@ td.selected.selection-bottom.selection-right::after {
     cursor: crosshair;
     z-index: 10;
 }
+
+/* --- Right-to-Left (RTL) Table Support --- */
+[dir="rtl"] #csv-table,
+[dir="rtl"] #xlsxTable,
+[dir="rtl"] .table-scroll,
+.rtl-mode #csv-table,
+.rtl-mode #xlsxTable {
+    direction: rtl;
+}
+
+[dir="rtl"] #csv-table th,
+[dir="rtl"] #csv-table td,
+[dir="rtl"] #xlsxTable th,
+[dir="rtl"] #xlsxTable td,
+.rtl-mode #csv-table th,
+.rtl-mode #csv-table td,
+.rtl-mode #xlsxTable th,
+.rtl-mode #xlsxTable td {
+    text-align: right;
+}
+
+[dir="rtl"] tbody th:first-child,
+[dir="rtl"] tbody td:first-child,
+[dir="rtl"] thead th:first-child,
+.rtl-mode tbody th:first-child,
+.rtl-mode tbody td:first-child,
+.rtl-mode thead th:first-child {
+    left: auto !important;
+    right: 0 !important;
+    border-left: 1px solid var(--border-color);
+    border-right: none;
+}
+
+[dir="rtl"] th.row-header,
+.rtl-mode th.row-header {
+    left: auto !important;
+    right: 0 !important;
+}
+
+[dir="rtl"] th.corner-cell,
+[dir="rtl"] thead th:first-child,
+.rtl-mode th.corner-cell,
+.rtl-mode thead th:first-child {
+    left: auto !important;
+    right: 0 !important;
+}
+

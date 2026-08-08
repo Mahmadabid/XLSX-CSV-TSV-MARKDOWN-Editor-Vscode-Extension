@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.95 - Right-to-Left (RTL) Text Direction Support
+- Added Right-to-Left (RTL) text direction support across CSV, XLSX, TSV, and Markdown editors.
+- Added RTL / LTR toggle button to the editor toolbars.
+- Added automatic RTL content detection for Arabic, Hebrew, Persian, Urdu, and other RTL scripts on document load.
+- Added RTL table layout and element attribute formatting for table cells, sticky row headers, formula bars, and Markdown preview elements.
+
 ## v1.9.94 - Native PDF Exporter Module
 - Added `MdToPdfExporter` for fast client-side PDF export (< 50ms) with selectable text (`puppeteer-core` and `html2canvas` removed).
 - Fixed heading `#` permalink text, emoji garbled characters, and added SVG rasterization for Mermaid diagrams.

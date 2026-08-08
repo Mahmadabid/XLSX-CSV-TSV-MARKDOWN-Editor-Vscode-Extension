@@ -10,6 +10,7 @@ import { Icons } from '../shared/icons';
 import { vscode, VirtualScrollConfig, debounce } from '../shared/common';
 import { VirtualLoader } from '../shared/virtualLoader';
 import { InfoTooltip } from '../shared/infoTooltip';
+import { detectIsRTL } from '../shared/rtlUtils';
 import { createXlsxRowHtml, getExcelColumnLabel, renderDropdownCellContent } from './components/spreadsheetRenderComponent';
 import { XlsxSelectionManager } from './components/spreadsheetSelectionComponent';
 import { createXlsxToolbarButtons } from './components/spreadsheetToolbarComponent';
@@ -6846,6 +6847,39 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         styledOnlySettingIds.forEach((id) => setSettingItemHidden(id, true));
     }
 
+    function updateTextDirection(sampleText?: string) {
+        const dirSetting = currentSettings.textDirection || 'auto';
+        let isRtl = false;
+        if (dirSetting === 'rtl') {
+            isRtl = true;
+        } else if (dirSetting === 'ltr') {
+            isRtl = false;
+        } else {
+            let sample = sampleText;
+            if (!sample && sourceRowsSnapshot && sourceRowsSnapshot.length > 0) {
+                sample = JSON.stringify(sourceRowsSnapshot.slice(0, 50));
+            }
+            if (!sample) {
+                sample = document.body.textContent || '';
+            }
+            isRtl = detectIsRTL(sample);
+        }
+
+        document.body.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
+        document.body.classList.toggle('rtl-mode', isRtl);
+
+        if (toolbarManager) {
+            const rtlBtn = toolbarManager.getButton('toggleRtlButton');
+            if (rtlBtn) {
+                rtlBtn.classList.toggle('rtl-active', isRtl);
+                rtlBtn.classList.toggle('active', isRtl);
+                const statusStr = isRtl ? 'RTL' : 'LTR';
+                const modeStr = dirSetting === 'auto' ? ' (Auto-detected)' : ` (${dirSetting.toUpperCase()})`;
+                toolbarManager.setButtonTooltip('toggleRtlButton', `Text Direction: ${statusStr}${modeStr}. Click to toggle.`);
+            }
+        }
+    }
+
     function applySettings(settings: any, scopeOverride?: SettingsScope) {
         const scope = scopeOverride || getCurrentSettingsScope();
         const previousSpacious = !!currentSettings.spaciousCells;
@@ -6886,6 +6920,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         document.body.classList.toggle('first-row-as-header', !!currentSettings.firstRowIsHeader);
         document.body.classList.toggle('spacious-cells', !!currentSettings.spaciousCells);
         document.body.classList.toggle('text-wrap-enabled', !!currentSettings.textWrap);
+        updateTextDirection();
 
         applyToolbarLayout(toolbarManager, {
             stickyToolbar: !!currentSettings.stickyToolbar,
@@ -7445,6 +7480,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             onFind: () => openFindOverlay(),
             textColorIcon,
             bgColorIcon,
+            onToggleRtl: () => {
+                let nextDir: 'auto' | 'ltr' | 'rtl' = 'rtl';
+                const current = currentSettings.textDirection || 'auto';
+                const isCurrentlyRtl = document.body.getAttribute('dir') === 'rtl';
+                if (current === 'auto') {
+                    nextDir = isCurrentlyRtl ? 'ltr' : 'rtl';
+                } else if (current === 'rtl') {
+                    nextDir = 'ltr';
+                } else {
+                    nextDir = 'rtl';
+                }
+                applySettings({ ...currentSettings, textDirection: nextDir });
+                postSettings();
+            },
             onEditFile: () => {
                 if (!isTemporaryStyleFile) return;
                 vscode.postMessage({ command: 'toggleView', isTableView: false });

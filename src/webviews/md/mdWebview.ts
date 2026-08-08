@@ -115,6 +115,8 @@ const turndownService = new TurndownService({
 });
 turndownService.use(gfm);
 
+import { detectIsRTL } from '../shared/rtlUtils';
+
 // Settings
 let currentSettings = {
     stickyToolbar: true,
@@ -124,7 +126,8 @@ let currentSettings = {
     showOutline: true,
     showLineNumbers: true,
     moveMdButtonsToEnd: false,
-    isMdEnabled: true
+    isMdEnabled: true,
+    textDirection: 'auto' as 'auto' | 'ltr' | 'rtl'
 };
 
 let isFocusMode = false;
@@ -1473,10 +1476,47 @@ function toggleFocusMode() {
     }
 }
 
+function updateTextDirection(sampleText?: string) {
+    const dirSetting = currentSettings.textDirection || 'auto';
+    let isRtl = false;
+    if (dirSetting === 'rtl') {
+        isRtl = true;
+    } else if (dirSetting === 'ltr') {
+        isRtl = false;
+    } else {
+        const sample = sampleText || currentContent || (document.body ? document.body.textContent : '') || '';
+        isRtl = detectIsRTL(sample);
+    }
+
+    const preview = $('markdownPreview');
+    const editor = $('markdownEditor');
+    const container = $('markdownContainer');
+
+    if (preview) preview.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
+    if (editor) editor.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
+    if (container) container.classList.toggle('rtl-mode', isRtl);
+
+    document.body.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
+    document.body.classList.toggle('rtl-mode', isRtl);
+
+    if (toolbarManager) {
+        const rtlBtn = toolbarManager.getButton('toggleRtlButton');
+        if (rtlBtn) {
+            rtlBtn.classList.toggle('rtl-active', isRtl);
+            rtlBtn.classList.toggle('active', isRtl);
+            const statusStr = isRtl ? 'RTL' : 'LTR';
+            const modeStr = dirSetting === 'auto' ? ' (Auto-detected)' : ` (${dirSetting.toUpperCase()})`;
+            toolbarManager.setButtonTooltip('toggleRtlButton', `Text Direction: ${statusStr}${modeStr}. Click to toggle.`);
+        }
+    }
+}
+
 // ===== Settings =====
 function applySettings(settings: any, persist = false) {
     if (!settings) return;
     currentSettings = { ...currentSettings, ...settings };
+
+    updateTextDirection();
 
     const container = $('markdownContainer');
     const editor = $('markdownEditor');
@@ -1637,6 +1677,16 @@ function initializeSettings() {
                 currentSettings.moveMdButtonsToEnd = val;
                 applySettings(currentSettings, true);
             }
+        },
+        {
+            id: 'chkRTLTextDirection',
+            label: 'RTL Text Direction',
+            tooltip: 'Force Right-to-Left (RTL) text direction for Markdown preview and editor.',
+            defaultValue: currentSettings.textDirection === 'rtl',
+            onChange: (val: boolean) => {
+                currentSettings.textDirection = val ? 'rtl' : 'ltr';
+                applySettings(currentSettings, true);
+            }
         }
     ];
 
@@ -1701,6 +1751,7 @@ window.addEventListener('message', (event) => {
             workspaceFolderUri = m.workspaceFolderUri || null;
             resolvedImageUriCache.clear();
             renderMarkdown(currentContent);
+            updateTextDirection(currentContent);
             updateStatusInfo();
             break;
 
@@ -1850,6 +1901,25 @@ function buildToolbarButtons() {
             onClick: () => {
                 currentSettings.showOutline = !currentSettings.showOutline;
                 applySettings(currentSettings, true);
+            }
+        },
+        {
+            id: 'toggleRtlButton',
+            icon: Icons.TextDirection,
+            label: 'RTL',
+            tooltip: 'Toggle Right-to-Left (RTL) / LTR text direction',
+            onClick: () => {
+                let nextDir: 'auto' | 'ltr' | 'rtl' = 'rtl';
+                const current = currentSettings.textDirection || 'auto';
+                const isCurrentlyRtl = document.body.getAttribute('dir') === 'rtl';
+                if (current === 'auto') {
+                    nextDir = isCurrentlyRtl ? 'ltr' : 'rtl';
+                } else if (current === 'rtl') {
+                    nextDir = 'ltr';
+                } else {
+                    nextDir = 'rtl';
+                }
+                applySettings({ textDirection: nextDir }, true);
             }
         },
         {

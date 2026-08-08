@@ -981,3 +981,46 @@ body:not(.sticky-toolbar-enabled) #tableContainer {
     max-height: none;
     overflow: visible;
 }
+
+/* --- Right-to-Left (RTL) Layout & Preview Support --- */
+[dir="rtl"] #markdownPreview,
+[dir="rtl"] #markdownEditor,
+[dir="rtl"] .preview-edit-container,
+.rtl-mode #markdownPreview,
+.rtl-mode #markdownEditor {
+    direction: rtl;
+    text-align: right;
+}
+
+[dir="rtl"] #markdownPreview blockquote,
+.rtl-mode #markdownPreview blockquote {
+    border-right: 4px solid var(--accent-color);
+    border-left: none;
+    padding-right: 1em;
+    padding-left: 0;
+    margin-right: 0;
+    margin-left: 1.5em;
+}
+
+[dir="rtl"] #markdownPreview ul,
+[dir="rtl"] #markdownPreview ol,
+.rtl-mode #markdownPreview ul,
+.rtl-mode #markdownPreview ol {
+    padding-right: 2em;
+    padding-left: 0;
+}
+
+[dir="rtl"] #markdownPreview th,
+[dir="rtl"] #markdownPreview td,
+.rtl-mode #markdownPreview th,
+.rtl-mode #markdownPreview td {
+    text-align: right;
+}
+
+/* RTL toggle button active state styling */
+.toggle-button.active,
+.toggle-button.rtl-active {
+    background-color: var(--accent-bg);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}

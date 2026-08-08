@@ -23,6 +23,7 @@ export interface CreateXlsxToolbarButtonsOptions {
     onConvertFile: () => void;
     onEnableAsDefault: () => void;
     onRefresh: () => void;
+    onToggleRtl: () => void;
     onProjects: () => void;
 }
 
@@ -42,6 +43,13 @@ export function createXlsxToolbarButtons(options: CreateXlsxToolbarButtonsOption
             tooltip: 'Reload file from disk',
             cls: 'icon-only',
             onClick: options.onRefresh
+        },
+        {
+            id: 'toggleRtlButton',
+            icon: Icons.TextDirection,
+            label: 'RTL',
+            tooltip: 'Toggle Right-to-Left (RTL) / LTR text direction',
+            onClick: options.onToggleRtl
         },
         {
             id: 'editFileButton',
