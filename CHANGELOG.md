@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.96 - Scroll Preservation & Popup Notification Controls
+- Fixed scroll reset on content save across all file types (XLSX, CSV, TSV, and Markdown), keeping editor and preview scroll positions intact.
+- Added `xlsxViewer.showPopups` setting allowing users to enable or disable save/autosave popup notifications.
+- Updated toast notifications to be non-blocking (`pointer-events: none`) so popups do not interrupt user editing or require waiting.
+
 ## v1.9.95 - Right-to-Left (RTL) Text Direction Support
 - Added Right-to-Left (RTL) text direction support across CSV, XLSX, TSV, and Markdown editors.
 - Added RTL / LTR toggle button to the editor toolbars.

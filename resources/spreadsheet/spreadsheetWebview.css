@@ -1595,3 +1595,9 @@ body.text-wrap-enabled #xlsxTable td:not([style*="white-space: nowrap"]) .cell-c
     overflow: visible !important;
     text-overflow: clip !important;
 }
+
+.toast-notification,
+#saveToast {
+    pointer-events: none !important;
+}
+

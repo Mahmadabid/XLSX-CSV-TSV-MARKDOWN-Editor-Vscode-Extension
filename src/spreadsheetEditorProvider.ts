@@ -1170,6 +1170,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             autoSave: boolean;
             autoSaveMode: 'all' | 'controlsOnly';
             showManualSavePopup: boolean;
+            showPopups: boolean;
             allowInteractiveControlsOutsideEditMode: boolean;
             hyperlinkPreview: boolean;
             spaciousCells: boolean;
@@ -1221,6 +1222,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 autoSave: cfg.get('xlsx.autoSave', false),
                 autoSaveMode: autoSaveModeSetting === 'controlsOnly' ? 'controlsOnly' : 'all',
                 showManualSavePopup: cfg.get('xlsx.showManualSavePopup', true),
+                showPopups: cfg.get('showPopups', true),
                 allowInteractiveControlsOutsideEditMode: cfg.get('xlsx.allowInteractiveControlsOutsideEditMode', true),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
@@ -1243,6 +1245,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     autoSave: cfg.get(`${fileType}.autoSave`, true),
                     autoSaveMode: 'all',
                     showManualSavePopup: false,
+                    showPopups: cfg.get('showPopups', true),
                     allowInteractiveControlsOutsideEditMode: true,
                     hyperlinkPreview: true,
                     spaciousCells: cfg.get(`${fileType}.spaciousCells`, false),
@@ -1260,6 +1263,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 autoSave: cfg.get('xlsx.autoSave', true),
                 autoSaveMode: 'all',
                 showManualSavePopup: false,
+                showPopups: cfg.get('showPopups', true),
                 allowInteractiveControlsOutsideEditMode: cfg.get('xlsx.allowInteractiveControlsOutsideEditMode', true),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
@@ -1600,6 +1604,10 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     const isDelimitedFile = currentFileType === 'csv' || currentFileType === 'tsv';
                     const firstRowIsHeader = !!s.firstRowIsHeader;
                     const stickyHeader = firstRowIsHeader ? !!s.stickyHeader : false;
+
+                    if (typeof s.showPopups === 'boolean') {
+                        await cfg.update('showPopups', !!s.showPopups, vscode.ConfigurationTarget.Global);
+                    }
 
                     if (scope === 'plain') {
                         // Plain mode settings: limited set matching CSV/TSV plain mode defaults

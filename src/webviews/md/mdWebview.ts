@@ -126,6 +126,7 @@ let currentSettings = {
     showOutline: true,
     showLineNumbers: true,
     moveMdButtonsToEnd: false,
+    showPopups: true,
     isMdEnabled: true,
     textDirection: 'auto' as 'auto' | 'ltr' | 'rtl'
 };
@@ -632,11 +633,17 @@ function renderMermaidFlowcharts() {
 function renderMarkdown(content: string) {
     const preview = $('markdownPreview');
     if (preview) {
+        const savedScrollTop = preview.scrollTop;
+        const savedScrollLeft = preview.scrollLeft;
         const env: any = {};
         const normalizedContent = sanitizeMarkdownCopyLinkArtifacts(content || '');
         const tokens = md.parse(normalizedContent, env);
         addHeadingIds(tokens);
         preview.innerHTML = md.renderer.render(tokens, md.options, env);
+        if (savedScrollTop > 0 || savedScrollLeft > 0) {
+            preview.scrollTop = savedScrollTop;
+            preview.scrollLeft = savedScrollLeft;
+        }
         preview.querySelectorAll('img').forEach((node) => {
             if (!(node instanceof HTMLImageElement)) return;
             if (!node.complete) {
@@ -857,11 +864,24 @@ function setVersionPreviewMode(enabled: boolean, label?: string) {
     }
 }
 
+let lastEditorScrollTop = 0;
+let lastEditorScrollLeft = 0;
+let lastEditorSelStart = 0;
+let lastEditorSelEnd = 0;
+
 function performSave(exitAfterSave = false) {
     if (isSaving || !isEditMode) return;
     isSaving = true;
     shouldExitEditMode = exitAfterSave;
     setButtonsEnabled(false);
+
+    const editorEl = $('markdownEditor') as HTMLTextAreaElement | null;
+    if (editorEl) {
+        lastEditorScrollTop = editorEl.scrollTop;
+        lastEditorScrollLeft = editorEl.scrollLeft;
+        lastEditorSelStart = editorEl.selectionStart;
+        lastEditorSelEnd = editorEl.selectionEnd;
+    }
 
     if (isPreviewEditMode) {
         // Convert preview HTML back to markdown
@@ -879,16 +899,14 @@ function performSave(exitAfterSave = false) {
             currentContent = turndownService.turndown(clone.innerHTML);
         }
     } else {
-        const editor = $('markdownEditor') as HTMLTextAreaElement;
-        if (editor) {
-            currentContent = editor.value;
+        if (editorEl) {
+            currentContent = editorEl.value;
         }
     }
 
     currentContent = sanitizeMarkdownCopyLinkArtifacts(currentContent);
-    const editor = $('markdownEditor') as HTMLTextAreaElement | null;
-    if (editor && editor.value !== currentContent) {
-        editor.value = currentContent;
+    if (editorEl && editorEl.value !== currentContent) {
+        editorEl.value = currentContent;
     }
 
     vscode.postMessage({ command: 'saveMarkdown', text: currentContent });
@@ -1516,6 +1534,8 @@ function applySettings(settings: any, persist = false) {
     if (!settings) return;
     currentSettings = { ...currentSettings, ...settings };
 
+    Utils.showPopupsEnabled = (currentSettings as any).showPopups !== false;
+
     updateTextDirection();
 
     const container = $('markdownContainer');
@@ -1687,6 +1707,16 @@ function initializeSettings() {
                 currentSettings.textDirection = val ? 'rtl' : 'ltr';
                 applySettings(currentSettings, true);
             }
+        },
+        {
+            id: 'chkShowPopups',
+            label: 'Show Notification Popups',
+            tooltip: 'Show popup notifications (such as save toasts) during editor usage. Uncheck to disable.',
+            defaultValue: (currentSettings as any).showPopups !== false,
+            onChange: (val: boolean) => {
+                (currentSettings as any).showPopups = val;
+                applySettings(currentSettings, true);
+            }
         }
     ];
 
@@ -1771,6 +1801,13 @@ window.addEventListener('message', (event) => {
                         setPreviewEditMode(false);
                     } else {
                         setEditMode(false);
+                    }
+                } else {
+                    const editorEl = $('markdownEditor') as HTMLTextAreaElement | null;
+                    if (editorEl && (lastEditorScrollTop > 0 || lastEditorScrollLeft > 0 || lastEditorSelStart > 0)) {
+                        editorEl.scrollTop = lastEditorScrollTop;
+                        editorEl.scrollLeft = lastEditorScrollLeft;
+                        try { editorEl.setSelectionRange(lastEditorSelStart, lastEditorSelEnd); } catch {}
                     }
                 }
                 shouldExitEditMode = false;

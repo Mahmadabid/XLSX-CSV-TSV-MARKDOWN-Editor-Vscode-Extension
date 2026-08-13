@@ -7,6 +7,7 @@ export interface XlsxViewSettings {
     autoSave: boolean;
     autoSaveMode: 'all' | 'controlsOnly';
     showManualSavePopup: boolean;
+    showPopups: boolean;
     allowInteractiveControlsOutsideEditMode: boolean;
     hyperlinkPreview: boolean;
     spaciousCells: boolean;
@@ -24,6 +25,7 @@ export const defaultXlsxViewSettings: XlsxViewSettings = {
     autoSave: false,
     autoSaveMode: 'all',
     showManualSavePopup: true,
+    showPopups: true,
     allowInteractiveControlsOutsideEditMode: true,
     hyperlinkPreview: true,
     spaciousCells: false,
@@ -42,6 +44,7 @@ export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): Xl
         autoSave: next && typeof next.autoSave === 'boolean' ? next.autoSave : previous.autoSave,
         autoSaveMode: next && (next.autoSaveMode === 'all' || next.autoSaveMode === 'controlsOnly') ? next.autoSaveMode : previous.autoSaveMode,
         showManualSavePopup: next && typeof next.showManualSavePopup === 'boolean' ? next.showManualSavePopup : previous.showManualSavePopup,
+        showPopups: next && typeof next.showPopups === 'boolean' ? next.showPopups : (previous.showPopups !== undefined ? previous.showPopups : true),
         allowInteractiveControlsOutsideEditMode: next && typeof next.allowInteractiveControlsOutsideEditMode === 'boolean' ? next.allowInteractiveControlsOutsideEditMode : previous.allowInteractiveControlsOutsideEditMode,
         hyperlinkPreview: next && typeof next.hyperlinkPreview === 'boolean' ? next.hyperlinkPreview : previous.hyperlinkPreview,
         spaciousCells: next && typeof next.spaciousCells === 'boolean' ? next.spaciousCells : previous.spaciousCells,
@@ -67,6 +70,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings, fileType?: st
     const radioAutoSaveAll = document.getElementById('radioAutoSaveAll') as HTMLInputElement | null;
     const radioAutoSaveControlsOnly = document.getElementById('radioAutoSaveControlsOnly') as HTMLInputElement | null;
     const chkManualSavePopup = document.getElementById('chkShowManualSavePopup') as HTMLInputElement | null;
+    const chkShowPopups = document.getElementById('chkShowPopups') as HTMLInputElement | null;
     const chkOutsideControls = document.getElementById('chkAllowInteractiveControlsOutsideEditMode') as HTMLInputElement | null;
     const chkHyperlink = document.getElementById('chkHyperlinkPreview') as HTMLInputElement | null;
     const chkSpacious = document.getElementById('chkSpaciousCells') as HTMLInputElement | null;
@@ -90,6 +94,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings, fileType?: st
     if (radioAutoSaveAll) radioAutoSaveAll.checked = settings.autoSaveMode !== 'controlsOnly';
     if (radioAutoSaveControlsOnly) radioAutoSaveControlsOnly.checked = settings.autoSaveMode === 'controlsOnly';
     if (chkManualSavePopup) chkManualSavePopup.checked = !!settings.showManualSavePopup;
+    if (chkShowPopups) chkShowPopups.checked = settings.showPopups !== false;
     if (chkOutsideControls) chkOutsideControls.checked = !!settings.allowInteractiveControlsOutsideEditMode;
     if (chkHyperlink) chkHyperlink.checked = !!settings.hyperlinkPreview;
     if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
@@ -267,6 +272,15 @@ export function createXlsxSettingsDefinitions(
                 applyAndPersist({ showManualSavePopup: val });
             },
             defaultValue: getSettings().showManualSavePopup
+        },
+        {
+            id: 'chkShowPopups',
+            label: 'Show Notification Popups',
+            tooltip: 'Show popup notifications (such as saved/autosaved toasts) during editor usage. Uncheck to disable.',
+            onChange: (val: boolean) => {
+                applyAndPersist({ showPopups: val });
+            },
+            defaultValue: getSettings().showPopups !== false
         },
         {
             id: 'radioCsvSeparatorComma',

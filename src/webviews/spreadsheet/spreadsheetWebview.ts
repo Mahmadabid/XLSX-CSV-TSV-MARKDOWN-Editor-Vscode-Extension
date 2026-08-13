@@ -5266,6 +5266,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     function renderWorksheet(index: number) {
         if (!worksheetsMeta || !worksheetsMeta.length) return;
 
+        const scrollTarget = getTableContainer();
+        const savedScrollTop = scrollTarget ? scrollTarget.scrollTop : 0;
+        const savedScrollLeft = scrollTarget ? scrollTarget.scrollLeft : 0;
+
         showLoading();
 
         // Reset virtual scrolling state for new worksheet
@@ -5311,6 +5315,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 initializeResize();
                 initializeHyperlinkHover();
                 initializeVirtualScrolling();
+
+                if (scrollTarget && (savedScrollTop > 0 || savedScrollLeft > 0)) {
+                    scrollTarget.scrollTop = savedScrollTop;
+                    scrollTarget.scrollLeft = savedScrollLeft;
+                    updateVisibleRows();
+                }
 
                 const toolbarEl = document.getElementById('toolbar') as HTMLElement | null;
                 if (toolbarEl) {
@@ -6888,6 +6898,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         currentSettings = normalizeSettingsForScope(scope, settings, previousSettings);
         setStoredSettingsForScope(scope, currentSettings);
 
+        Utils.showPopupsEnabled = currentSettings.showPopups !== false;
+
         if (!currentSettings.autoSave) {
             clearAutoSaveTimer();
             if (!isEditMode && pendingOutsideControlEdits.length > 0) {
@@ -7664,6 +7676,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             setLoadingText('Rendering worksheet...');
             isSaving = false;
             setButtonsEnabled(true);
+            const scrollTarget = getTableContainer();
+            const savedScrollTop = scrollTarget ? scrollTarget.scrollTop : 0;
+            const savedScrollLeft = scrollTarget ? scrollTarget.scrollLeft : 0;
+
             if (message.ok) {
                 const thead = document.querySelector('#xlsxTable thead') as HTMLElement | null;
                 if (thead) thead.style.display = 'table-header-group';
@@ -7681,6 +7697,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     setEditMode(false, true);
                 } else if (isEditMode) {
                     captureOriginalCellValues();
+                }
+
+                if (scrollTarget && (savedScrollTop > 0 || savedScrollLeft > 0)) {
+                    scrollTarget.scrollTop = savedScrollTop;
+                    scrollTarget.scrollLeft = savedScrollLeft;
+                    updateVisibleRows();
                 }
             } else {
                 const isAutosaveResult = !!message.isAutosave;

@@ -166,6 +166,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 showOutline: cfg.get('md.showOutline', true),
                                 showLineNumbers: cfg.get('md.showLineNumbers', true),
                                 moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
+                                showPopups: cfg.get('showPopups', true),
                                 isMdEnabled: isMdEnabled
                             };
                             webviewPanel.webview.postMessage({ command: 'initSettings', settings });
@@ -219,6 +220,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('md.syncScroll', !!s.syncScroll, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.previewPosition', s.previewPosition || 'right', vscode.ConfigurationTarget.Global);
                             await cfg.update('md.moveMdButtonsToEnd', !!s.moveMdButtonsToEnd, vscode.ConfigurationTarget.Global);
+                            if (typeof s.showPopups === 'boolean') {
+                                await cfg.update('showPopups', !!s.showPopups, vscode.ConfigurationTarget.Global);
+                            }
                             if (typeof s.showOutline === 'boolean') {
                                 await cfg.update('md.showOutline', !!s.showOutline, vscode.ConfigurationTarget.Global);
                             }

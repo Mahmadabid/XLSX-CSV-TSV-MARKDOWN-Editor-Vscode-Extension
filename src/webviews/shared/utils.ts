@@ -17,7 +17,11 @@ export class Utils {
         return div.innerHTML;
     }
 
+    static showPopupsEnabled: boolean = true;
+
     static showToast(message: string, isAutosave = false, durationMs?: number) {
+        if (!Utils.showPopupsEnabled) return;
+
         let toast = document.getElementById('saveToast');
         if (!toast) {
             toast = document.createElement('div');

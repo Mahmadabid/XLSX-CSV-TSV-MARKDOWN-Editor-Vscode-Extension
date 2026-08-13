@@ -1451,3 +1451,9 @@ body:not(.show-line-numbers) .markdown-preview .code-line::before {
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
 }
+
+.toast-notification,
+#saveToast {
+    pointer-events: none !important;
+}
+
