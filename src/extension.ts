@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as Excel from 'exceljs';
+import { loadExcelWorkbook } from './spreadsheet/spreadsheetUtilities';
 import { SpreadsheetEditorProvider } from './spreadsheetEditorProvider';
 import { MDEditorProvider } from './mdEditorProvider';
 import { StyleStorageService } from './shared/styleStorageService';
@@ -239,7 +240,7 @@ async function applyStoredStylesToXlsxFile(filePath: string, storedStyles: Recor
     }
 
     const workbook = new Excel.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await loadExcelWorkbook(filePath, workbook);
     const worksheet = workbook.worksheets[0];
     if (!worksheet) {
         return;

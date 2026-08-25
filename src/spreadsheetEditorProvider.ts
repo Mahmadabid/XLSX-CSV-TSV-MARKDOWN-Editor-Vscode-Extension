@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { VERSION_HISTORY_RETENTION_MS, buildGroupedVersionHistoryItems as buildSharedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryDir } from './shared/versionHistory';
-import { convertARGBToRGBA, isShadeOfBlack, isShadeOfWhite } from './spreadsheet/spreadsheetUtilities';
+import { convertARGBToRGBA, isShadeOfBlack, isShadeOfWhite, loadExcelWorkbook } from './spreadsheet/spreadsheetUtilities';
 import { convertTabularFile, readTabularFile, detectTabularFileType, writeTabularFile, TabularFileType, setCsvSeparatorOverride } from './shared/fileConversionService';
 import { StyleStorageService } from './shared/styleStorageService';
 
@@ -1053,7 +1053,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             const storedStyles = (await this.styleStorage.getStyles(document.uri)) ?? {};
             if (Object.keys(storedStyles).length > 0) {
                 const workbook = new Excel.Workbook();
-                await workbook.xlsx.readFile(targetPath);
+                await loadExcelWorkbook(targetPath, workbook);
                 const worksheet = workbook.worksheets[0];
                 if (worksheet) {
                     applyStoredStylesToWorksheet(worksheet, storedStyles);
@@ -1346,7 +1346,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             const workbook = new Excel.Workbook();
 
             if (fileType === 'xlsx') {
-                await workbook.xlsx.readFile(sourcePath);
+                await loadExcelWorkbook(sourcePath, workbook);
             } else {
                 // Load CSV/TSV data
                 const { workbook: tabularData } = await readTabularFile(sourcePath, fileType);
@@ -1856,7 +1856,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     }
 
                     const workbook = new Excel.Workbook();
-                    await workbook.xlsx.readFile(document.uri.fsPath);
+                    await loadExcelWorkbook(document.uri.fsPath, workbook);
                     const ws = workbook.worksheets[sheetIndex];
                     if (!ws) {
                         throw new Error('Worksheet not found');

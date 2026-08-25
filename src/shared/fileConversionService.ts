@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as Excel from 'exceljs';
 import * as vscode from 'vscode';
+import { loadExcelWorkbook } from '../spreadsheet/spreadsheetUtilities';
 
 let csvSeparatorOverride: string | undefined = undefined;
 
@@ -265,7 +266,7 @@ function createXlsxConverter(): TabularFileConverter {
         extension: 'xlsx',
         async read(filePath: string): Promise<TabularWorkbookData> {
             const workbook = new Excel.Workbook();
-            await workbook.xlsx.readFile(filePath);
+            await loadExcelWorkbook(filePath, workbook);
 
             const sheets = workbook.worksheets.map((worksheet, index) => {
                 let maxRow = 0;

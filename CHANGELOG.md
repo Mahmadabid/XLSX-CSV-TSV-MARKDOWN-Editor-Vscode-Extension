@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.9.97 - XLSX XML Namespace Compatibility
+- Fixed an issue where XLSX files with XML namespace prefixes  failed to open.
+- Added automatic XML namespace sanitization to ensure seamless loading and editing across all OpenXML spreadsheet variants.
+
 ## v1.9.96 - Scroll Preservation & Popup Notification Controls
 - Fixed scroll reset on content save across all file types (XLSX, CSV, TSV, and Markdown), keeping editor and preview scroll positions intact.
 - Added `xlsxViewer.showPopups` setting allowing users to enable or disable save/autosave popup notifications.
