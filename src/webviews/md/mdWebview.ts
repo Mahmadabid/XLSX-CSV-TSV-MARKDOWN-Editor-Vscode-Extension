@@ -164,8 +164,20 @@ function escapeHtmlAttr(value: string) {
         .replace(/>/g, '&gt;');
 }
 
+function decodeURIComponentSafe(value: string): string {
+    try {
+        return decodeURIComponent(value);
+    } catch {
+        try {
+            return decodeURI(value);
+        } catch {
+            return value;
+        }
+    }
+}
+
 function isRemoteOrInlineUri(value: string): boolean {
-    return /^(https?:|data:|mailto:|#)/i.test(value);
+    return /^(https?:|data:|mailto:|#|vscode-webview:|vscode-resource:)/i.test(value) || value.includes('vscode-cdn.net');
 }
 
 function shouldResolveLocalImage(value: string): boolean {
@@ -375,6 +387,102 @@ md.use(abbr);
 md.use(emoji);
 md.use(markdownItMermaid);
 
+// Support link & image destinations with unencoded spaces (e.g. Typora Windows file paths)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const originalParseLinkDestination = (md.helpers as any).parseLinkDestination;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(md.helpers as any).parseLinkDestination = function (str: string, start: number, max: number) {
+    if (str.charCodeAt(start) === 0x3C /* < */) {
+        return originalParseLinkDestination(str, start, max);
+    }
+
+    const res = originalParseLinkDestination(str, start, max);
+    let isValidEnd = false;
+    if (res.ok) {
+        let p = res.pos;
+        while (p < max && (str.charCodeAt(p) === 0x20 || str.charCodeAt(p) === 0x09)) {
+            p++;
+        }
+        if (p < max && str.charCodeAt(p) === 0x29 /* ) */) {
+            isValidEnd = true;
+        } else if (p < max) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const titleRes = (md.helpers as any).parseLinkTitle(str, p, max);
+            if (titleRes.ok) {
+                let afterTitle = titleRes.pos;
+                while (afterTitle < max && (str.charCodeAt(afterTitle) === 0x20 || str.charCodeAt(afterTitle) === 0x09)) {
+                    afterTitle++;
+                }
+                if (afterTitle < max && str.charCodeAt(afterTitle) === 0x29 /* ) */) {
+                    isValidEnd = true;
+                }
+            }
+        }
+    }
+
+    if (res.ok && isValidEnd) {
+        return res;
+    }
+
+    // Fallback: allow spaces in path until closing ')' or valid title quote
+    let pos = start;
+    let level = 0;
+    while (pos < max) {
+        const code = str.charCodeAt(pos);
+        if (code === 0x0A /* \n */) {
+            break;
+        }
+
+        if (pos > start && (str.charCodeAt(pos - 1) === 0x20 || str.charCodeAt(pos - 1) === 0x09)) {
+            if (code === 0x22 /* " */ || code === 0x27 /* ' */) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const titleRes = (md.helpers as any).parseLinkTitle(str, pos, max);
+                if (titleRes.ok) {
+                    let after = titleRes.pos;
+                    while (after < max && (str.charCodeAt(after) === 0x20 || str.charCodeAt(after) === 0x09)) {
+                        after++;
+                    }
+                    if (after < max && str.charCodeAt(after) === 0x29 /* ) */) {
+                        let destEnd = pos - 1;
+                        while (destEnd > start && (str.charCodeAt(destEnd - 1) === 0x20 || str.charCodeAt(destEnd - 1) === 0x09)) {
+                            destEnd--;
+                        }
+                        return {
+                            ok: true,
+                            pos: destEnd,
+                            str: str.slice(start, destEnd)
+                        };
+                    }
+                }
+            }
+        }
+
+        if (code === 0x28 /* ( */) {
+            level++;
+        } else if (code === 0x29 /* ) */) {
+            if (level === 0) {
+                break;
+            }
+            level--;
+        }
+        pos++;
+    }
+
+    if (pos > start && level === 0) {
+        let destEnd = pos;
+        while (destEnd > start && (str.charCodeAt(destEnd - 1) === 0x20 || str.charCodeAt(destEnd - 1) === 0x09)) {
+            destEnd--;
+        }
+        return {
+            ok: true,
+            pos: destEnd,
+            str: str.slice(start, destEnd)
+        };
+    }
+
+    return res;
+};
+
 // Inline code styling
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const defaultInlineCode = md.renderer.rules.code_inline || function (tokens: any, idx: number, options: any, env: any, self: any) {
@@ -430,7 +538,7 @@ md.renderer.rules.image = function (tokens: any, idx: number, options: any, env:
     tokens[idx].attrSet('loading', 'lazy');
     const src = (tokens[idx].attrGet('src') || '').trim();
     if (shouldResolveLocalImage(src)) {
-        const resolved = resolvedImageUriCache.get(src);
+        const resolved = resolvedImageUriCache.get(src) || resolvedImageUriCache.get(decodeURIComponentSafe(src));
         if (resolved) {
             tokens[idx].attrSet('src', resolved);
         } else {
@@ -445,12 +553,29 @@ function requestLocalImageResolution() {
     if (!preview) return;
 
     const pending = new Set<string>();
+
     preview.querySelectorAll('img[data-md-src]').forEach((node) => {
         const src = (node.getAttribute('data-md-src') || '').trim();
-        if (!src || resolvedImageUriCache.has(src)) {
+        if (!src) return;
+        const cached = resolvedImageUriCache.get(src) || resolvedImageUriCache.get(decodeURIComponentSafe(src));
+        if (cached) {
+            node.setAttribute('src', cached);
+            node.removeAttribute('data-md-src');
             return;
         }
         pending.add(src);
+    });
+
+    preview.querySelectorAll('img:not([data-md-src])').forEach((node) => {
+        const rawSrc = (node.getAttribute('src') || '').trim();
+        if (!rawSrc || !shouldResolveLocalImage(rawSrc)) return;
+        const cached = resolvedImageUriCache.get(rawSrc) || resolvedImageUriCache.get(decodeURIComponentSafe(rawSrc));
+        if (cached) {
+            node.setAttribute('src', cached);
+            return;
+        }
+        node.setAttribute('data-md-src', rawSrc);
+        pending.add(rawSrc);
     });
 
     if (pending.size === 0) {
@@ -473,6 +598,10 @@ function applyResolvedImageUris(resolved: Record<string, string>) {
             return;
         }
         resolvedImageUriCache.set(source, uri);
+        const decoded = decodeURIComponentSafe(source);
+        if (decoded !== source) {
+            resolvedImageUriCache.set(decoded, uri);
+        }
     });
 
     const preview = $('markdownPreview');
@@ -482,7 +611,7 @@ function applyResolvedImageUris(resolved: Record<string, string>) {
 
     preview.querySelectorAll('img[data-md-src]').forEach((node) => {
         const source = (node.getAttribute('data-md-src') || '').trim();
-        const uri = resolvedImageUriCache.get(source);
+        const uri = resolvedImageUriCache.get(source) || resolvedImageUriCache.get(decodeURIComponentSafe(source));
         if (!uri) {
             return;
         }

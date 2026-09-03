@@ -117,15 +117,49 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 workspaceFolderUri
             });
 
+            const docRoot = vscode.Uri.file(path.parse(filePath).root);
+            const initialRoots = [
+                vscode.Uri.joinPath(this.context.extensionUri, 'resources'),
+                vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
+                documentDirUri,
+                docRoot,
+                ...workspaceFolders
+            ];
+
+            const ensureResourceRoots = (targetUris: vscode.Uri[]) => {
+                try {
+                    const currentRoots = [...(webviewPanel.webview.options.localResourceRoots || [])];
+                    const toAdd: vscode.Uri[] = [];
+
+                    for (const targetUri of targetUris) {
+                        const targetDir = vscode.Uri.file(path.dirname(targetUri.fsPath));
+                        const targetRoot = vscode.Uri.file(path.parse(targetUri.fsPath).root);
+
+                        if (!currentRoots.some(r => r.fsPath.toLowerCase() === targetRoot.fsPath.toLowerCase()) &&
+                            !toAdd.some(r => r.fsPath.toLowerCase() === targetRoot.fsPath.toLowerCase())) {
+                            toAdd.push(targetRoot);
+                        }
+                        if (!currentRoots.some(r => r.fsPath.toLowerCase() === targetDir.fsPath.toLowerCase()) &&
+                            !toAdd.some(r => r.fsPath.toLowerCase() === targetDir.fsPath.toLowerCase())) {
+                            toAdd.push(targetDir);
+                        }
+                    }
+
+                    if (toAdd.length > 0) {
+                        webviewPanel.webview.options = {
+                            ...webviewPanel.webview.options,
+                            localResourceRoots: [...currentRoots, ...toAdd]
+                        };
+                    }
+                } catch (e) {
+                    console.error('Failed to update localResourceRoots:', e);
+                }
+            };
+
             // Set up webview
             webviewPanel.webview.options = {
                 enableScripts: true,
-                localResourceRoots: [
-                    vscode.Uri.joinPath(this.context.extensionUri, 'resources'),
-                    vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
-                    documentDirUri,
-                    ...workspaceFolders
-                ]
+                localResourceRoots: initialRoots
             };
             webviewPanel.webview.html = this.getWebviewContent(webviewPanel);
 
@@ -185,6 +219,27 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         try {
                             const requestedSources = Array.isArray(message.sources) ? message.sources : [];
                             const resolved: Record<string, string> = {};
+                            const targetFileUris: vscode.Uri[] = [];
+
+                            for (const source of requestedSources) {
+                                if (typeof source !== 'string') {
+                                    continue;
+                                }
+
+                                const trimmed = source.trim();
+                                if (!trimmed) {
+                                    continue;
+                                }
+
+                                const target = this.resolveMarkdownImageTarget(trimmed, document.uri);
+                                if (target) {
+                                    targetFileUris.push(target.targetUri);
+                                }
+                            }
+
+                            if (targetFileUris.length > 0) {
+                                ensureResourceRoots(targetFileUris);
+                            }
 
                             for (const source of requestedSources) {
                                 if (typeof source !== 'string') {
@@ -440,15 +495,35 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             let lineNum: number | undefined;
                             const hashIndex = href.indexOf('#');
                             const anchor = hashIndex !== -1 ? href.substring(hashIndex + 1) : '';
-                            const hrefWithoutAnchor = hashIndex !== -1 ? href.substring(0, hashIndex) : href;
+                            let hrefWithoutAnchor = hashIndex !== -1 ? href.substring(0, hashIndex) : href;
+                            try {
+                                hrefWithoutAnchor = decodeURIComponent(hrefWithoutAnchor);
+                            } catch {
+                                try {
+                                    hrefWithoutAnchor = decodeURI(hrefWithoutAnchor);
+                                } catch {}
+                            }
                             
                             const lineMatch = anchor.match(/^[Ll](\d+)$/);
                             if (lineMatch) {
                                 lineNum = parseInt(lineMatch[1], 10);
                             }
                             
-                            // Resolve the relative path
-                            const resolvedPath = path.resolve(currentDir, hrefWithoutAnchor);
+                            // Resolve the relative path or absolute Windows/file path
+                            let resolvedPath: string;
+                            if (/^file:\/\/\/?/i.test(hrefWithoutAnchor)) {
+                                let f = hrefWithoutAnchor.replace(/^file:\/\/\/?/i, '');
+                                if (/^[a-zA-Z]:[/\\]/.test(f)) {
+                                    f = f.replace(/\//g, '\\');
+                                } else {
+                                    f = '/' + f;
+                                }
+                                resolvedPath = path.normalize(f);
+                            } else if (/^[a-zA-Z]:[/\\]/.test(hrefWithoutAnchor)) {
+                                resolvedPath = path.normalize(hrefWithoutAnchor);
+                            } else {
+                                resolvedPath = path.resolve(currentDir, hrefWithoutAnchor);
+                            }
                             const targetUri = vscode.Uri.file(resolvedPath);
                             
                             if (lineNum !== undefined && lineNum > 0) {
@@ -765,7 +840,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
         </html>`;
     }
 
-    private resolveMarkdownImageUri(rawSource: string, documentUri: vscode.Uri, webview: vscode.Webview): string | null {
+    private resolveMarkdownImageTarget(rawSource: string, documentUri: vscode.Uri): { targetUri: vscode.Uri; suffix: string } | null {
         if (!rawSource || /^https?:\/\//i.test(rawSource) || /^data:/i.test(rawSource) || /^#/.test(rawSource)) {
             return null;
         }
@@ -778,27 +853,60 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             return null;
         }
 
-        const normalized = sourcePath.replace(/\\/g, '/');
+        let decoded = sourcePath;
+        try {
+            decoded = decodeURIComponent(sourcePath);
+        } catch {
+            try {
+                decoded = decodeURI(sourcePath);
+            } catch {
+                decoded = sourcePath;
+            }
+        }
 
         try {
-            if (/^file:/i.test(normalized)) {
-                return webview.asWebviewUri(vscode.Uri.parse(normalized)).toString() + suffix;
+            // Check file:// URI
+            if (/^file:\/\/\/?/i.test(decoded)) {
+                let filePath = decoded.replace(/^file:\/\/\/?/i, '');
+                if (/^[a-zA-Z]:[/\\]/.test(filePath)) {
+                    filePath = filePath.replace(/\//g, '\\');
+                } else {
+                    filePath = '/' + filePath;
+                }
+                return { targetUri: vscode.Uri.file(path.normalize(filePath)), suffix };
             }
 
+            // Windows drive path: e.g. F:\... or F:/...
+            if (/^[a-zA-Z]:[/\\]/.test(decoded)) {
+                return { targetUri: vscode.Uri.file(path.normalize(decoded)), suffix };
+            }
+
+            // Workspace-relative path: e.g. /images/...
             const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri)?.uri;
-
-            if (/^\//.test(normalized) && workspaceFolder) {
-                const rel = normalized.replace(/^\/+/, '');
-                const absolute = path.join(workspaceFolder.fsPath, rel);
-                return webview.asWebviewUri(vscode.Uri.file(absolute)).toString() + suffix;
+            if (/^[/\\]/.test(decoded)) {
+                if (workspaceFolder) {
+                    const rel = decoded.replace(/^[/\\]+/, '');
+                    const absolute = path.join(workspaceFolder.fsPath, rel);
+                    return { targetUri: vscode.Uri.file(absolute), suffix };
+                }
+                return { targetUri: vscode.Uri.file(path.normalize(decoded)), suffix };
             }
 
-            if (path.isAbsolute(normalized)) {
-                return webview.asWebviewUri(vscode.Uri.file(normalized)).toString() + suffix;
-            }
+            // Relative path to document directory
+            const absolute = path.resolve(path.dirname(documentUri.fsPath), decoded);
+            return { targetUri: vscode.Uri.file(absolute), suffix };
+        } catch {
+            return null;
+        }
+    }
 
-            const absolute = path.resolve(path.dirname(documentUri.fsPath), normalized);
-            return webview.asWebviewUri(vscode.Uri.file(absolute)).toString() + suffix;
+    private resolveMarkdownImageUri(rawSource: string, documentUri: vscode.Uri, webview: vscode.Webview): string | null {
+        const target = this.resolveMarkdownImageTarget(rawSource, documentUri);
+        if (!target) {
+            return null;
+        }
+        try {
+            return webview.asWebviewUri(target.targetUri).toString() + target.suffix;
         } catch {
             return null;
         }

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.98 - Markdown Preview Improvements
+- Fixed inline code appearing smaller than normal text in the preview.
+- Fixed images failing to load from external drives or folder paths containing spaces (including notes created in Typora).
+- Added support for local HTML image tags.
+
 ## v1.9.97 - XLSX XML Namespace Compatibility
 - Fixed an issue where XLSX files with XML namespace prefixes  failed to open.
 - Added automatic XML namespace sanitization to ensure seamless loading and editing across all OpenXML spreadsheet variants.
