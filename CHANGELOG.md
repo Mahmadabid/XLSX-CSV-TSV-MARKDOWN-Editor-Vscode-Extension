@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.99 - Markdown Edit Preservation & Split Scroll Stability
+- Fixed Preview & Edit saves preserving Mermaid diagram source instead of serializing rendered SVG output.
+- Fixed fenced code blocks preserving their language, multiline layout, and original source without injecting preview UI labels.
+- Improved split Markdown editing scroll stability by isolating edit-mode scroll containers and preventing live preview redraw feedback loops.
+- Chaned logo.
+
 ## v1.9.98 - Markdown Preview Improvements
 - Fixed inline code appearing smaller than normal text in the preview.
 - Fixed images failing to load from external drives or folder paths containing spaces (including notes created in Typora).

@@ -1,5 +1,14 @@
+:root {
+    --formatting-height: 0px;
+}
+
 * {
     box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
 }
 
 body {
@@ -16,6 +25,12 @@ body {
 
 body.sticky-toolbar-enabled {
     padding-top: var(--header-height);
+}
+
+body.edit-mode,
+body.preview-edit-mode {
+    --formatting-height: 37px;
+    overflow: hidden !important;
 }
 
 body.edit-mode #content {
@@ -152,34 +167,50 @@ body.edit-mode #content {
 
 /* ===== Content ===== */
 #content {
-    height: calc(100vh - var(--header-height));
+    height: calc(100vh - var(--header-height) - var(--formatting-height, 0px));
+    max-height: calc(100vh - var(--header-height) - var(--formatting-height, 0px));
     overflow: hidden;
     position: relative;
     z-index: 1;
 }
 
-body:not(.sticky-toolbar-enabled) {
+body:not(.sticky-toolbar-enabled):not(.edit-mode) {
     overflow: hidden;
 }
 
-body:not(.sticky-toolbar-enabled) #content {
+body:not(.sticky-toolbar-enabled):not(.edit-mode) #content {
     height: 100vh;
     overflow: auto;
 }
 
-/* Non-sticky: let #content be the primary scroller so toolbar scrolls away */
-body:not(.sticky-toolbar-enabled) .markdown-container {
+/* Non-sticky: let #content be the primary scroller so toolbar scrolls away (preview only, not edit mode) */
+body:not(.sticky-toolbar-enabled):not(.edit-mode) .markdown-container {
     height: auto;
     min-height: calc(100vh - var(--header-height));
     overflow: visible;
 }
 
-body:not(.sticky-toolbar-enabled) .markdown-preview,
-body:not(.sticky-toolbar-enabled) .markdown-editor,
-body:not(.sticky-toolbar-enabled) .toc-panel {
+body:not(.sticky-toolbar-enabled):not(.edit-mode) .markdown-preview,
+body:not(.sticky-toolbar-enabled):not(.edit-mode) .markdown-editor,
+body:not(.sticky-toolbar-enabled):not(.edit-mode) .toc-panel {
     height: auto;
     min-height: 100%;
     overflow: visible;
+}
+
+body.edit-mode #content,
+body.preview-edit-mode #content {
+    height: calc(100vh - var(--header-height) - var(--formatting-height, 37px)) !important;
+    max-height: calc(100vh - var(--header-height) - var(--formatting-height, 37px)) !important;
+    overflow: hidden !important;
+}
+
+body.edit-mode .markdown-container,
+body.preview-edit-mode .markdown-container {
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
 }
 
 
@@ -373,13 +404,30 @@ body:not(.sticky-toolbar-enabled) .toc-panel {
 
 .markdown-container.split-view .editor-wrapper {
     display: flex;
-    overflow: hidden;
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
     min-width: 0;
 }
 
+.markdown-container.split-view .markdown-editor {
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: auto !important;
+    box-sizing: border-box !important;
+}
+
 .markdown-container.split-view .markdown-preview {
-    overflow-y: auto;
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
     min-width: 0;
+    box-sizing: border-box !important;
 }
 
 /* ===== Preview Edit Mode (WYSIWYG) ===== */

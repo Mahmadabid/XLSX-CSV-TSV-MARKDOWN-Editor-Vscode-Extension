@@ -115,6 +115,82 @@ const turndownService = new TurndownService({
 });
 turndownService.use(gfm);
 
+function decodeStoredFenceCode(encoded: string | null): string | null {
+    if (!encoded) {
+        return null;
+    }
+    try {
+        return decodeURIComponent(encoded);
+    } catch {
+        return encoded;
+    }
+}
+
+function formatFencedMarkdown(info: string, code: string): string {
+    const normalized = code.replace(/\r\n/g, '\n').replace(/\n+$/, '');
+    const longestFence = Math.max(3, ...Array.from(normalized.matchAll(/`+/g), match => match[0].length + 1));
+    const fence = '`'.repeat(longestFence);
+    return `\n\n${fence}${info}\n${normalized}\n${fence}\n\n`;
+}
+
+// Custom Turndown rules to preserve Mermaid diagrams and code blocks without loss
+turndownService.addRule('mermaidBlock', {
+    filter: (node) => {
+        return node.nodeName === 'DIV' && node.classList.contains('mermaid');
+    },
+    replacement: (_content, node) => {
+        const el = node as HTMLElement;
+        const code = decodeStoredFenceCode(el.getAttribute('data-mermaid-code')) || el.textContent || '';
+        const info = el.getAttribute('data-fence-info') || 'mermaid';
+        return formatFencedMarkdown(info, code);
+    }
+});
+
+turndownService.addRule('fencedCodeBlockContainer', {
+    filter: (node) => {
+        return node.nodeName === 'DIV' && node.classList.contains('code-block');
+    },
+    replacement: (_content, node) => {
+        const el = node as HTMLElement;
+        const info = el.getAttribute('data-fence-info') || '';
+        const originalCode = decodeStoredFenceCode(el.getAttribute('data-code'));
+
+        let code = '';
+        const codeLines = el.querySelectorAll('.code-line');
+        if (codeLines.length > 0) {
+            code = Array.from(codeLines).map(line => line.textContent || '').join('\n');
+        } else {
+            const preCode = el.querySelector('pre > code');
+            if (preCode) {
+                code = preCode.textContent || '';
+            } else if (originalCode !== null) {
+                code = originalCode;
+            }
+        }
+
+        if (originalCode !== null && code.replace(/\r\n/g, '\n').trim() === originalCode.replace(/\r\n/g, '\n').trim()) {
+            code = originalCode;
+        }
+
+        return formatFencedMarkdown(info, code);
+    }
+});
+
+turndownService.addRule('katexBlock', {
+    filter: (node) => {
+        return node.nodeName === 'SPAN' && (node.classList.contains('katex') || node.classList.contains('katex-display'));
+    },
+    replacement: (content, node) => {
+        const el = node as HTMLElement;
+        const annotation = el.querySelector('annotation');
+        if (annotation && annotation.textContent) {
+            const tex = annotation.textContent;
+            return el.classList.contains('katex-display') ? `\n\n$$${tex}$$\n\n` : `$${tex}$`;
+        }
+        return content;
+    }
+});
+
 import { detectIsRTL } from '../shared/rtlUtils';
 
 // Settings
@@ -635,7 +711,9 @@ md.renderer.rules.fence = function (tokens: any, idx: number, options: any, env:
     const firstLine = code.trim().split(/\n/)[0].trim();
     if (langName === 'mermaid' || langName === 'flowchart' || (langName === '' && (firstLine === 'gantt' || firstLine === 'sequenceDiagram' || /^graph (?:TB|BT|RL|LR|TD);?$/.test(firstLine)))) {
         const dataLine = token.map && token.level === 0 ? ` data-line="${token.map[0]}"` : '';
-        return `<div class="mermaid"${dataLine}>${code}</div>`;
+        const encoded = encodeURIComponent(code);
+        const fenceInfo = info || 'mermaid';
+        return `<div class="mermaid"${dataLine} data-mermaid-code="${escapeHtmlAttr(encoded)}" data-fence-info="${escapeHtmlAttr(fenceInfo)}" contenteditable="false">${md.utils.escapeHtml(code)}</div>`;
     }
 
     let highlighted = '';
@@ -658,7 +736,7 @@ md.renderer.rules.fence = function (tokens: any, idx: number, options: any, env:
     // Wrap each line for line numbers
     const numberedCode = wrapCodeLines(highlighted);
 
-    return `<div class="code-block"${dataLine}><div class="code-block-header">${langLabel}${copyButton}</div><pre><code${langClass}>${numberedCode}</code></pre></div>`;
+    return `<div class="code-block"${dataLine} data-code="${escapeHtmlAttr(encoded)}" data-fence-info="${escapeHtmlAttr(info)}"><div class="code-block-header" contenteditable="false">${langLabel}${copyButton}</div><pre><code${langClass}>${numberedCode}</code></pre></div>`;
 };
 
 function addHeadingIds(tokens: any[]) {
@@ -759,9 +837,14 @@ function renderMermaidFlowcharts() {
     }
 }
 
+let isRenderingMarkdown = false;
+
 function renderMarkdown(content: string) {
     const preview = $('markdownPreview');
     if (preview) {
+        isRenderingMarkdown = true;
+        const editor = $('markdownEditor') as HTMLTextAreaElement | null;
+        const isEditorFocused = !!editor && document.activeElement === editor;
         const savedScrollTop = preview.scrollTop;
         const savedScrollLeft = preview.scrollLeft;
         const env: any = {};
@@ -769,10 +852,26 @@ function renderMarkdown(content: string) {
         const tokens = md.parse(normalizedContent, env);
         addHeadingIds(tokens);
         preview.innerHTML = md.renderer.render(tokens, md.options, env);
-        if (savedScrollTop > 0 || savedScrollLeft > 0) {
+
+        refreshSyncMetrics();
+
+        // In split edit mode with sync scroll active and editor focused, synchronize preview smoothly without feedback loops
+        if (isEditMode && !isPreviewEditMode && currentSettings.syncScroll && isEditorFocused && editor) {
+            const editorMax = editor.scrollHeight - editor.clientHeight;
+            const previewMax = preview.scrollHeight - preview.clientHeight;
+            if (editorMax > 0 && previewMax > 0) {
+                if (cachedEditorLineMap.length >= 2 && cachedPreviewLineMap.length >= 2) {
+                    const sourceLine = interpolateLineFromTop(cachedEditorLineMap, editor.scrollTop);
+                    preview.scrollTop = Math.max(0, Math.min(previewMax, interpolateTopFromLine(cachedPreviewLineMap, sourceLine)));
+                } else {
+                    preview.scrollTop = (editor.scrollTop / editorMax) * previewMax;
+                }
+            }
+        } else if (savedScrollTop > 0 || savedScrollLeft > 0) {
             preview.scrollTop = savedScrollTop;
             preview.scrollLeft = savedScrollLeft;
         }
+
         preview.querySelectorAll('img').forEach((node) => {
             if (!(node instanceof HTMLImageElement)) return;
             if (!node.complete) {
@@ -780,13 +879,15 @@ function renderMarkdown(content: string) {
             }
         });
         updateToc(tokens);
-        refreshSyncMetrics();
         requestAnimationFrame(() => {
             updateScrollSpy();
             updateProgressBar();
             reapplySearch();
             requestLocalImageResolution();
             renderMermaidFlowcharts();
+            requestAnimationFrame(() => {
+                isRenderingMarkdown = false;
+            });
         });
     }
 }
@@ -795,6 +896,17 @@ function updateToc(tokens: any[]) {
     const tocBody = $('tocBody');
     if (!tocBody) return;
     tocBody.innerHTML = buildToc(tokens);
+}
+
+function updateFormattingToolbarHeight() {
+    const fmtToolbar = $('formattingToolbar');
+    if (fmtToolbar && !fmtToolbar.classList.contains('hidden')) {
+        const rect = fmtToolbar.getBoundingClientRect();
+        const height = Math.max(28, Math.ceil(rect.height || 37));
+        document.documentElement.style.setProperty('--formatting-height', `${height}px`);
+    } else {
+        document.documentElement.style.setProperty('--formatting-height', '0px');
+    }
 }
 
 // ===== Edit Mode (Split View) =====
@@ -826,6 +938,7 @@ function setEditMode(enabled: boolean) {
     // Toggle formatting toolbar
     const fmtToolbar = $('formattingToolbar');
     if (fmtToolbar) fmtToolbar.classList.toggle('hidden', !enabled);
+    updateFormattingToolbarHeight();
 
     // Ensure preview is not contenteditable
     if (preview) preview.contentEditable = 'false';
@@ -844,33 +957,41 @@ function setEditMode(enabled: boolean) {
 
         if (editor) editor.value = currentContent;
 
-        // Cache line height after entering edit mode
+        // Cache line height and lock outer scroll after entering edit mode
         requestAnimationFrame(() => {
             updateCachedLineHeight();
+            updateFormattingToolbarHeight();
+
+            // Lock outer scroll containers completely
+            window.scrollTo(0, 0);
+            document.body.scrollTop = 0;
+            const content = $('content');
+            if (content) {
+                content.scrollTop = 0;
+                content.scrollLeft = 0;
+            }
+            if (container) {
+                container.scrollTop = 0;
+                container.scrollLeft = 0;
+            }
+
             if (editor) {
                 editor.scrollTop = 0;
                 editor.scrollLeft = 0;
-                editor.focus();
+                editor.focus({ preventScroll: true });
                 editor.setSelectionRange(0, 0);
             }
             if (preview) preview.scrollTop = 0;
-            // Scroll the container so the editor (left side) is visible
-            if (container) container.scrollLeft = 0;
 
-            setTimeout(() => {
-                if (editor) {
-                    editor.scrollTop = 0;
-                    editor.scrollLeft = 0;
-                }
-                if (preview) preview.scrollTop = 0;
-                if (container) container.scrollLeft = 0;
-            }, 50);
+            refreshSyncMetrics();
+            requestAnimationFrame(refreshSyncMetrics);
         });
     } else {
         // Exit edit mode
         container?.classList.remove('split-view');
         container?.classList.remove('preview-edit');
         container?.classList.remove('preview-left');
+        updateFormattingToolbarHeight();
         renderMarkdown(currentContent);
     }
 
@@ -905,6 +1026,7 @@ function setPreviewEditMode(enabled: boolean) {
     // Show formatting toolbar in preview edit mode
     const fmtToolbar = $('formattingToolbar');
     if (fmtToolbar) fmtToolbar.classList.toggle('hidden', !enabled);
+    updateFormattingToolbarHeight();
 
     if (enabled) {
         originalContent = currentContent;
@@ -920,7 +1042,7 @@ function setPreviewEditMode(enabled: boolean) {
             preview.contentEditable = 'true';
             enhancePreviewTablesForEditing();
             initializePreviewHistory();
-            preview.focus();
+            preview.focus({ preventScroll: true });
         }
     } else {
         // Exit preview edit mode
@@ -936,6 +1058,7 @@ function setPreviewEditMode(enabled: boolean) {
         container?.classList.remove('split-view');
         container?.classList.remove('preview-edit');
         container?.classList.remove('preview-left');
+        updateFormattingToolbarHeight();
         renderMarkdown(currentContent);
     }
 
@@ -997,6 +1120,56 @@ let lastEditorScrollTop = 0;
 let lastEditorScrollLeft = 0;
 let lastEditorSelStart = 0;
 let lastEditorSelEnd = 0;
+let pendingPreviewEditScrollRestore: { top: number; left: number } | null = null;
+let pendingPreviewEditScrollClearTimer: number | null = null;
+
+function capturePreviewEditScroll() {
+    const preview = $('markdownPreview');
+    if (!preview) {
+        return null;
+    }
+
+    return {
+        top: preview.scrollTop,
+        left: preview.scrollLeft
+    };
+}
+
+function rememberPreviewEditScroll() {
+    pendingPreviewEditScrollRestore = capturePreviewEditScroll();
+    if (pendingPreviewEditScrollClearTimer !== null) {
+        window.clearTimeout(pendingPreviewEditScrollClearTimer);
+    }
+    pendingPreviewEditScrollClearTimer = window.setTimeout(() => {
+        pendingPreviewEditScrollRestore = null;
+        pendingPreviewEditScrollClearTimer = null;
+    }, 1500);
+}
+
+function restorePreviewEditScroll(scrollState: { top: number; left: number } | null = pendingPreviewEditScrollRestore) {
+    if (!scrollState) {
+        return;
+    }
+
+    const preview = $('markdownPreview') as HTMLElement | null;
+    if (!preview) {
+        return;
+    }
+
+    const applyScroll = () => {
+        preview.scrollTop = scrollState.top;
+        preview.scrollLeft = scrollState.left;
+        if (isPreviewEditMode) {
+            preview.focus({ preventScroll: true });
+        }
+    };
+
+    applyScroll();
+    requestAnimationFrame(() => {
+        applyScroll();
+        requestAnimationFrame(applyScroll);
+    });
+}
 
 function performSave(exitAfterSave = false) {
     if (isSaving || !isEditMode) return;
@@ -1013,12 +1186,16 @@ function performSave(exitAfterSave = false) {
     }
 
     if (isPreviewEditMode) {
+        rememberPreviewEditScroll();
+
         // Convert preview HTML back to markdown
         const preview = $('markdownPreview');
         if (preview) {
             const clone = preview.cloneNode(true) as HTMLElement;
             clone.querySelectorAll('.table-hover-tools').forEach(node => node.remove());
             clone.querySelectorAll('.heading-anchor').forEach(node => node.remove());
+            clone.querySelectorAll('.code-block-header').forEach(node => node.remove());
+            clone.querySelectorAll('.code-copy').forEach(node => node.remove());
             clone.querySelectorAll('td, th').forEach((cellNode) => {
                 const cell = cellNode as HTMLTableCellElement;
                 if ((cell.textContent || '').replace(/\u00a0/g, '').trim() === '') {
@@ -1065,6 +1242,10 @@ const debouncedRender = debounce((content: string) => {
 function onEditorInput() {
     const editor = $('markdownEditor') as HTMLTextAreaElement;
     if (!editor) return;
+
+    activeScrollSource = 'editor';
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => { activeScrollSource = null; }, 300);
 
     currentContent = editor.value;
 
@@ -1175,7 +1356,7 @@ function ensureEditorLineMeasureHost(editor: HTMLTextAreaElement): HTMLDivElemen
     }
 
     const style = getComputedStyle(editor);
-    editorLineMeasureHost.style.position = 'absolute';
+    editorLineMeasureHost.style.position = 'fixed';
     editorLineMeasureHost.style.visibility = 'hidden';
     editorLineMeasureHost.style.pointerEvents = 'none';
     editorLineMeasureHost.style.left = '-100000px';
@@ -1183,6 +1364,9 @@ function ensureEditorLineMeasureHost(editor: HTMLTextAreaElement): HTMLDivElemen
     editorLineMeasureHost.style.zIndex = '-1';
     editorLineMeasureHost.style.boxSizing = 'border-box';
     editorLineMeasureHost.style.overflow = 'hidden';
+    editorLineMeasureHost.style.height = '0';
+    editorLineMeasureHost.style.maxHeight = '0';
+    editorLineMeasureHost.style.contain = 'strict';
     editorLineMeasureHost.style.width = `${editor.clientWidth}px`;
     editorLineMeasureHost.style.padding = style.padding;
     editorLineMeasureHost.style.border = '0';
@@ -1262,7 +1446,7 @@ function updateCachedLineHeight() {
 }
 
 function syncEditorToPreview() {
-    if (!currentSettings.syncScroll || isPreviewEditMode) return;
+    if (!currentSettings.syncScroll || isPreviewEditMode || isRenderingMarkdown) return;
     if (activeScrollSource === 'preview') return;
 
     activeScrollSource = 'editor';
@@ -1288,13 +1472,15 @@ function syncEditorToPreview() {
 }
 
 function syncPreviewToEditor() {
-    if (!currentSettings.syncScroll || isPreviewEditMode) return;
+    if (!currentSettings.syncScroll || isPreviewEditMode || isRenderingMarkdown) return;
     if (activeScrollSource === 'editor') return;
+
+    const editor = $('markdownEditor') as HTMLTextAreaElement | null;
+    if (editor && document.activeElement === editor) return;
 
     activeScrollSource = 'preview';
     if (scrollTimeout) clearTimeout(scrollTimeout);
 
-    const editor = $('markdownEditor') as HTMLTextAreaElement;
     const preview = $('markdownPreview');
     if (!editor || !preview) return;
 
@@ -1900,6 +2086,10 @@ window.addEventListener('message', (event) => {
 
     switch (m.command) {
         case 'initMarkdown':
+            const wasPreviewEditMode = isPreviewEditMode;
+            const previewEditScrollState = wasPreviewEditMode
+                ? (pendingPreviewEditScrollRestore || capturePreviewEditScroll())
+                : null;
             const loading = $('loadingIndicator');
             if (loading) loading.style.display = 'none';
 
@@ -1910,6 +2100,15 @@ window.addEventListener('message', (event) => {
             workspaceFolderUri = m.workspaceFolderUri || null;
             resolvedImageUriCache.clear();
             renderMarkdown(currentContent);
+            if (wasPreviewEditMode) {
+                const preview = $('markdownPreview');
+                if (preview) {
+                    preview.contentEditable = 'true';
+                    enhancePreviewTablesForEditing();
+                    initializePreviewHistory();
+                }
+                restorePreviewEditScroll(previewEditScrollState);
+            }
             updateTextDirection(currentContent);
             updateStatusInfo();
             break;
@@ -1933,7 +2132,9 @@ window.addEventListener('message', (event) => {
                     }
                 } else {
                     const editorEl = $('markdownEditor') as HTMLTextAreaElement | null;
-                    if (editorEl && (lastEditorScrollTop > 0 || lastEditorScrollLeft > 0 || lastEditorSelStart > 0)) {
+                    if (isPreviewEditMode) {
+                        restorePreviewEditScroll();
+                    } else if (editorEl && (lastEditorScrollTop > 0 || lastEditorScrollLeft > 0 || lastEditorSelStart > 0)) {
                         editorEl.scrollTop = lastEditorScrollTop;
                         editorEl.scrollLeft = lastEditorScrollLeft;
                         try { editorEl.setSelectionRange(lastEditorSelStart, lastEditorSelEnd); } catch {}
@@ -2276,7 +2477,7 @@ function wrapSelection(editor: HTMLTextAreaElement, before: string, after: strin
         editor.selectionStart = start + bLen;
         editor.selectionEnd = end + bLen;
     }
-    editor.focus();
+    editor.focus({ preventScroll: true });
     onEditorInput();
 }
 
@@ -2304,7 +2505,7 @@ function toggleLinePrefix(editor: HTMLTextAreaElement, prefix: string) {
         editor.selectionStart = start + diff;
         editor.selectionEnd = end + diff;
     }
-    editor.focus();
+    editor.focus({ preventScroll: true });
     onEditorInput();
 }
 
@@ -2315,7 +2516,7 @@ function insertAtCursor(editor: HTMLTextAreaElement, text: string, cursorOffset?
     editor.value = value.substring(0, start) + text + value.substring(end);
     const pos = cursorOffset !== undefined ? start + cursorOffset : start + text.length;
     editor.selectionStart = editor.selectionEnd = pos;
-    editor.focus();
+    editor.focus({ preventScroll: true });
     onEditorInput();
 }
 
@@ -2333,7 +2534,7 @@ function insertLink(editor: HTMLTextAreaElement) {
         editor.selectionStart = start + 1;
         editor.selectionEnd = start + 5;
     }
-    editor.focus();
+    editor.focus({ preventScroll: true });
 }
 
 function insertImage(editor: HTMLTextAreaElement) {
@@ -2346,7 +2547,7 @@ function insertImage(editor: HTMLTextAreaElement) {
     // Select "image-url"
     editor.selectionStart = start + alt.length + 4;
     editor.selectionEnd = start + alt.length + 13;
-    editor.focus();
+    editor.focus({ preventScroll: true });
     onEditorInput();
 }
 

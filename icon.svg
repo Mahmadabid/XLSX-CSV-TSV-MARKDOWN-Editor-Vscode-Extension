@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1e2e"/>
+      <stop offset="100%" stop-color="#11111b"/>
+    </linearGradient>
+
+    <!-- Spreadsheet / Data Layer (Green) -->
+    <linearGradient id="gridGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#107c41"/>
+      <stop offset="100%" stop-color="#1f9a55"/>
+    </linearGradient>
+
+    <!-- Document / Text Layer (Blue/Indigo) -->
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+
+    <!-- Pen / Edit Gradient -->
+    <linearGradient id="penGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <!-- Drop Shadows -->
+    <filter id="shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+    <filter id="penShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Base Icon Container (VS Code extension square rounded tile) -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+  <rect width="508" height="508" x="2" y="2" rx="110" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="4"/>
+
+  <!-- BACK LAYER: Spreadsheet / Grid (XLSX, CSV, TSV) -->
+  <g filter="url(#shadow)">
+    <!-- Sheet Base -->
+    <rect x="80" y="80" width="250" height="290" rx="20" fill="url(#gridGrad)"/>
+    <!-- Fold Corner -->
+    <path d="M270,80 L330,140 L280,140 C274.5,140 270,135.5 270,130 Z" fill="#ffffff" fill-opacity="0.25"/>
+
+    <!-- Grid Table Lines & Cells -->
+    <g fill="#ffffff" opacity="0.85">
+      <!-- Header row -->
+      <rect x="106" y="152" width="46" height="14" rx="4" fill-opacity="0.9"/>
+      <rect x="160" y="152" width="46" height="14" rx="4" fill-opacity="0.9"/>
+      <rect x="214" y="152" width="46" height="14" rx="4" fill-opacity="0.9"/>
+
+      <!-- Row 1 -->
+      <rect x="106" y="176" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="160" y="176" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="214" y="176" width="46" height="22" rx="4" fill-opacity="0.3"/>
+
+      <!-- Row 2 -->
+      <rect x="106" y="206" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="160" y="206" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="214" y="206" width="46" height="22" rx="4" fill-opacity="0.3"/>
+
+      <!-- Row 3 -->
+      <rect x="106" y="236" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="160" y="236" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="214" y="236" width="46" height="22" rx="4" fill-opacity="0.3"/>
+
+      <!-- Row 4 -->
+      <rect x="106" y="266" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="160" y="266" width="46" height="22" rx="4" fill-opacity="0.3"/>
+      <rect x="214" y="266" width="46" height="22" rx="4" fill-opacity="0.3"/>
+    </g>
+
+    <!-- Spreadsheet format indicator dots -->
+    <circle cx="112" cy="114" r="5" fill="#ffffff" opacity="0.6"/>
+    <circle cx="128" cy="114" r="5" fill="#ffffff" opacity="0.6"/>
+    <circle cx="144" cy="114" r="5" fill="#ffffff" opacity="0.6"/>
+  </g>
+
+  <!-- FOREGROUND LAYER: Document (Markdown / PDF) -->
+  <g filter="url(#shadow)">
+    <!-- Base Page -->
+    <rect x="180" y="140" width="252" height="292" rx="20" fill="#f8fafc"/>
+
+    <!-- Document Corner Fold -->
+    <path d="M372,140 L432,200 L384,200 C377.4,200 372,194.6 372,188 Z" fill="#cbd5e1"/>
+
+    <!-- Red Tag (Signifying PDF) -->
+    <rect x="180" y="172" width="10" height="42" rx="2" fill="#ef4444"/>
+
+    <!-- Markdown Header Symbol '#' Style & Lines -->
+    <!-- Header Line -->
+    <rect x="214" y="178" width="124" height="16" rx="4" fill="#0f172a" opacity="0.85"/>
+
+    <!-- Paragraph lines -->
+    <rect x="214" y="212" width="180" height="10" rx="4" fill="#64748b" opacity="0.7"/>
+    <rect x="214" y="232" width="150" height="10" rx="4" fill="#64748b" opacity="0.7"/>
+    <rect x="214" y="252" width="168" height="10" rx="4" fill="#64748b" opacity="0.7"/>
+
+    <!-- Code Block / Quoted region -->
+    <rect x="214" y="278" width="180" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="230" y="290" width="90" height="8" rx="3" fill="#3b82f6" opacity="0.8"/>
+    <rect x="230" y="304" width="130" height="8" rx="3" fill="#64748b" opacity="0.6"/>
+
+    <!-- Markdown List Lines -->
+    <circle cx="220" cy="346" r="4" fill="#ef4444"/>
+    <rect x="232" y="342" width="100" height="8" rx="3" fill="#64748b" opacity="0.7"/>
+
+    <circle cx="220" cy="368" r="4" fill="#3b82f6"/>
+    <rect x="232" y="364" width="70" height="8" rx="3" fill="#64748b" opacity="0.7"/>
+  </g>
+
+  <!-- ACCENT FLOATING ACTION: Stylized Editor Pencil -->
+  <g filter="url(#penShadow)" transform="translate(325, 295) rotate(-15)">
+    <!-- Pen Body -->
+    <rect x="0" y="0" width="30" height="110" rx="6" fill="url(#penGrad)"/>
+
+    <!-- Grip Detail -->
+    <rect x="0" y="80" width="30" height="14" fill="#0369a1"/>
+
+    <!-- Tip -->
+    <path d="M0,110 L15,138 L30,110 Z" fill="#fcd34d"/>
+    <!-- Lead -->
+    <path d="M10,129 L15,138 L20,129 Z" fill="#1e293b"/>
+
+    <!-- Eraser / Top Cap -->
+    <rect x="0" y="-12" width="30" height="14" rx="4" fill="#f43f5e"/>
+    <rect x="0" y="0" width="30" height="4" fill="#94a3b8"/>
+  </g>
+</svg>
