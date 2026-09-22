@@ -806,9 +806,47 @@ function buildToc(tokens: any[]) {
         return '<div class="toc-empty">No headings found</div>';
     }
 
-    return items.map(item => {
+    return items.map((item, idx) => {
         const safeText = md.utils.escapeHtml(item.text);
-        return `<div class="toc-item toc-level-${item.level}"><a href="#${item.id}" data-target="${item.id}">${safeText}</a></div>`;
+        const depth = Math.max(0, item.level - 1);
+
+        let guidesHtml = '';
+        if (depth > 0) {
+            const guides: string[] = [];
+            for (let c = 0; c < depth; c++) {
+                if (c === depth - 1) {
+                    // Own connector column: check if a subsequent sibling at the same level exists under the same parent
+                    let hasSibling = false;
+                    for (let k = idx + 1; k < items.length; k++) {
+                        if (items[k].level < item.level) {
+                            break; // Parent boundary reached
+                        }
+                        if (items[k].level === item.level) {
+                            hasSibling = true;
+                            break;
+                        }
+                    }
+                    guides.push(hasSibling ? 'tee' : 'corner');
+                } else {
+                    // Ancestor column: check if an ancestor branch at level (c + 2) continues past this item
+                    const ancestorLevel = c + 2;
+                    let hasContinuation = false;
+                    for (let k = idx + 1; k < items.length; k++) {
+                        if (items[k].level < ancestorLevel) {
+                            break; // Higher ancestor boundary reached
+                        }
+                        if (items[k].level === ancestorLevel) {
+                            hasContinuation = true;
+                            break;
+                        }
+                    }
+                    guides.push(hasContinuation ? 'line' : 'space');
+                }
+            }
+            guidesHtml = `<span class="toc-guides" aria-hidden="true">${guides.map(g => `<span class="toc-guide toc-guide-${g}"></span>`).join('')}</span>`;
+        }
+
+        return `<div class="toc-item toc-level-${item.level}" data-level="${item.level}">${guidesHtml}<a href="#${item.id}" data-target="${item.id}" class="toc-link" title="${safeText}"><span class="toc-text">${safeText}</span></a></div>`;
     }).join('');
 }
 
@@ -1567,12 +1605,16 @@ function updateScrollSpy() {
         }
     }
 
-    const links = tocBody.querySelectorAll('.toc-item a');
+    const items = tocBody.querySelectorAll('.toc-item');
     let activeLink: HTMLElement | null = null;
-    links.forEach(a => {
-        const isActive = a.getAttribute('data-target') === current;
-        a.classList.toggle('active', isActive);
-        if (isActive) activeLink = a as HTMLElement;
+    items.forEach(item => {
+        const a = item.querySelector('a[data-target]');
+        const isActive = a ? a.getAttribute('data-target') === current : false;
+        item.classList.toggle('active', isActive);
+        if (a) {
+            a.classList.toggle('active', isActive);
+            if (isActive) activeLink = a as HTMLElement;
+        }
     });
 
     // Auto-scroll TOC body to keep active item visible
@@ -3971,7 +4013,13 @@ function wireTocPanel() {
     if (tocBody) {
         tocBody.addEventListener('click', (e) => {
             const target = e.target as HTMLElement;
-            const link = target.closest('a[data-target]') as HTMLAnchorElement | null;
+            let link = target.closest('a[data-target]') as HTMLAnchorElement | null;
+            if (!link) {
+                const item = target.closest('.toc-item');
+                if (item) {
+                    link = item.querySelector('a[data-target]');
+                }
+            }
             if (!link) return;
             e.preventDefault();
             const id = link.getAttribute('data-target') || '';

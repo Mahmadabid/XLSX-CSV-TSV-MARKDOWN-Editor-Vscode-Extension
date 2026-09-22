@@ -1,5 +1,13 @@
 :root {
     --formatting-height: 0px;
+    --toc-indent: 20px;
+    --toc-guide-color: rgba(0, 0, 0, 0.14);
+}
+
+body.dark-mode,
+body.dark-theme,
+body.vscode-dark {
+    --toc-guide-color: rgba(255, 255, 255, 0.16);
 }
 
 * {
@@ -296,35 +304,144 @@ body.preview-edit-mode .markdown-container {
 }
 
 .toc-body {
-    padding: 10px 8px 16px 8px;
+    padding: 8px 6px 16px 6px;
     overflow-y: auto;
+    overflow-x: auto;
 }
 
 .toc-item {
-    margin: 4px 0;
+    display: flex;
+    align-items: stretch;
+    min-height: 26px;
+    margin: 0;
+    padding: 0;
     font-size: 12px;
     line-height: 1.4;
-}
-
-.toc-item a {
-    color: var(--text-color);
-    text-decoration: none;
-    display: inline-block;
-    padding: 2px 6px;
+    position: relative;
     border-radius: 6px;
 }
 
+.toc-guides {
+    display: inline-flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    user-select: none;
+    pointer-events: none;
+}
+
+.toc-guide {
+    display: inline-block;
+    width: var(--toc-indent, 20px);
+    position: relative;
+    flex-shrink: 0;
+}
+
+/* Continuous vertical pass-through guide line */
+.toc-guide-line::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 9px;
+    width: 1px;
+    background-color: var(--toc-guide-color);
+}
+
+/* Tee connector (├─) */
+.toc-guide-tee::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 9px;
+    width: 1px;
+    background-color: var(--toc-guide-color);
+}
+.toc-guide-tee::after {
+    content: '';
+    position: absolute;
+    top: 13px;
+    left: 9px;
+    right: 0;
+    height: 1px;
+    background-color: var(--toc-guide-color);
+}
+
+/* Corner/Elbow connector (└─) */
+.toc-guide-corner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    height: 14px;
+    left: 9px;
+    width: 1px;
+    background-color: var(--toc-guide-color);
+}
+.toc-guide-corner::after {
+    content: '';
+    position: absolute;
+    top: 13px;
+    left: 9px;
+    right: 0;
+    height: 1px;
+    background-color: var(--toc-guide-color);
+}
+
+.toc-guide-space {
+    /* empty spacer for closed branches */
+}
+
+.toc-item .toc-link,
+.toc-item a {
+    color: var(--text-color);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 6px;
+    border-radius: 6px;
+    flex: 1;
+    min-width: 0;
+    border-left: 2px solid transparent;
+    margin-left: 0;
+    box-sizing: border-box;
+    word-break: break-word;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.toc-item .toc-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.toc-item:hover .toc-link,
 .toc-item a:hover {
     background: var(--accent-bg);
     color: var(--accent-color);
 }
 
-.toc-level-1 { padding-left: 2px; font-weight: 600; }
-.toc-level-2 { padding-left: 12px; }
-.toc-level-3 { padding-left: 22px; }
-.toc-level-4 { padding-left: 32px; }
-.toc-level-5 { padding-left: 42px; }
-.toc-level-6 { padding-left: 52px; }
+/* Stable Active Highlight - NO text width jump, NO margin shift, NO layout reflow */
+.toc-item.active .toc-link,
+.toc-item.active a,
+.toc-item a.active {
+    background: var(--accent-bg);
+    color: var(--accent-color) !important;
+    border-left-color: var(--accent-color);
+    font-weight: 500;
+}
+
+.toc-level-1 .toc-link,
+.toc-level-1 a {
+    font-weight: 600;
+    padding-left: 4px;
+}
+
+/* Fallback indents if .toc-guides are absent */
+.toc-item:not(:has(.toc-guides)).toc-level-1 { padding-left: 0; }
+.toc-item:not(:has(.toc-guides)).toc-level-2 { padding-left: 20px; }
+.toc-item:not(:has(.toc-guides)).toc-level-3 { padding-left: 40px; }
+.toc-item:not(:has(.toc-guides)).toc-level-4 { padding-left: 60px; }
+.toc-item:not(:has(.toc-guides)).toc-level-5 { padding-left: 80px; }
+.toc-item:not(:has(.toc-guides)).toc-level-6 { padding-left: 100px; }
 
 .toc-empty {
     color: var(--text-muted);
@@ -1402,13 +1519,13 @@ body.lightbox-open {
 }
 
 /* ===== Active TOC Scroll Spy ===== */
+.toc-item.active .toc-link,
+.toc-item.active a,
 .toc-item a.active {
     background: var(--accent-bg);
     color: var(--accent-color) !important;
-    font-weight: 600;
-    border-left: 2px solid var(--accent-color);
-    margin-left: -2px;
-    transition: all 0.2s ease;
+    border-left-color: var(--accent-color);
+    font-weight: 500;
 }
 
 /* Search Highlights */

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.0 - Markdown Outline Tree & Projects Modal
+- Added tree guide lines and increased heading indentation to 20px in the Outline panel.
+- Stabilized outline active highlighting to prevent text jitter during scroll spy.
+- Allowed clicking anywhere on an outline row to navigate.
+- Updated open source projects modal with official logos and colors for OpenPart and vibed-puppet.
+
 ## v1.9.99 - Markdown Edit Preservation & Split Scroll Stability
 - Fixed Preview & Edit saves preserving Mermaid diagram source instead of serializing rendered SVG output.
 - Fixed fenced code blocks preserving their language, multiline layout, and original source without injecting preview UI labels.
