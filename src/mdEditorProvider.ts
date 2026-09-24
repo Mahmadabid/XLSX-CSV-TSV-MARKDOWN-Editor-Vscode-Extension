@@ -201,7 +201,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 showLineNumbers: cfg.get('md.showLineNumbers', true),
                                 moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                                 showPopups: cfg.get('showPopups', true),
-                                isMdEnabled: isMdEnabled
+                                isMdEnabled: isMdEnabled,
+                                language: cfg.get('language', 'auto'),
+                                vscodeLanguage: vscode.env.language
                             };
                             webviewPanel.webview.postMessage({ command: 'initSettings', settings });
 
@@ -286,6 +288,18 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             }
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
+                        }
+                        break;
+
+                    case 'setLanguage':
+                        try {
+                            const lang = message.language;
+                            if (lang === 'auto' || lang === 'en' || lang === 'zh') {
+                                const cfg = vscode.workspace.getConfiguration('xlsxViewer');
+                                await cfg.update('language', lang, vscode.ConfigurationTarget.Global);
+                            }
+                        } catch (err) {
+                            console.error('Failed to update language setting:', err);
                         }
                         break;
 
@@ -618,7 +632,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                  showOutline: cfg.get('md.showOutline', true),
                                  showLineNumbers: cfg.get('md.showLineNumbers', true),
                                  moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
-                                 isMdEnabled: true
+                                 isMdEnabled: true,
+                                 language: cfg.get('language', 'auto'),
+                                 vscodeLanguage: vscode.env.language
                              };
                              webviewPanel.webview.postMessage({ command: 'initSettings', settings });
 
@@ -657,7 +673,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         showOutline: cfg.get('md.showOutline', true),
                         showLineNumbers: cfg.get('md.showLineNumbers', true),
                         moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
-                        isMdEnabled: isMdEnabled
+                        isMdEnabled: isMdEnabled,
+                        language: cfg.get('language', 'auto'),
+                        vscodeLanguage: vscode.env.language
                     };
                     try {
                         webviewPanel.webview.postMessage({ command: 'settingsUpdated', settings });

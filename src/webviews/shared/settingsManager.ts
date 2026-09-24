@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { I18n } from './i18n';
 
 export interface SettingDefinition {
     id: string;
@@ -64,10 +64,29 @@ export class SettingsManager {
             html += `<label class="setting-item tooltip${extraClass}"><input type="${inputType}" id="${safeId}"${groupAttr}${valueAttr}/> <span>${safeLabel}</span><span class="tooltiptext hidden">${safeTooltip}</span></label>`;
         });
         html += '</div>';
-        html += `<button id="${cancelId}" class="toggle-button" title="Close">Close</button>`;
+        const closeText = this.escapeHtml(I18n.t('settings.close', 'Close'));
+        html += `<button id="${cancelId}" class="toggle-button" title="${closeText}">${closeText}</button>`;
         
         panel.innerHTML = html;
         container.appendChild(panel);
+    }
+
+    updateTranslations(settings: SettingDefinition[]) {
+        if (!this.panel) return;
+        settings.forEach(s => {
+            const input = this.panel!.querySelector(`#${s.id}`) as HTMLInputElement | null;
+            if (input && input.parentElement) {
+                const labelSpan = input.parentElement.querySelector('span:not(.tooltiptext)') as HTMLSpanElement | null;
+                if (labelSpan) labelSpan.textContent = s.label;
+                const tip = input.parentElement.querySelector('.tooltiptext') as HTMLSpanElement | null;
+                if (tip) tip.textContent = s.tooltip || s.label;
+            }
+        });
+        if (this.cancelBtn) {
+            const closeText = I18n.t('settings.close', 'Close');
+            this.cancelBtn.textContent = closeText;
+            this.cancelBtn.title = closeText;
+        }
     }
 
     private init() {

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { I18n } from '../../shared/i18n';
 
 export interface XlsxFindMatch {
     row: number;
@@ -149,11 +149,11 @@ export class XlsxFindManager {
         overlay.className = 'search-overlay sheet-find-overlay hidden';
         overlay.innerHTML = `
             <div class="search-bar sheet-find-shell">
-                <input id="sheetFindInput" type="text" class="search-input sheet-find-input" placeholder="Find" aria-label="Find in worksheet" />
+                <input id="sheetFindInput" type="text" class="search-input sheet-find-input" placeholder="${I18n.t('find.placeholder', 'Find')}" aria-label="${I18n.t('find.ariaLabel', 'Find in worksheet')}" />
                 <span id="sheetFindCount" class="search-count sheet-find-count">0 / 0</span>
-                <button id="sheetFindPrev" type="button" class="search-nav-btn" title="Previous match (Shift+Enter)">↑</button>
-                <button id="sheetFindNext" type="button" class="search-nav-btn" title="Next match (Enter)">↓</button>
-                <button id="sheetFindClose" type="button" class="search-close-btn" title="Close">×</button>
+                <button id="sheetFindPrev" type="button" class="search-nav-btn" title="${I18n.t('find.prevMatch', 'Previous match (Shift+Enter)')}">↑</button>
+                <button id="sheetFindNext" type="button" class="search-nav-btn" title="${I18n.t('find.nextMatch', 'Next match (Enter)')}">↓</button>
+                <button id="sheetFindClose" type="button" class="search-close-btn" title="${I18n.t('find.close', 'Close')}">×</button>
             </div>
         `;
 
@@ -161,6 +161,8 @@ export class XlsxFindManager {
         this.overlayEl = overlay;
         this.inputEl = overlay.querySelector('#sheetFindInput') as HTMLInputElement | null;
         this.countEl = overlay.querySelector('#sheetFindCount') as HTMLElement | null;
+
+        I18n.onLanguageChange(() => this.updateTranslations());
 
         const prevBtn = overlay.querySelector('#sheetFindPrev') as HTMLButtonElement | null;
         const nextBtn = overlay.querySelector('#sheetFindNext') as HTMLButtonElement | null;
@@ -201,6 +203,20 @@ export class XlsxFindManager {
         closeBtn?.addEventListener('click', () => {
             this.close();
         });
+    }
+
+    private updateTranslations() {
+        if (!this.overlayEl) return;
+        if (this.inputEl) {
+            this.inputEl.placeholder = I18n.t('find.placeholder', 'Find');
+            this.inputEl.setAttribute('aria-label', I18n.t('find.ariaLabel', 'Find in worksheet'));
+        }
+        const prevBtn = this.overlayEl.querySelector('#sheetFindPrev') as HTMLButtonElement | null;
+        if (prevBtn) prevBtn.title = I18n.t('find.prevMatch', 'Previous match (Shift+Enter)');
+        const nextBtn = this.overlayEl.querySelector('#sheetFindNext') as HTMLButtonElement | null;
+        if (nextBtn) nextBtn.title = I18n.t('find.nextMatch', 'Next match (Enter)');
+        const closeBtn = this.overlayEl.querySelector('#sheetFindClose') as HTMLButtonElement | null;
+        if (closeBtn) closeBtn.title = I18n.t('find.close', 'Close');
     }
 
     private updateCount() {

@@ -1184,6 +1184,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             plainSettings: PersistedSpreadsheetSettings;
             styledSettings: PersistedSpreadsheetSettings;
             settingsScope: SettingsScope;
+            language?: string;
+            vscodeLanguage?: string;
         };
 
         const isDefaultEditorAssociationEnabled = (associations: any, fileType: TabularFileType): boolean => {
@@ -1281,11 +1283,14 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             }
             const settingsScope: SettingsScope = currentIsPlainView ? 'plain' : (currentFileType === 'xlsx' ? 'styled' : 'plain');
 
+            const cfg = vscode.workspace.getConfiguration('xlsxViewer');
             return {
                 settings: settingsScope === 'plain' ? plainSettings : styledSettings,
                 plainSettings,
                 styledSettings,
-                settingsScope
+                settingsScope,
+                language: cfg.get('language', 'auto'),
+                vscodeLanguage: vscode.env.language
             };
         };
 
@@ -1331,7 +1336,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     isPlainView: currentIsPlainView,
                     previewMode: !!previewVersionId,
                     versionId: previewVersionId,
-                    timestamp: previewVersionTimestamp
+                    timestamp: previewVersionTimestamp,
+                    language: vscode.workspace.getConfiguration('xlsxViewer').get('language', 'auto'),
+                    vscodeLanguage: vscode.env.language
                 });
             } catch {
                 // ignore
@@ -1764,6 +1771,19 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     await vscode.commands.executeCommand('xlsx-viewer.convertFile', document.uri);
                 } catch (err) {
                     vscode.window.showErrorMessage(`Error converting file: ${err}`);
+                }
+                return;
+            }
+
+            if (message?.command === 'setLanguage') {
+                try {
+                    const lang = message.language;
+                    if (lang === 'auto' || lang === 'en' || lang === 'zh') {
+                        const cfg = vscode.workspace.getConfiguration('xlsxViewer');
+                        await cfg.update('language', lang, vscode.ConfigurationTarget.Global);
+                    }
+                } catch (err) {
+                    console.error('Failed to update language setting:', err);
                 }
                 return;
             }

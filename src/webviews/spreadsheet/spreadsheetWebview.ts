@@ -14,6 +14,7 @@ import { detectIsRTL } from '../shared/rtlUtils';
 import { createXlsxRowHtml, getExcelColumnLabel, renderDropdownCellContent } from './components/spreadsheetRenderComponent';
 import { XlsxSelectionManager } from './components/spreadsheetSelectionComponent';
 import { createXlsxToolbarButtons } from './components/spreadsheetToolbarComponent';
+import { I18n } from '../shared/i18n';
 import { FeedbackModal } from '../shared/feedbackModal';
 import { ProjectsModal } from '../shared/projectsModal';
 import {
@@ -66,6 +67,9 @@ import { XlsxFindManager } from './components/spreadsheetFindComponent';
 import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClipboardAsync } from './components/spreadsheetCopyComponent';
 
 (function () {
+    I18n.setVsCodeApi(vscode);
+    I18n.init();
+
     // ===== Virtual Scrolling Configuration =====
     const { ROW_HEIGHT, BUFFER_ROWS, CHUNK_SIZE } = VirtualScrollConfig;
     const textColorIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M8.5 16h7"/><path d="M12 4l4 12"/><path d="M12 4L8 16"/></svg>';
@@ -149,6 +153,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     let handlersAttached = false;
     let selectionGlobalListenersAttached = false;
     let toolbarManager: ToolbarManager | null = null;
+    let xlsxSettingsManager: SettingsManager | null = null;
 
     type SettingsScope = 'plain' | 'styled';
 
@@ -1496,7 +1501,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     function showHeaderContextMenu(e: MouseEvent, targetType: 'row' | 'column', targetIndexZeroBased: number) {
         if (targetType === 'row' && isVersionPreviewMode) {
-            showToast('Version preview is read-only');
+            showToast(I18n.t('toast.versionPreviewReadOnly', 'Version preview is read-only'));
             return;
         }
 
@@ -1506,14 +1511,14 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const targetIndexOneBased = targetIndexZeroBased + 1;
         const items: Array<{ label: string; op: StructuralOpType }> = targetType === 'row'
             ? [
-                { label: 'Insert row above', op: 'insertRowAbove' },
-                { label: 'Insert row below', op: 'insertRowBelow' },
-                { label: 'Delete row', op: 'deleteRow' }
+                { label: I18n.t('context.insertRowAbove', 'Insert row above'), op: 'insertRowAbove' },
+                { label: I18n.t('context.insertRowBelow', 'Insert row below'), op: 'insertRowBelow' },
+                { label: I18n.t('context.deleteRow', 'Delete row'), op: 'deleteRow' }
             ]
             : [
-                { label: 'Insert column left', op: 'insertColumnLeft' },
-                { label: 'Insert column right', op: 'insertColumnRight' },
-                { label: 'Delete column', op: 'deleteColumn' }
+                { label: I18n.t('context.insertColLeft', 'Insert column left'), op: 'insertColumnLeft' },
+                { label: I18n.t('context.insertColRight', 'Insert column right'), op: 'insertColumnRight' },
+                { label: I18n.t('context.deleteCol', 'Delete column'), op: 'deleteColumn' }
             ];
 
         items.forEach(item => {
@@ -1540,7 +1545,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const wrapBtn = document.createElement('button');
         wrapBtn.type = 'button';
         wrapBtn.className = 'header-context-item';
-        wrapBtn.textContent = isWrapped ? '✓ Text wrap' : 'Text wrap';
+        wrapBtn.textContent = isWrapped ? ('✓ ' + I18n.t('context.textWrap', 'Text wrap')) : I18n.t('context.textWrap', 'Text wrap');
         wrapBtn.addEventListener('click', () => {
             hideHeaderContextMenu();
             const nextMode: WrapMode = isWrapped ? 'overflow' : 'wrap';
@@ -1641,16 +1646,16 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
                 const title = document.createElement('div');
                 title.className = 'header-filter-title';
-                title.textContent = `Filter ${getExcelColumnLabel(colIndex + 1)}`;
+                title.textContent = I18n.t('context.filterTitle', `Filter ${getExcelColumnLabel(colIndex + 1)}`, getExcelColumnLabel(colIndex + 1));
                 panel.appendChild(title);
 
                 const modeSelect = document.createElement('select');
                 modeSelect.className = 'header-filter-select';
                 const filterModes: Array<{ value: FilterMode; label: string }> = [
-                    { value: 'contains', label: 'Contains' },
-                    { value: 'equals', label: 'Equals' },
-                    { value: 'startsWith', label: 'Starts with' },
-                    { value: 'nonEmpty', label: 'Non-empty' }
+                    { value: 'contains', label: I18n.t('context.contains', 'Contains') },
+                    { value: 'equals', label: I18n.t('context.equals', 'Equals') },
+                    { value: 'startsWith', label: I18n.t('context.startsWith', 'Starts with') },
+                    { value: 'nonEmpty', label: I18n.t('context.nonEmpty', 'Non-empty') }
                 ];
                 filterModes.forEach((mode) => {
                     const option = document.createElement('option');
@@ -1664,7 +1669,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 const queryInput = document.createElement('input');
                 queryInput.className = 'header-filter-input';
                 queryInput.type = 'text';
-                queryInput.placeholder = 'Filter value';
+                queryInput.placeholder = I18n.t('context.filterValue', 'Filter value');
                 queryInput.value = existingFilter && existingFilter.mode !== 'nonEmpty' ? existingFilter.query : '';
                 panel.appendChild(queryInput);
 
@@ -1674,7 +1679,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 caseInput.type = 'checkbox';
                 caseInput.checked = !!existingFilter?.caseSensitive;
                 caseLabel.appendChild(caseInput);
-                caseLabel.appendChild(document.createTextNode('Case sensitive'));
+                caseLabel.appendChild(document.createTextNode(I18n.t('context.caseSensitive', 'Case sensitive')));
                 panel.appendChild(caseLabel);
 
                 const actions = document.createElement('div');
@@ -1683,12 +1688,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 const applyBtn = document.createElement('button');
                 applyBtn.type = 'button';
                 applyBtn.className = 'header-filter-button primary';
-                applyBtn.textContent = 'Apply';
+                applyBtn.textContent = I18n.t('context.apply', 'Apply');
 
                 const clearBtn = document.createElement('button');
                 clearBtn.type = 'button';
                 clearBtn.className = 'header-filter-button';
-                clearBtn.textContent = 'Clear';
+                clearBtn.textContent = I18n.t('context.clear', 'Clear');
 
                 actions.appendChild(applyBtn);
                 actions.appendChild(clearBtn);
@@ -1698,7 +1703,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     const nonEmpty = modeSelect.value === 'nonEmpty';
                     queryInput.disabled = nonEmpty;
                     caseInput.disabled = nonEmpty;
-                    queryInput.placeholder = nonEmpty ? 'No value needed' : 'Filter value';
+                    queryInput.placeholder = nonEmpty ? I18n.t('context.noValueNeeded', 'No value needed') : I18n.t('context.filterValue', 'Filter value');
                 };
 
                 const runApply = async () => {
@@ -1747,7 +1752,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             headerCheckbox.className = 'header-context-checkbox';
             headerCheckbox.checked = !!currentSettings.firstRowIsHeader;
 
-            const labelText = document.createTextNode('First row as header');
+            const labelText = document.createTextNode(I18n.t('context.firstRowAsHeader', 'First row as header'));
 
             headerCheckboxLabel.appendChild(headerCheckbox);
             headerCheckboxLabel.appendChild(labelText);
@@ -1767,7 +1772,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             const isAscSorted = activeSortState?.columnIndex === colIndex && activeSortState?.direction === 'asc';
             const isDescSorted = activeSortState?.columnIndex === colIndex && activeSortState?.direction === 'desc';
 
-            appendAction('Sort A to Z' + (isAscSorted ? ' ✓' : ''), async () => {
+            appendAction(I18n.t('context.sortAsc', 'Sort A to Z') + (isAscSorted ? ' ✓' : ''), async () => {
                 const ready = await ensureSourceRowsSnapshot();
                 if (!ready) return;
 
@@ -1782,7 +1787,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 applyDataOpsRowsToViewport(activeSortState || activeColumnFilters.size > 0 ? transformedRowsSnapshot : null);
             });
 
-            appendAction('Sort Z to A' + (isDescSorted ? ' ✓' : ''), async () => {
+            appendAction(I18n.t('context.sortDesc', 'Sort Z to A') + (isDescSorted ? ' ✓' : ''), async () => {
                 const ready = await ensureSourceRowsSnapshot();
                 if (!ready) return;
 
@@ -1799,13 +1804,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
             appendSeparator();
             appendFilterPanel();
-            appendAction('Filter Non-Empty', async () => {
+            appendAction(I18n.t('context.filterNonEmpty', 'Filter Non-Empty'), async () => {
                 await applyColumnFilter('nonEmpty', '', false);
             });
-            appendAction('Clear Column Filter', async () => {
+            appendAction(I18n.t('context.clearColFilter', 'Clear Column Filter'), async () => {
                 await clearColumnFilter();
             });
-            appendAction('Clear All Filters/Sort', async () => {
+            appendAction(I18n.t('context.clearAllFilters', 'Clear All Filters/Sort'), async () => {
                 if (!sourceRowsSnapshot && activeColumnFilters.size === 0 && !activeSortState) {
                     return;
                 }
@@ -1826,7 +1831,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     function showCellContextMenu(e: MouseEvent, cell: HTMLElement) {
         if (isVersionPreviewMode) {
-            showToast('Version preview is read-only');
+            showToast(I18n.t('toast.versionPreviewReadOnly', 'Version preview is read-only'));
             return;
         }
 
@@ -1847,24 +1852,24 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             menu.appendChild(btn);
         };
 
-        appendAction('Copy', () => {
+        appendAction(I18n.t('context.copy', 'Copy'), () => {
             hideHeaderContextMenu();
             copySelectionToClipboard();
         });
-        appendAction('Paste', async () => {
+        appendAction(I18n.t('context.paste', 'Paste'), async () => {
             hideHeaderContextMenu();
             if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
                 try {
                     const text = await navigator.clipboard.readText();
                     pasteTextAtSelection(text);
                 } catch (err) {
-                    const text = prompt('Paste content:');
+                    const text = prompt(I18n.t('context.pastePrompt', 'Paste content:'));
                     if (text !== null) {
                         pasteTextAtSelection(text);
                     }
                 }
             } else {
-                const text = prompt('Paste content:');
+                const text = prompt(I18n.t('context.pastePrompt', 'Paste content:'));
                 if (text !== null) {
                     pasteTextAtSelection(text);
                 }
@@ -1872,7 +1877,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         });
 
         const isWrapped = cell.style.whiteSpace === 'pre-wrap';
-        appendAction(isWrapped ? '✓ Text wrap' : 'Text wrap', () => {
+        appendAction(isWrapped ? ('✓ ' + I18n.t('context.textWrap', 'Text wrap')) : I18n.t('context.textWrap', 'Text wrap'), () => {
             hideHeaderContextMenu();
             const nextMode: WrapMode = isWrapped ? 'overflow' : 'wrap';
             const targets = getEditTargetCells();
@@ -1893,19 +1898,19 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         topSeparator.className = 'header-context-separator';
         menu.appendChild(topSeparator);
 
-        appendAction('Insert row above', () => applyStructureOperation({ type: 'insertRowAbove', index: rowNumber }));
-        appendAction('Insert row below', () => applyStructureOperation({ type: 'insertRowBelow', index: rowNumber }));
-        appendAction('Insert column left', () => applyStructureOperation({ type: 'insertColumnLeft', index: colNumber }));
-        appendAction('Insert column right', () => applyStructureOperation({ type: 'insertColumnRight', index: colNumber }));
+        appendAction(I18n.t('context.insertRowAbove', 'Insert row above'), () => applyStructureOperation({ type: 'insertRowAbove', index: rowNumber }));
+        appendAction(I18n.t('context.insertRowBelow', 'Insert row below'), () => applyStructureOperation({ type: 'insertRowBelow', index: rowNumber }));
+        appendAction(I18n.t('context.insertColLeft', 'Insert column left'), () => applyStructureOperation({ type: 'insertColumnLeft', index: colNumber }));
+        appendAction(I18n.t('context.insertColRight', 'Insert column right'), () => applyStructureOperation({ type: 'insertColumnRight', index: colNumber }));
 
         const separator = document.createElement('div');
         separator.className = 'header-context-separator';
         menu.appendChild(separator);
 
-        appendAction('Insert cell and shift right', () => applyCellInsertOperation('insertCellShiftRight', rowNumber, colNumber));
-        appendAction('Insert cell and shift down', () => applyCellInsertOperation('insertCellShiftDown', rowNumber, colNumber));
-        appendAction('Delete cell and shift left', () => applyCellDeleteOperation('deleteCellShiftLeft', rowNumber, colNumber));
-        appendAction('Delete cell and shift up', () => applyCellDeleteOperation('deleteCellShiftUp', rowNumber, colNumber));
+        appendAction(I18n.t('context.insertCellShiftRight', 'Insert cell and shift right'), () => applyCellInsertOperation('insertCellShiftRight', rowNumber, colNumber));
+        appendAction(I18n.t('context.insertCellShiftDown', 'Insert cell and shift down'), () => applyCellInsertOperation('insertCellShiftDown', rowNumber, colNumber));
+        appendAction(I18n.t('context.deleteCellShiftLeft', 'Delete cell and shift left'), () => applyCellDeleteOperation('deleteCellShiftLeft', rowNumber, colNumber));
+        appendAction(I18n.t('context.deleteCellShiftUp', 'Delete cell and shift up'), () => applyCellDeleteOperation('deleteCellShiftUp', rowNumber, colNumber));
 
         menu.classList.remove('hidden');
 
@@ -1980,8 +1985,19 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         const labelSpan = btn.querySelector('.btn-label');
         if (labelSpan) {
-            labelSpan.textContent = isPlainView ? 'Styled' : 'Plain';
+            labelSpan.textContent = isPlainView ? I18n.t('toolbar.styled', 'Styled') : I18n.t('toolbar.plain', 'Plain');
         }
+        btn.title = isPlainView ? I18n.t('toolbar.styledTooltip', 'Toggle Styled View') : I18n.t('toolbar.plainTooltip', 'Toggle Plain View (removes all styling)');
+    }
+
+    function updateExpandButtonLabel() {
+        const btn = document.getElementById('toggleExpandButton');
+        if (!btn) return;
+        const state = btn.getAttribute('data-state') || 'default';
+        const label = state === 'expanded' ? I18n.t('toolbar.collapse', 'Default') : I18n.t('toolbar.expand', 'Expand');
+        const icon = state === 'expanded' ? Icons.Collapse : Icons.Expand;
+        btn.innerHTML = icon + ' <span class="btn-label">' + label + '</span>';
+        btn.title = I18n.t('toolbar.expandTooltip', 'Toggle Column Widths (Default / Expand All)');
     }
 
     function syncPlainViewUiState() {
@@ -2068,6 +2084,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
     }
 
     function consumeIncomingSettingsPayload(message: any) {
+        if (message?.language !== undefined || message?.vscodeLanguage !== undefined) {
+            I18n.init(message.language, message.vscodeLanguage);
+        }
+
         const incomingScope = resolveSettingsScope(message?.settingsScope);
 
         if (message?.plainSettings) {
@@ -7450,6 +7470,53 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         adjustColumnWidths(isExpanded ? 'expand' : 'default');
     }
 
+    function updateAllSpreadsheetTranslations() {
+        if (!toolbarManager) return;
+        toolbarManager.setButtonLabel('toggleLanguageButton', I18n.getLanguageButtonLabel());
+        toolbarManager.setButtonTooltip('toggleLanguageButton', I18n.t('toolbar.languageTooltip', 'Switch Language (English / 中文)'));
+        toolbarManager.setButtonLabel('toggleRtlButton', I18n.t('toolbar.rtl', 'RTL'));
+        toolbarManager.setButtonTooltip('toggleRtlButton', I18n.t('toolbar.rtlTooltip', 'Toggle Right-to-Left (RTL) / LTR text direction'));
+        toolbarManager.setButtonLabel('editFileButton', I18n.t('toolbar.editFile', 'Edit File'));
+        toolbarManager.setButtonTooltip('editFileButton', I18n.t('toolbar.editFileTooltip', 'Open this file in the default text editor'));
+        toolbarManager.setButtonLabel('toggleTableEditButton', isEditMode ? I18n.t('toolbar.exitEdit', 'Exit Edit') : I18n.t('toolbar.editTable', 'Edit Table'));
+        toolbarManager.setButtonLabel('saveTableEditsButton', I18n.t('toolbar.save', 'Save'));
+        toolbarManager.setButtonTooltip('saveTableEditsButton', I18n.t('toolbar.saveTooltip', 'Save table edits'));
+        toolbarManager.setButtonLabel('cancelTableEditsButton', I18n.t('toolbar.cancel', 'Cancel'));
+        toolbarManager.setButtonTooltip('cancelTableEditsButton', I18n.t('toolbar.cancelTooltip', 'Cancel table edits'));
+        toolbarManager.setButtonLabel('insertControlButton', I18n.t('toolbar.insert', 'Insert'));
+        toolbarManager.setButtonTooltip('insertControlButton', I18n.t('toolbar.insertTooltip', 'Insert checkbox, dropdown, rating, or date into selected cells'));
+        toolbarManager.setButtonTooltip('findButton', I18n.t('toolbar.find', 'Find in sheet (Ctrl/Cmd+F)'));
+        toolbarManager.setButtonTooltip('versionHistoryButton', I18n.t('toolbar.versionHistory', 'Version history'));
+        toolbarManager.setButtonTooltip('convertFileButton', I18n.t('toolbar.convert', 'Convert'));
+        toolbarManager.setButtonTooltip('openSettingsButton', I18n.t('toolbar.settings', 'Sheet Settings'));
+        toolbarManager.setButtonTooltip('helpButton', I18n.t('toolbar.help', 'Help & Feedback'));
+        toolbarManager.setButtonTooltip('projectsButton', I18n.t('toolbar.projects', 'Other Projects'));
+        toolbarManager.setButtonTooltip('refreshButton', I18n.t('toolbar.refresh', 'Reload file from disk'));
+        toolbarManager.setButtonTooltip('toggleBackgroundButton', I18n.t('toolbar.theme', 'Toggle Theme'));
+
+        updateExpandButtonLabel();
+        updatePlainViewButtonLabel();
+
+        const sheetSelector = document.getElementById('sheetSelector');
+        if (sheetSelector) {
+            sheetSelector.title = I18n.t('toolbar.selectSheet', 'Select sheet');
+        }
+
+        if (xlsxSettingsManager) {
+            const settings = createXlsxSettingsDefinitions(
+                () => currentSettings,
+                (next: XlsxViewSettings) => {
+                    applySettings(next);
+                },
+                () => {
+                    postSettings();
+                }
+            );
+            xlsxSettingsManager.updateTranslations(settings);
+            syncSettingsCheckboxes(currentSettings, loadedFileType);
+        }
+    }
+
     function wireSettingsUI() {
         const settings = createXlsxSettingsDefinitions(
             () => currentSettings,
@@ -7463,7 +7530,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
         SettingsManager.renderPanel(document.getElementById('toolbar')!, 'settingsPanel', 'settingsCancelButton', settings);
 
-        new SettingsManager('openSettingsButton', 'settingsPanel', 'settingsCancelButton', settings, () => {
+        xlsxSettingsManager = new SettingsManager('openSettingsButton', 'settingsPanel', 'settingsCancelButton', settings, () => {
             toolbarManager?.updateHeaderHeight();
         });
     }
@@ -7479,7 +7546,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         const sheetSelector = document.createElement('select');
         sheetSelector.id = 'sheetSelector';
         sheetSelector.className = 'sheet-selector';
-        sheetSelector.title = 'Select sheet';
+        sheetSelector.title = I18n.t('toolbar.selectSheet', 'Select sheet');
         sheetSelector.addEventListener('change', (e) => {
             if (isEditMode) return;
             currentWorksheet = parseInt((e.target as HTMLSelectElement).value, 10);
@@ -7492,6 +7559,9 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             onFind: () => openFindOverlay(),
             textColorIcon,
             bgColorIcon,
+            onToggleLanguage: () => {
+                I18n.toggleLanguage();
+            },
             onToggleRtl: () => {
                 let nextDir: 'auto' | 'ltr' | 'rtl' = 'rtl';
                 const current = currentSettings.textDirection || 'auto';
@@ -7541,13 +7611,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 const state = btn?.getAttribute('data-state') || 'default';
                 if (state === 'default') {
                     btn?.setAttribute('data-state', 'expanded');
-                    if (btn) btn.innerHTML = Icons.Collapse + ' <span class="btn-label">Default</span>';
                     setExpandedMode(true);
                 } else {
                     btn?.setAttribute('data-state', 'default');
-                    if (btn) btn.innerHTML = Icons.Expand + ' <span class="btn-label">Expand</span>';
                     setExpandedMode(false);
                 }
+                updateExpandButtonLabel();
             },
             onTogglePlainView: () => {
                 if (isEditMode) return;
@@ -7591,6 +7660,10 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 vscode.postMessage({ command: 'requestFreshData' });
             }
         }));
+
+        I18n.onLanguageChange(() => {
+            updateAllSpreadsheetTranslations();
+        });
 
         toolbar.prependElement(sheetSelector);
 
@@ -7684,7 +7757,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 const thead = document.querySelector('#xlsxTable thead') as HTMLElement | null;
                 if (thead) thead.style.display = 'table-header-group';
                 const isAutosaveResult = !!message.isAutosave;
-                showToast(isAutosaveResult ? 'Autosaved' : 'Saved', isAutosaveResult, 1000);
+                showToast(isAutosaveResult ? I18n.t('toast.autosaved', 'Autosaved') : I18n.t('toast.saved', 'Saved'), isAutosaveResult, 1000);
                 pendingWorksheetOps = [];
                 pendingCellStyleEdits.clear();
                 clearPendingOutsideControlEdits();
@@ -7706,7 +7779,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 }
             } else {
                 const isAutosaveResult = !!message.isAutosave;
-                showToast(isAutosaveResult ? 'Autosave failed' : 'Error saving', isAutosaveResult, 1000);
+                showToast(isAutosaveResult ? I18n.t('toast.autosaveFailed', 'Autosave failed') : I18n.t('toast.errorSaving', 'Error saving'), isAutosaveResult, 1000);
             }
             return;
         }
@@ -7717,12 +7790,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         }
 
         if (message.command === 'versionRestoredXlsx') {
-            showToast('Version restored');
+            showToast(I18n.t('toast.versionRestored', 'Version restored'));
             return;
         }
 
         if (message.command === 'versionPreviewCancelledXlsx') {
-            showToast('Preview canceled');
+            showToast(I18n.t('toast.previewCanceled', 'Preview canceled'));
             return;
         }
 
@@ -7744,13 +7817,28 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         // Handle rowsData response for virtual scrolling
         if (message.command === 'rowsData') {
             virtualLoader.resolveRequest(message.requestId, message.rows || []);
+            if (Array.isArray(message.rows) && message.rows.length > 0) {
+                const sample = message.rows.slice(0, 10).map((r: any) => (r && r.cells ? r.cells.slice(0, 10).map((c: any) => (c ? c.value || '' : '')).join(' ') : '')).join(' ');
+                if (sample) {
+                    I18n.detectAndApplyFromContent(sample);
+                }
+            }
             return;
         }
 
         // Handle initVirtualTable for virtual scrolling
         if (message.command === 'initVirtualTable') {
+            if (message.language !== undefined || message.vscodeLanguage !== undefined) {
+                I18n.init(message.language, message.vscodeLanguage);
+            }
             const previousWorksheet = currentWorksheet;
             worksheetsMeta = Array.isArray(message.worksheets) ? message.worksheets : [];
+            if (worksheetsMeta.length > 0) {
+                const namesSample = worksheetsMeta.map((w: any) => w.name || '').join(' ');
+                if (namesSample) {
+                    I18n.detectAndApplyFromContent(namesSample);
+                }
+            }
             currentWorksheet = Math.min(Math.max(previousWorksheet, 0), Math.max(worksheetsMeta.length - 1, 0));
             clearDataTransforms();
 

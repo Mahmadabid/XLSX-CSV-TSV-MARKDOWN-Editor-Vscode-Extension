@@ -1,6 +1,7 @@
 import { vscode } from './common';
 import { Utils } from './utils';
 import { Icons } from './icons';
+import { I18n } from './i18n';
 
 export class FeedbackModal {
     private static isInitialized = false;
@@ -127,16 +128,16 @@ export class FeedbackModal {
                 const submitBtn = document.getElementById('feedbackSubmitBtn') as HTMLButtonElement;
                 if (submitBtn) {
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Submit';
+                    submitBtn.textContent = I18n.t('feedback.submit', 'Submit');
                 }
                 if (event.data.ok) {
-                    Utils.showToast('Feedback submitted successfully!');
+                    Utils.showToast(I18n.t('feedback.success', 'Feedback submitted successfully!'));
                     this.hide();
                     const form = document.getElementById('feedbackForm') as HTMLFormElement;
                     if (form) form.reset();
                     this.updateEmailVisibility();
                 } else {
-                    Utils.showToast('Failed to submit feedback.', false);
+                    Utils.showToast(I18n.t('feedback.fail', 'Failed to submit feedback.'), false);
                 }
             }
         });
@@ -218,7 +219,7 @@ export class FeedbackModal {
         const submitBtn = document.getElementById('feedbackSubmitBtn') as HTMLButtonElement;
         if (submitBtn) {
             submitBtn.disabled = true;
-            submitBtn.textContent = 'Submitting...';
+            submitBtn.textContent = I18n.t('feedback.submitting', 'Submitting...');
         }
 
         const formData = new FormData(form);
@@ -233,10 +234,68 @@ export class FeedbackModal {
         });
     }
 
+    public static updateTranslations() {
+        if (!this.container) return;
+        const h2 = this.container.querySelector('.feedback-header h2');
+        if (h2) h2.textContent = I18n.t('feedback.title', 'Help & Feedback');
+        const closeBtn = this.container.querySelector('.feedback-close');
+        if (closeBtn) closeBtn.setAttribute('title', I18n.t('feedback.close', 'Close'));
+        const githubP = this.container.querySelector('.github-section p');
+        if (githubP) githubP.textContent = I18n.t('feedback.githubText', 'For issues requiring follow-up or detailed discussion, we recommend creating a GitHub issue. This allows for better tracking and collaboration.');
+        const githubBtnSpan = this.container.querySelector('#githubIssueBtn span');
+        if (githubBtnSpan) githubBtnSpan.textContent = I18n.t('feedback.createIssue', 'Create Issue on GitHub');
+
+        const formGroups = this.container.querySelectorAll('.form-group');
+        if (formGroups.length >= 6) {
+            const label0 = formGroups[0].querySelector('label');
+            if (label0) label0.textContent = I18n.t('feedback.systemInfo', 'System Information');
+
+            const label1 = formGroups[1].querySelector('label');
+            if (label1) label1.textContent = I18n.t('feedback.reasonTitle', 'What is the primary reason for filling out this form? *');
+            const radioSpans1 = formGroups[1].querySelectorAll('.radio-label span');
+            if (radioSpans1[0]) radioSpans1[0].textContent = I18n.t('feedback.reasonBug', 'Bug/Support');
+            if (radioSpans1[1]) radioSpans1[1].textContent = I18n.t('feedback.reasonGeneral', 'General Feedback');
+            if (radioSpans1[2]) radioSpans1[2].textContent = I18n.t('feedback.reasonFeature', 'Feature Suggestion');
+
+            const label2 = formGroups[2].querySelector('label');
+            if (label2) label2.textContent = I18n.t('feedback.satisfactionTitle', 'How satisfied are you overall? *');
+            const scaleSpans = formGroups[2].querySelectorAll('.linear-scale > span');
+            if (scaleSpans[0]) scaleSpans[0].textContent = I18n.t('feedback.veryDissatisfied', 'Very Dissatisfied');
+            if (scaleSpans[1]) scaleSpans[1].textContent = I18n.t('feedback.verySatisfied', 'Very Satisfied');
+
+            const label3 = formGroups[3].querySelector('label');
+            if (label3) label3.textContent = I18n.t('feedback.descTitle', 'Please describe your issue or suggestion *');
+            const descArea = formGroups[3].querySelector('textarea');
+            if (descArea) descArea.placeholder = I18n.t('feedback.descPlaceholder', 'Describe your issue, bug, feedback, or feature suggestion...');
+
+            const label4 = formGroups[4].querySelector('label');
+            if (label4) label4.textContent = I18n.t('feedback.followUpTitle', 'Would you be open to a follow-up discussion? *');
+            const radioSpans4 = formGroups[4].querySelectorAll('.radio-label span');
+            if (radioSpans4[0]) radioSpans4[0].textContent = I18n.t('feedback.followUpYes', "Yes, I'd like to be contacted");
+            if (radioSpans4[1]) radioSpans4[1].textContent = I18n.t('feedback.followUpNo', 'No, I prefer not to be contacted');
+
+            const label5 = formGroups[5].querySelector('label');
+            if (label5) label5.textContent = I18n.t('feedback.email', 'Email Address *');
+        }
+
+        const cancelBtn = document.getElementById('feedbackCancelBtn');
+        if (cancelBtn) cancelBtn.textContent = I18n.t('feedback.cancel', 'Cancel');
+        const submitBtn = document.getElementById('feedbackSubmitBtn');
+        if (submitBtn) submitBtn.textContent = I18n.t('feedback.submit', 'Submit');
+
+        const warningP = this.container.querySelector('#feedbackWarningPopup .warning-content p');
+        if (warningP) warningP.textContent = I18n.t('feedback.warningText', 'You have selected not to follow up, so you will not receive any information about fixes made or suggestions implemented.');
+        const warningCancel = document.getElementById('warningCancelBtn');
+        if (warningCancel) warningCancel.textContent = I18n.t('feedback.cancel', 'Cancel');
+        const warningSubmit = document.getElementById('warningSubmitBtn');
+        if (warningSubmit) warningSubmit.textContent = I18n.t('feedback.submitAnyway', 'Submit Anyway');
+    }
+
     public static show() {
         if (!this.isInitialized) {
             this.initialize();
         }
+        this.updateTranslations();
 
         // Request system details
         vscode.postMessage({ command: 'getSystemDetails' });

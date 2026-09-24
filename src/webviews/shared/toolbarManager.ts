@@ -186,6 +186,22 @@ export class ToolbarManager {
         return this.buttons.get(id);
     }
 
+    setButtonLabel(id: string, label: string) {
+        const btn = this.buttons.get(id);
+        if (btn) {
+            let labelSpan = btn.querySelector('.btn-label') as HTMLSpanElement | null;
+            if (labelSpan) {
+                labelSpan.textContent = label;
+            } else {
+                labelSpan = document.createElement('span');
+                labelSpan.className = 'btn-label';
+                labelSpan.textContent = label;
+                btn.appendChild(document.createTextNode(' '));
+                btn.appendChild(labelSpan);
+            }
+        }
+    }
+
     prependElement(element: HTMLElement) {
         if (this.container.firstChild) {
             this.container.insertBefore(element, this.container.firstChild);

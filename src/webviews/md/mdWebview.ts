@@ -24,7 +24,7 @@ import katex from 'markdown-it-katex';
 
 import hljs from 'highlight.js';
 import { ThemeManager } from '../shared/themeManager';
-import { SettingsManager } from '../shared/settingsManager';
+import { SettingsManager, SettingDefinition } from '../shared/settingsManager';
 import { ToolbarManager } from '../shared/toolbarManager';
 import { applyToolbarLayout } from '../shared/toolbarLayout';
 import { Utils } from '../shared/utils';
@@ -34,11 +34,15 @@ import { vscode, debounce } from '../shared/common';
 import { FeedbackModal } from '../shared/feedbackModal';
 import { ProjectsModal } from '../shared/projectsModal';
 import { InfoTooltip } from '../shared/infoTooltip';
+import { I18n } from '../shared/i18n';
 import TurndownService from 'turndown';
 // @ts-ignore
 import { gfm } from 'turndown-plugin-gfm';
 // @ts-ignore
 import mermaid from 'mermaid';
+
+I18n.setVsCodeApi(vscode);
+I18n.init();
 
 // Inline custom plugin that mimics the markdown-it-mermaid API and behavior,
 // but uses standard ES imports bundled properly by esbuild for the browser.
@@ -99,6 +103,7 @@ let shouldExitEditMode = false;
 let originalContent = '';
 let currentContent = '';
 let toolbarManager: ToolbarManager | null = null;
+let mdSettingsManager: SettingsManager | null = null;
 const resolvedImageUriCache = new Map<string, string>();
 let documentUri = '';
 let documentDirUri = '';
@@ -730,7 +735,8 @@ md.renderer.rules.fence = function (tokens: any, idx: number, options: any, env:
     const dataLine = token.map && token.level === 0 ? ` data-line="${token.map[0]}"` : '';
     const langLabel = langName ? `<div class="code-lang">${md.utils.escapeHtml(langName)}</div>` : `<div class="code-lang muted">text</div>`;
     const encoded = encodeURIComponent(code);
-    const copyButton = `<button class="code-copy" data-code="${escapeHtmlAttr(encoded)}" title="Copy code">${Icons.Copy}<span>Copy</span></button>`;
+    const copyLabel = I18n.t('table.copy', 'Copy');
+    const copyButton = `<button class="code-copy" data-code="${escapeHtmlAttr(encoded)}" title="${copyLabel}">${Icons.Copy}<span>${copyLabel}</span></button>`;
     const langClass = langName ? ` class="language-${langName}"` : '';
 
     // Wrap each line for line numbers
@@ -803,7 +809,7 @@ function buildToc(tokens: any[]) {
     }
 
     if (!items.length) {
-        return '<div class="toc-empty">No headings found</div>';
+        return `<div class="toc-empty">${I18n.t('toc.empty', 'No headings found')}</div>`;
     }
 
     return items.map((item, idx) => {
@@ -878,6 +884,7 @@ function renderMermaidFlowcharts() {
 let isRenderingMarkdown = false;
 
 function renderMarkdown(content: string) {
+    I18n.detectAndApplyFromContent(content);
     const preview = $('markdownPreview');
     if (preview) {
         isRenderingMarkdown = true;
@@ -1816,6 +1823,7 @@ function reapplySearch() {
 }
 
 function initSearchOverlay() {
+    updateSearchOverlayTranslations();
     const input = $('searchInput') as HTMLInputElement;
     const prevBtn = $('searchPrev');
     const nextBtn = $('searchNext');
@@ -1983,12 +1991,12 @@ function applySettings(settings: any, persist = false) {
     }
 }
 
-function initializeSettings() {
-    const settingsDefs = [
+function createMdSettingsDefinitions(): SettingDefinition[] {
+    return [
         {
             id: 'chkWordWrap',
-            label: 'Word Wrap',
-            tooltip: 'Wrap long lines in the Markdown preview/editor instead of horizontal scrolling.',
+            label: I18n.t('settings.wordWrap', 'Word Wrap'),
+            tooltip: I18n.t('settings.wordWrapTip', 'Wrap long lines in the Markdown preview/editor instead of horizontal scrolling.'),
             defaultValue: currentSettings.wordWrap,
             onChange: (val: boolean) => {
                 currentSettings.wordWrap = val;
@@ -1997,8 +2005,8 @@ function initializeSettings() {
         },
         {
             id: 'chkStickyToolbar',
-            label: 'Sticky Toolbar',
-            tooltip: 'Keep the Markdown toolbar pinned at the top while you scroll.',
+            label: I18n.t('settings.stickyToolbar', 'Sticky Toolbar'),
+            tooltip: I18n.t('settings.stickyToolbarTip', 'Keep the Markdown toolbar pinned at the top while you scroll.'),
             defaultValue: currentSettings.stickyToolbar,
             onChange: (val: boolean) => {
                 currentSettings.stickyToolbar = val;
@@ -2007,8 +2015,8 @@ function initializeSettings() {
         },
         {
             id: 'chkSyncScroll',
-            label: 'Sync Scrolling',
-            tooltip: 'Synchronize editor and preview scroll positions in split mode.',
+            label: I18n.t('settings.syncScroll', 'Sync Scrolling'),
+            tooltip: I18n.t('settings.syncScrollTip', 'Synchronize editor and preview scroll positions in split mode.'),
             defaultValue: currentSettings.syncScroll,
             onChange: (val: boolean) => {
                 currentSettings.syncScroll = val;
@@ -2017,8 +2025,8 @@ function initializeSettings() {
         },
         {
             id: 'chkPreviewLeft',
-            label: 'Preview on Left',
-            tooltip: 'Show preview on the left side instead of the right in split mode.',
+            label: I18n.t('settings.previewLeft', 'Preview on Left'),
+            tooltip: I18n.t('settings.previewLeftTip', 'Show preview on the left side instead of the right in split mode.'),
             defaultValue: currentSettings.previewPosition === 'left',
             onChange: (val: boolean) => {
                 currentSettings.previewPosition = val ? 'left' : 'right';
@@ -2027,8 +2035,8 @@ function initializeSettings() {
         },
         {
             id: 'chkShowOutline',
-            label: 'Show Outline',
-            tooltip: 'Display the document outline panel for heading navigation.',
+            label: I18n.t('settings.showOutline', 'Show Outline'),
+            tooltip: I18n.t('settings.showOutlineTip', 'Display the document outline panel for heading navigation.'),
             defaultValue: currentSettings.showOutline,
             onChange: (val: boolean) => {
                 currentSettings.showOutline = val;
@@ -2037,8 +2045,8 @@ function initializeSettings() {
         },
         {
             id: 'chkShowLineNumbers',
-            label: 'Line Numbers',
-            tooltip: 'Show line numbers in fenced code block previews.',
+            label: I18n.t('settings.lineNumbers', 'Line Numbers'),
+            tooltip: I18n.t('settings.lineNumbersTip', 'Show line numbers in fenced code block previews.'),
             defaultValue: currentSettings.showLineNumbers,
             onChange: (val: boolean) => {
                 currentSettings.showLineNumbers = val;
@@ -2047,8 +2055,8 @@ function initializeSettings() {
         },
         {
             id: 'chkMoveMdButtonsToEnd',
-            label: 'Move Enable/Disable MD Buttons Near Help',
-            tooltip: 'Place the Enable/Disable MD buttons just before Help & Feedback instead of at the start of the toolbar.',
+            label: I18n.t('settings.moveMdButtonsToEnd', 'Move Enable/Disable MD Buttons Near Help'),
+            tooltip: I18n.t('settings.moveMdButtonsToEndTip', 'Place the Enable/Disable MD buttons just before Help & Feedback instead of at the start of the toolbar.'),
             defaultValue: currentSettings.moveMdButtonsToEnd,
             onChange: (val: boolean) => {
                 currentSettings.moveMdButtonsToEnd = val;
@@ -2057,8 +2065,8 @@ function initializeSettings() {
         },
         {
             id: 'chkRTLTextDirection',
-            label: 'RTL Text Direction',
-            tooltip: 'Force Right-to-Left (RTL) text direction for Markdown preview and editor.',
+            label: I18n.t('settings.rtlTextDirection', 'RTL Text Direction'),
+            tooltip: I18n.t('settings.rtlTextDirectionTip', 'Force Right-to-Left (RTL) text direction for Markdown preview and editor.'),
             defaultValue: currentSettings.textDirection === 'rtl',
             onChange: (val: boolean) => {
                 currentSettings.textDirection = val ? 'rtl' : 'ltr';
@@ -2067,21 +2075,156 @@ function initializeSettings() {
         },
         {
             id: 'chkShowPopups',
-            label: 'Show Notification Popups',
-            tooltip: 'Show popup notifications (such as save toasts) during editor usage. Uncheck to disable.',
+            label: I18n.t('settings.showPopups', 'Show Notification Popups'),
+            tooltip: I18n.t('settings.showPopupsTip', 'Show popup notifications (such as save toasts) during editor usage. Uncheck to disable.'),
             defaultValue: (currentSettings as any).showPopups !== false,
             onChange: (val: boolean) => {
                 (currentSettings as any).showPopups = val;
                 applySettings(currentSettings, true);
             }
+        },
+        {
+            id: 'radioLangAuto',
+            label: I18n.t('settings.langAuto', 'Auto (Detect)'),
+            tooltip: I18n.t('settings.languageTip', 'Auto-detect language'),
+            inputType: 'radio' as const,
+            groupName: 'uiLanguageMode',
+            value: 'auto',
+            onChange: () => {
+                I18n.setLanguage('auto', true);
+            },
+            defaultValue: I18n.getLanguageSetting() === 'auto'
+        },
+        {
+            id: 'radioLangEn',
+            label: I18n.t('settings.langEn', 'English'),
+            tooltip: 'English',
+            inputType: 'radio' as const,
+            groupName: 'uiLanguageMode',
+            value: 'en',
+            onChange: () => {
+                I18n.setLanguage('en', true);
+            },
+            defaultValue: I18n.getLanguageSetting() === 'en'
+        },
+        {
+            id: 'radioLangZh',
+            label: I18n.t('settings.langZh', '中文 (Simplified Chinese)'),
+            tooltip: '简体中文',
+            inputType: 'radio' as const,
+            groupName: 'uiLanguageMode',
+            value: 'zh',
+            onChange: () => {
+                I18n.setLanguage('zh', true);
+            },
+            defaultValue: I18n.getLanguageSetting() === 'zh'
         }
     ];
+}
+
+function syncMdLanguageRadios() {
+    const setting = I18n.getLanguageSetting();
+    const autoRadio = document.getElementById('radioLangAuto') as HTMLInputElement | null;
+    const enRadio = document.getElementById('radioLangEn') as HTMLInputElement | null;
+    const zhRadio = document.getElementById('radioLangZh') as HTMLInputElement | null;
+    if (autoRadio) autoRadio.checked = setting === 'auto';
+    if (enRadio) enRadio.checked = setting === 'en';
+    if (zhRadio) zhRadio.checked = setting === 'zh';
+}
+
+function updateFormattingToolbarTranslations() {
+    const fmtToolbar = $('formattingToolbar');
+    if (!fmtToolbar) return;
+    const buttons = fmtToolbar.querySelectorAll('.fmt-btn');
+    buttons.forEach(btn => {
+        const format = btn.getAttribute('data-format');
+        if (!format) return;
+        const key = 'fmt.' + format;
+        const translation = I18n.t(key);
+        if (translation && translation !== key) {
+            btn.setAttribute('title', translation);
+        }
+    });
+}
+
+function updateSearchOverlayTranslations() {
+    const input = $('searchInput') as HTMLInputElement | null;
+    const prevBtn = $('searchPrev');
+    const nextBtn = $('searchNext');
+    const closeBtn = $('searchClose');
+    if (input) {
+        input.placeholder = I18n.t('find.mdPlaceholder', 'Search in preview...');
+    }
+    if (prevBtn) {
+        prevBtn.setAttribute('title', I18n.t('find.prevMatch', 'Previous match (Shift+Enter)'));
+    }
+    if (nextBtn) {
+        nextBtn.setAttribute('title', I18n.t('find.nextMatch', 'Next match (Enter)'));
+    }
+    if (closeBtn) {
+        closeBtn.setAttribute('title', I18n.t('find.mdClose', 'Close (Esc)'));
+    }
+}
+
+function updateTocTranslations() {
+    const emptyToc = document.querySelector('#tocPanel .toc-empty');
+    if (emptyToc) {
+        emptyToc.textContent = I18n.t('toc.empty', 'No headings found');
+    }
+}
+
+function updateAllMdTranslations() {
+    if (toolbarManager) {
+        toolbarManager.setButtonLabel('enableMdEditorButton', I18n.t('toolbar.enableMd', 'Enable MD'));
+        toolbarManager.setButtonTooltip('enableMdEditorButton', I18n.t('toolbar.enableMdTooltip', 'Enable Markdown Viewer for all Markdown files (Make Default)'));
+        toolbarManager.setButtonTooltip('refreshButton', I18n.t('toolbar.refresh', 'Reload file from disk'));
+        toolbarManager.setButtonLabel('disableMdEditorButton', I18n.t('toolbar.disableMd', 'Disable MD'));
+        toolbarManager.setButtonTooltip('disableMdEditorButton', I18n.t('toolbar.disableMdTooltip', 'Disable Markdown Viewer for all Markdown files'));
+        toolbarManager.setButtonLabel('toggleViewButton', I18n.t('toolbar.editFile', 'Edit File'));
+        toolbarManager.setButtonTooltip('toggleViewButton', I18n.t('toolbar.editFileMdTooltip', 'Edit File in Vscode Default Editor'));
+        toolbarManager.setButtonLabel('toggleEditModeButton', I18n.t('toolbar.splitEdit', 'Split Edit'));
+        toolbarManager.setButtonTooltip('toggleEditModeButton', I18n.t('toolbar.splitEditTooltip', 'Edit Markdown side-by-side'));
+        toolbarManager.setButtonLabel('previewEditButton', I18n.t('toolbar.previewEdit', 'Preview Edit'));
+        toolbarManager.setButtonTooltip('previewEditButton', I18n.t('toolbar.previewEditTooltip', 'Edit directly in preview (WYSIWYG)'));
+        toolbarManager.setButtonTooltip('saveEditsButton', I18n.t('toolbar.saveMdTooltip', 'Save Changes (Ctrl+S)'));
+        toolbarManager.setButtonLabel('cancelEditsButton', I18n.t('toolbar.cancel', 'Cancel'));
+        toolbarManager.setButtonTooltip('cancelEditsButton', I18n.t('toolbar.cancelMdTooltip', 'Cancel Changes (Esc)'));
+        toolbarManager.setButtonTooltip('toggleTocButton', I18n.t('toolbar.outline', 'Toggle Outline'));
+        toolbarManager.setButtonLabel('toggleRtlButton', I18n.t('toolbar.rtl', 'RTL'));
+        toolbarManager.setButtonTooltip('toggleRtlButton', I18n.t('toolbar.rtlTooltip', 'Toggle Right-to-Left (RTL) / LTR text direction'));
+        toolbarManager.setButtonTooltip('searchButton', I18n.t('toolbar.searchMd', 'Search in Preview (Ctrl/Cmd+F)'));
+        toolbarManager.setButtonTooltip('openSettingsButton', I18n.t('toolbar.settingsMd', 'Settings'));
+        toolbarManager.setButtonTooltip('toggleBackgroundButton', I18n.t('toolbar.theme', 'Toggle Theme'));
+        toolbarManager.setButtonLabel('toggleLanguageButton', I18n.getLanguageButtonLabel());
+        toolbarManager.setButtonTooltip('toggleLanguageButton', I18n.t('toolbar.languageTooltip', 'Switch Language (English / 中文)'));
+        toolbarManager.setButtonTooltip('focusModeButton', I18n.t('toolbar.focus', 'Focus Mode'));
+        toolbarManager.setButtonTooltip('copyHtmlButton', I18n.t('toolbar.copyHtml', 'Copy as HTML'));
+        toolbarManager.setButtonTooltip('exportPdfButton', I18n.t('toolbar.exportPdf', 'Export to PDF'));
+        toolbarManager.setButtonTooltip('versionHistoryButton', I18n.t('toolbar.versionHistory', 'Version history'));
+        toolbarManager.setButtonTooltip('projectsButton', I18n.t('toolbar.projects', 'Other Projects'));
+        toolbarManager.setButtonTooltip('helpButton', I18n.t('toolbar.help', 'Help & Feedback'));
+    }
+
+    if (mdSettingsManager) {
+        mdSettingsManager.updateTranslations(createMdSettingsDefinitions());
+    }
+    syncMdLanguageRadios();
+
+    ProjectsModal.updateTranslations();
+    FeedbackModal.updateTranslations();
+    updateFormattingToolbarTranslations();
+    updateSearchOverlayTranslations();
+    updateTocTranslations();
+}
+
+function initializeSettings() {
+    const settingsDefs = createMdSettingsDefinitions();
 
     // Render panel
     SettingsManager.renderPanel(document.body, 'settingsPanel', 'settingsCancelButton', settingsDefs);
 
     // Initialize manager
-    new SettingsManager('openSettingsButton', 'settingsPanel', 'settingsCancelButton', settingsDefs);
+    mdSettingsManager = new SettingsManager('openSettingsButton', 'settingsPanel', 'settingsCancelButton', settingsDefs);
 }
 
 function reorderMdToolbarButtons() {
@@ -2157,6 +2300,9 @@ window.addEventListener('message', (event) => {
 
         case 'initSettings':
         case 'settingsUpdated':
+            if (m.settings) {
+                I18n.init(m.settings.language, m.settings.vscodeLanguage);
+            }
             applySettings(m.settings, false);
             break;
 
@@ -2164,7 +2310,7 @@ window.addEventListener('message', (event) => {
             isSaving = false;
             setButtonsEnabled(true);
             if (m.ok) {
-                showToast('Saved');
+                showToast(I18n.t('toast.saved', 'Saved'));
                 originalContent = currentContent;
                 if (shouldExitEditMode) {
                     if (isPreviewEditMode) {
@@ -2184,28 +2330,28 @@ window.addEventListener('message', (event) => {
                 }
                 shouldExitEditMode = false;
             } else {
-                showToast('Error saving');
+                showToast(I18n.t('toast.errorSaving', 'Error saving'));
                 shouldExitEditMode = false;
             }
             break;
 
         case 'versionHistoryError':
-            showToast(m.message || 'Version history failed');
+            showToast(m.message || I18n.t('toast.versionHistoryFailed', 'Version history failed'));
             break;
 
         case 'versionPreviewMd':
             setVersionPreviewMode(true, m.timestamp ? `Previewing ${new Date(m.timestamp).toLocaleString()} (read-only)` : 'Previewing selected version (read-only)');
-            showToast('Previewing version');
+            showToast(I18n.t('toast.previewingVersion', 'Previewing version'));
             break;
 
         case 'versionPreviewCancelledMd':
             setVersionPreviewMode(false);
-            showToast('Preview canceled');
+            showToast(I18n.t('toast.previewCanceled', 'Preview canceled'));
             break;
 
         case 'versionRestoredMd':
             setVersionPreviewMode(false);
-            showToast('Version restored');
+            showToast(I18n.t('toast.versionRestored', 'Version restored'));
             break;
 
         case 'resolvedImageUris':
@@ -2221,6 +2367,10 @@ function wireButtons() {
     toolbarManager.setButtons(buildToolbarButtons());
     reorderMdToolbarButtons();
 
+    I18n.onLanguageChange(() => {
+        updateAllMdTranslations();
+    });
+
     // Inject tooltip if variables are present
     InfoTooltip.inject('toolbar', (window as any).viewImgUri, (window as any).logoSvgUri, 'GitHub Flavored Markdown');
 
@@ -2235,8 +2385,8 @@ function buildToolbarButtons() {
         {
             id: 'enableMdEditorButton',
             icon: Icons.Zap,
-            label: 'Enable MD',
-            tooltip: 'Enable Markdown Viewer for all Markdown files (Make Default)',
+            label: I18n.t('toolbar.enableMd', 'Enable MD'),
+            tooltip: I18n.t('toolbar.enableMdTooltip', 'Enable Markdown Viewer for all Markdown files (Make Default)'),
             cls: 'edit-mode-hide',
             hidden: true,
             onClick: () => {
@@ -2246,7 +2396,7 @@ function buildToolbarButtons() {
         {
             id: 'refreshButton',
             icon: Icons.Refresh,
-            tooltip: 'Reload file from disk',
+            tooltip: I18n.t('toolbar.refresh', 'Reload file from disk'),
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 vscode.postMessage({ command: 'requestFreshData' });
@@ -2255,8 +2405,8 @@ function buildToolbarButtons() {
         {
             id: 'disableMdEditorButton',
             icon: Icons.ZapOff,
-            label: 'Disable MD',
-            tooltip: 'Disable Markdown Viewer for all Markdown files',
+            label: I18n.t('toolbar.disableMd', 'Disable MD'),
+            tooltip: I18n.t('toolbar.disableMdTooltip', 'Disable Markdown Viewer for all Markdown files'),
             cls: 'edit-mode-hide',
             onClick: () => {
                 vscode.postMessage({ command: 'disableMdEditor' });
@@ -2265,8 +2415,8 @@ function buildToolbarButtons() {
         {
             id: 'toggleViewButton',
             icon: Icons.EditFile,
-            label: 'Edit File',
-            tooltip: 'Edit File in Vscode Default Editor',
+            label: I18n.t('toolbar.editFile', 'Edit File'),
+            tooltip: I18n.t('toolbar.editFileMdTooltip', 'Edit File in Vscode Default Editor'),
             onClick: () => {
                 isPreviewView = !isPreviewView;
                 vscode.postMessage({ command: 'toggleView', isPreviewView });
@@ -2275,21 +2425,21 @@ function buildToolbarButtons() {
         {
             id: 'toggleEditModeButton',
             icon: Icons.SplitEdit,
-            label: 'Split Edit',
-            tooltip: 'Edit Markdown side-by-side',
+            label: I18n.t('toolbar.splitEdit', 'Split Edit'),
+            tooltip: I18n.t('toolbar.splitEditTooltip', 'Edit Markdown side-by-side'),
             onClick: () => setEditMode(true)
         },
         {
             id: 'previewEditButton',
             icon: Icons.ReviewOnly,
-            label: 'Preview Edit',
-            tooltip: 'Edit directly in preview (WYSIWYG)',
+            label: I18n.t('toolbar.previewEdit', 'Preview Edit'),
+            tooltip: I18n.t('toolbar.previewEditTooltip', 'Edit directly in preview (WYSIWYG)'),
             onClick: () => setPreviewEditMode(true)
         },
         {
             id: 'saveEditsButton',
             icon: Icons.Save,
-            tooltip: 'Save Changes (Ctrl+S)',
+            tooltip: I18n.t('toolbar.saveMdTooltip', 'Save Changes (Ctrl+S)'),
             cls: 'icon-only',
             hidden: true,
             onClick: () => performSave(true)
@@ -2297,15 +2447,15 @@ function buildToolbarButtons() {
         {
             id: 'cancelEditsButton',
             icon: Icons.Cancel,
-            label: 'Cancel',
-            tooltip: 'Cancel Changes (Esc)',
+            label: I18n.t('toolbar.cancel', 'Cancel'),
+            tooltip: I18n.t('toolbar.cancelMdTooltip', 'Cancel Changes (Esc)'),
             hidden: true,
             onClick: () => cancelEdit()
         },
         {
             id: 'toggleTocButton',
             icon: Icons.Outline,
-            tooltip: 'Toggle Outline',
+            tooltip: I18n.t('toolbar.outline', 'Toggle Outline'),
             cls: 'icon-only',
             onClick: () => {
                 currentSettings.showOutline = !currentSettings.showOutline;
@@ -2315,8 +2465,8 @@ function buildToolbarButtons() {
         {
             id: 'toggleRtlButton',
             icon: Icons.TextDirection,
-            label: 'RTL',
-            tooltip: 'Toggle Right-to-Left (RTL) / LTR text direction',
+            label: I18n.t('toolbar.rtl', 'RTL'),
+            tooltip: I18n.t('toolbar.rtlTooltip', 'Toggle Right-to-Left (RTL) / LTR text direction'),
             onClick: () => {
                 let nextDir: 'auto' | 'ltr' | 'rtl' = 'rtl';
                 const current = currentSettings.textDirection || 'auto';
@@ -2334,58 +2484,68 @@ function buildToolbarButtons() {
         {
             id: 'searchButton',
             icon: Icons.Search,
-            tooltip: 'Search in Preview (Ctrl/Cmd+F)',
+            tooltip: I18n.t('toolbar.searchMd', 'Search in Preview (Ctrl/Cmd+F)'),
             cls: 'icon-only',
             onClick: () => toggleSearchOverlay()
         },
         {
             id: 'openSettingsButton',
             icon: Icons.Settings,
-            tooltip: 'Settings',
+            tooltip: I18n.t('toolbar.settingsMd', 'Settings'),
             cls: 'icon-only',
             onClick: () => { /* Handled by wireSettingsUI */ }
         },
         {
             id: 'toggleBackgroundButton',
             icon: Icons.ThemeLight + Icons.ThemeDark + Icons.ThemeVSCode,
-            tooltip: 'Toggle Theme',
+            tooltip: I18n.t('toolbar.theme', 'Toggle Theme'),
             cls: 'edit-mode-hide',
             onClick: () => { /* Handled by ThemeManager */ }
         },
         {
+            id: 'toggleLanguageButton',
+            icon: Icons.Globe,
+            label: I18n.getLanguageButtonLabel(),
+            tooltip: I18n.t('toolbar.languageTooltip', 'Switch Language (English / 中文)'),
+            cls: 'language-switcher-btn edit-mode-hide',
+            onClick: () => {
+                I18n.toggleLanguage();
+            }
+        },
+        {
             id: 'focusModeButton',
             icon: Icons.Focus,
-            tooltip: 'Focus Mode',
+            tooltip: I18n.t('toolbar.focus', 'Focus Mode'),
             cls: 'icon-only',
             onClick: () => toggleFocusMode()
         },
         {
             id: 'copyHtmlButton',
             icon: Icons.CopyHtml,
-            tooltip: 'Copy as HTML',
+            tooltip: I18n.t('toolbar.copyHtml', 'Copy as HTML'),
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 const preview = $('markdownPreview');
                 if (preview && navigator.clipboard) {
                     navigator.clipboard.writeText(preview.innerHTML)
-                        .then(() => showToast('HTML copied'))
-                        .catch(() => showToast('Copy failed'));
+                        .then(() => showToast(I18n.t('toast.htmlCopied', 'HTML copied')))
+                        .catch(() => showToast(I18n.t('toast.copyFailed', 'Copy failed')));
                 }
             }
         },
         {
             id: 'exportPdfButton',
             icon: Icons.ExportPdf,
-            tooltip: 'Export to PDF',
+            tooltip: I18n.t('toolbar.exportPdf', 'Export to PDF'),
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 const preview = $('markdownPreview');
                 if (!preview) {
-                    showToast('Preview not available.');
+                    showToast(I18n.t('toast.previewUnavailable', 'Preview not available.'));
                     return;
                 }
 
-                showToast('Generating PDF... Please wait.');
+                showToast(I18n.t('toast.pdfGenerating', 'Generating PDF... Please wait.'));
 
                 setTimeout(async () => {
                     try {
@@ -2398,7 +2558,7 @@ function buildToolbarButtons() {
                         reader.readAsDataURL(blob);
                     } catch (err: any) {
                         console.error('PDF export error:', err);
-                        showToast('Failed to generate PDF: ' + (err?.message || err));
+                        showToast(I18n.t('toast.pdfFailed', 'Failed to generate PDF: {0}', (err?.message || err)));
                     }
                 }, 50);
             }
@@ -2406,7 +2566,7 @@ function buildToolbarButtons() {
         {
             id: 'versionHistoryButton',
             icon: Icons.VersionHistory,
-            tooltip: 'Version History',
+            tooltip: I18n.t('toolbar.versionHistory', 'Version history'),
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 vscode.postMessage({ command: 'showVersionHistory' });
@@ -2415,7 +2575,7 @@ function buildToolbarButtons() {
         {
             id: 'projectsButton',
             icon: Icons.Link,
-            tooltip: 'Other Projects',
+            tooltip: I18n.t('toolbar.projects', 'Other Projects'),
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 ProjectsModal.show();
@@ -2424,7 +2584,7 @@ function buildToolbarButtons() {
         {
             id: 'helpButton',
             icon: Icons.Help,
-            tooltip: 'Help & Feedback',
+            tooltip: I18n.t('toolbar.help', 'Help & Feedback'),
             cls: 'icon-only edit-mode-hide',
             onClick: () => {
                 FeedbackModal.show();
@@ -2433,8 +2593,10 @@ function buildToolbarButtons() {
     ];
 
     if (currentSettings.moveMdButtonsToEnd) {
-        const enableButton = buttons.shift();
-        const disableButton = buttons.shift();
+        const enableIndex = buttons.findIndex((b) => b.id === 'enableMdEditorButton');
+        const enableButton = enableIndex >= 0 ? buttons.splice(enableIndex, 1)[0] : undefined;
+        const disableIndex = buttons.findIndex((b) => b.id === 'disableMdEditorButton');
+        const disableButton = disableIndex >= 0 ? buttons.splice(disableIndex, 1)[0] : undefined;
         const helpIndex = buttons.findIndex((button) => button.id === 'helpButton');
         if (enableButton && disableButton) {
             if (helpIndex >= 0) {
@@ -2881,7 +3043,7 @@ function applyFormat(action: string) {
     }
 
     if (previewOnlyTableActions.has(action)) {
-        showToast('Table structure actions are available in WYSIWYG mode');
+        showToast(I18n.t('toast.tableStructureWysiwyg', 'Table structure actions are available in WYSIWYG mode'));
         return;
     }
 
@@ -3335,7 +3497,7 @@ function getTableColumnCount(table: HTMLTableElement): number {
 function addTableRowBelow() {
     const context = resolveInsertContext();
     if (!context) {
-        showToast('No table found to add a row');
+        showToast(I18n.t('toast.noTableFoundRow', 'No table found to add a row'));
         return;
     }
 
@@ -3373,7 +3535,7 @@ function addTableRowBelow() {
 function removeCurrentTableRow() {
     const context = getForcedTableSelectionContext() || getActiveTableSelectionContext();
     if (!context) {
-        showToast('Place the caret inside a table cell first');
+        showToast(I18n.t('toast.placeCaretTableCell', 'Place the caret inside a table cell first'));
         return;
     }
 
@@ -3387,7 +3549,7 @@ function removeCurrentTableRow() {
             cell.textContent = '';
         });
         placeCaretInCell(context.row.cells[Math.min(context.colIndex, context.row.cells.length - 1)] as HTMLTableCellElement);
-        showToast('Cannot remove the last row in this section');
+        showToast(I18n.t('toast.cannotRemoveLastRow', 'Cannot remove the last row in this section'));
         return;
     }
 
@@ -3402,7 +3564,7 @@ function removeCurrentTableRow() {
 function addTableColumnRight() {
     const context = resolveInsertContext();
     if (!context) {
-        showToast('No table found to add a column');
+        showToast(I18n.t('toast.noTableFoundCol', 'No table found to add a column'));
         return;
     }
 
@@ -3423,13 +3585,13 @@ function addTableColumnRight() {
 function removeCurrentTableColumn() {
     const context = getForcedTableSelectionContext() || getActiveTableSelectionContext();
     if (!context) {
-        showToast('Place the caret inside a table cell first');
+        showToast(I18n.t('toast.placeCaretTableCell', 'Place the caret inside a table cell first'));
         return;
     }
 
     const maxColumns = getTableColumnCount(context.table);
     if (maxColumns <= 1) {
-        showToast('Cannot remove the last column');
+        showToast(I18n.t('toast.cannotRemoveLastCol', 'Cannot remove the last column'));
         return;
     }
 
@@ -3918,7 +4080,7 @@ function wirePreviewInteractions() {
             const encoded = copyBtn.getAttribute('data-code') || '';
             const code = decodeURIComponent(encoded);
             if (navigator.clipboard) {
-                navigator.clipboard.writeText(code).then(() => showToast('Copied')).catch(() => showToast('Copy failed'));
+                navigator.clipboard.writeText(code).then(() => showToast(I18n.t('toast.copied', 'Copied'))).catch(() => showToast(I18n.t('toast.copyFailed', 'Copy failed')));
             }
             return;
         }
@@ -3932,8 +4094,8 @@ function wirePreviewInteractions() {
             if (headingId && navigator.clipboard) {
                 const decoded = decodeURIComponent(headingId);
                 navigator.clipboard.writeText(`#${decoded}`)
-                    .then(() => showToast('Link copied'))
-                    .catch(() => showToast('Copy failed'));
+                    .then(() => showToast(I18n.t('toast.linkCopied', 'Link copied')))
+                    .catch(() => showToast(I18n.t('toast.copyFailed', 'Copy failed')));
             }
             return;
         }
@@ -4132,6 +4294,8 @@ const formatIconMap: Record<string, string> = {
 function wireFormattingToolbar() {
     const fmtToolbar = $('formattingToolbar');
     if (!fmtToolbar) return;
+
+    updateFormattingToolbarTranslations();
 
     const buttons = fmtToolbar.querySelectorAll('.fmt-btn');
     buttons.forEach(btn => {

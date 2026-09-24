@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.1 - Chinese Language Support & Language Switcher
+- Added Chinese (Simplified) localization across XLSX, CSV, TSV, and Markdown editors.
+- Added a header language switcher button for all 4 file types with instant toggling.
+- Added automatic language detection for VS Code environment, system locale, and file content.
+
 ## v2.0.0 - Markdown Outline Tree & Projects Modal
 - Added tree guide lines and increased heading indentation to 20px in the Outline panel.
 - Stabilized outline active highlighting to prevent text jitter during scroll spy.

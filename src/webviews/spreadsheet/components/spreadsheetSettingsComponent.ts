@@ -1,4 +1,5 @@
 import { SettingDefinition } from '../../shared/settingsManager';
+import { I18n } from '../../shared/i18n';
 
 export interface XlsxViewSettings {
     firstRowIsHeader: boolean;
@@ -104,6 +105,14 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings, fileType?: st
     if (radioCsvSeparatorComma) radioCsvSeparatorComma.checked = settings.csvSeparator !== ';';
     if (radioCsvSeparatorSemicolon) radioCsvSeparatorSemicolon.checked = settings.csvSeparator === ';';
 
+    const radioLangAuto = document.getElementById('radioLangAuto') as HTMLInputElement | null;
+    const radioLangEn = document.getElementById('radioLangEn') as HTMLInputElement | null;
+    const radioLangZh = document.getElementById('radioLangZh') as HTMLInputElement | null;
+    const currentLangSetting = I18n.getLanguageSetting();
+    if (radioLangAuto) radioLangAuto.checked = currentLangSetting === 'auto';
+    if (radioLangEn) radioLangEn.checked = currentLangSetting === 'en';
+    if (radioLangZh) radioLangZh.checked = currentLangSetting === 'zh';
+
     const autoSaveEnabled = !!settings.autoSave;
     const manualSaveItem = chkManualSavePopup?.closest('.setting-item') as HTMLElement | null;
     const autoSaveAllItem = radioAutoSaveAll?.closest('.setting-item') as HTMLElement | null;
@@ -153,8 +162,8 @@ export function createXlsxSettingsDefinitions(
     return [
         {
             id: 'chkHeaderRow',
-            label: 'Header Row',
-            tooltip: 'Treat the first worksheet row as a header row.',
+            label: I18n.t('settings.headerRow', 'Header Row'),
+            tooltip: I18n.t('settings.headerRowTip', 'Treat the first worksheet row as a header row.'),
             onChange: (val: boolean) => {
                 const settings = getSettings();
                 applyAndPersist({
@@ -166,8 +175,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkStickyHeader',
-            label: 'Sticky Header',
-            tooltip: 'Keep the header row visible while scrolling vertically.',
+            label: I18n.t('settings.stickyHeader', 'Sticky Header'),
+            tooltip: I18n.t('settings.stickyHeaderTip', 'Keep the header row visible while scrolling vertically.'),
             onChange: (val: boolean) => {
                 const settings = getSettings();
                 applyAndPersist({ stickyHeader: settings.firstRowIsHeader ? val : false });
@@ -176,8 +185,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkStickyToolbar',
-            label: 'Sticky Toolbar',
-            tooltip: 'Keep the top toolbar pinned while scrolling the worksheet.',
+            label: I18n.t('settings.stickyToolbar', 'Sticky Toolbar'),
+            tooltip: I18n.t('settings.stickyToolbarTip', 'Keep the top toolbar pinned while scrolling the worksheet.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ stickyToolbar: val });
             },
@@ -185,8 +194,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkAllowInteractiveControlsOutsideEditMode',
-            label: 'Edit Checkbox/Dropdown Without Edit Mode',
-            tooltip: 'Allow checkbox toggles and dropdown selection without entering table edit mode.',
+            label: I18n.t('settings.allowControlsOutside', 'Edit Checkbox/Dropdown Without Edit Mode'),
+            tooltip: I18n.t('settings.allowControlsOutsideTip', 'Allow checkbox toggles and dropdown selection without entering table edit mode.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ allowInteractiveControlsOutsideEditMode: val });
             },
@@ -194,8 +203,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkHyperlinkPreview',
-            label: 'Hyperlink Preview',
-            tooltip: 'Show hover actions for hyperlinks, including Open in browser and Copy link.',
+            label: I18n.t('settings.hyperlinkPreview', 'Hyperlink Preview'),
+            tooltip: I18n.t('settings.hyperlinkPreviewTip', 'Show hover actions for hyperlinks, including Open in browser and Copy link.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ hyperlinkPreview: val });
             },
@@ -203,8 +212,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkSpaciousCells',
-            label: 'Spacious Cells',
-            tooltip: 'Increase row height and padding for better readability.',
+            label: I18n.t('settings.spaciousCells', 'Spacious Cells'),
+            tooltip: I18n.t('settings.spaciousCellsTip', 'Increase row height and padding for better readability.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ spaciousCells: val });
             },
@@ -212,8 +221,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkTextWrap',
-            label: 'Text Wrap',
-            tooltip: 'Enable text wrapping in cells by default.',
+            label: I18n.t('settings.textWrap', 'Text Wrap'),
+            tooltip: I18n.t('settings.textWrapTip', 'Enable text wrapping in cells by default.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ textWrap: val });
             },
@@ -221,8 +230,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkMergeWarningEnabled',
-            label: 'Merge Warning Popup',
-            tooltip: 'Ask for confirmation before merging cells because only the top-left value is preserved.',
+            label: I18n.t('settings.mergeWarning', 'Merge Warning Popup'),
+            tooltip: I18n.t('settings.mergeWarningTip', 'Ask for confirmation before merging cells because only the top-left value is preserved.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ mergeWarningEnabled: val });
             },
@@ -230,8 +239,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkAutoSave',
-            label: 'Autosave',
-            tooltip: 'Automatically save edits shortly after text, checkbox, dropdown, or formatting changes.',
+            label: I18n.t('settings.autoSave', 'Autosave'),
+            tooltip: I18n.t('settings.autoSaveTip', 'Automatically save edits shortly after text, checkbox, dropdown, or formatting changes.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ autoSave: val });
             },
@@ -239,8 +248,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'radioAutoSaveAll',
-            label: 'Autosave all changes',
-            tooltip: 'Autosave any pending worksheet edits, including text, formatting, and structure operations.',
+            label: I18n.t('settings.autoSaveAll', 'Autosave all changes'),
+            tooltip: I18n.t('settings.autoSaveAllTip', 'Autosave any pending worksheet edits, including text, formatting, and structure operations.'),
             className: 'setting-dependent setting-autosave-dependent',
             inputType: 'radio',
             groupName: 'xlsxAutoSaveMode',
@@ -252,8 +261,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'radioAutoSaveControlsOnly',
-            label: 'Autosave only checkbox/dropdown',
-            tooltip: 'Autosave triggers only from checkbox or dropdown changes.',
+            label: I18n.t('settings.autoSaveControlsOnly', 'Autosave only checkbox/dropdown'),
+            tooltip: I18n.t('settings.autoSaveControlsOnlyTip', 'Autosave triggers only from checkbox or dropdown changes.'),
             className: 'setting-dependent setting-autosave-dependent',
             inputType: 'radio',
             groupName: 'xlsxAutoSaveMode',
@@ -265,8 +274,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkShowManualSavePopup',
-            label: 'Manual Save Popup (Autosave Off)',
-            tooltip: 'When Autosave is off, show a short reminder popup to save manually after edits.',
+            label: I18n.t('settings.manualSavePopup', 'Manual Save Popup (Autosave Off)'),
+            tooltip: I18n.t('settings.manualSavePopupTip', 'When Autosave is off, show a short reminder popup to save manually after edits.'),
             className: 'setting-dependent setting-autosave-dependent',
             onChange: (val: boolean) => {
                 applyAndPersist({ showManualSavePopup: val });
@@ -275,8 +284,8 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'chkShowPopups',
-            label: 'Show Notification Popups',
-            tooltip: 'Show popup notifications (such as saved/autosaved toasts) during editor usage. Uncheck to disable.',
+            label: I18n.t('settings.showPopups', 'Show Notification Popups'),
+            tooltip: I18n.t('settings.showPopupsTip', 'Show popup notifications (such as saved/autosaved toasts) during editor usage. Uncheck to disable.'),
             onChange: (val: boolean) => {
                 applyAndPersist({ showPopups: val });
             },
@@ -284,27 +293,63 @@ export function createXlsxSettingsDefinitions(
         },
         {
             id: 'radioCsvSeparatorComma',
-            label: 'CSV Delimiter: Comma (,)',
-            tooltip: 'Use comma as separator when saving CSV files.',
+            label: I18n.t('settings.csvComma', 'CSV Delimiter: Comma (,)'),
+            tooltip: I18n.t('settings.csvCommaTip', 'Use comma as separator when saving CSV files.'),
             inputType: 'radio',
             groupName: 'csvSeparatorMode',
             value: ',',
-            onChange: (val: string) => {
+            onChange: () => {
                 applyAndPersist({ csvSeparator: ',' });
             },
             defaultValue: getSettings().csvSeparator !== ';'
         },
         {
             id: 'radioCsvSeparatorSemicolon',
-            label: 'CSV Delimiter: Semicolon (;)',
-            tooltip: 'Use semicolon as separator when saving CSV files.',
+            label: I18n.t('settings.csvSemicolon', 'CSV Delimiter: Semicolon (;)'),
+            tooltip: I18n.t('settings.csvSemicolonTip', 'Use semicolon as separator when saving CSV files.'),
             inputType: 'radio',
             groupName: 'csvSeparatorMode',
             value: ';',
-            onChange: (val: string) => {
+            onChange: () => {
                 applyAndPersist({ csvSeparator: ';' });
             },
             defaultValue: getSettings().csvSeparator === ';'
+        },
+        {
+            id: 'radioLangAuto',
+            label: I18n.t('settings.langAuto', 'Auto (Detect)'),
+            tooltip: I18n.t('settings.languageTip', 'Auto-detect language'),
+            inputType: 'radio',
+            groupName: 'uiLanguageMode',
+            value: 'auto',
+            onChange: () => {
+                I18n.setLanguage('auto', true);
+            },
+            defaultValue: I18n.getLanguageSetting() === 'auto'
+        },
+        {
+            id: 'radioLangEn',
+            label: I18n.t('settings.langEn', 'English'),
+            tooltip: 'English',
+            inputType: 'radio',
+            groupName: 'uiLanguageMode',
+            value: 'en',
+            onChange: () => {
+                I18n.setLanguage('en', true);
+            },
+            defaultValue: I18n.getLanguageSetting() === 'en'
+        },
+        {
+            id: 'radioLangZh',
+            label: I18n.t('settings.langZh', '中文 (Simplified Chinese)'),
+            tooltip: '简体中文',
+            inputType: 'radio',
+            groupName: 'uiLanguageMode',
+            value: 'zh',
+            onChange: () => {
+                I18n.setLanguage('zh', true);
+            },
+            defaultValue: I18n.getLanguageSetting() === 'zh'
         }
     ];
 }
