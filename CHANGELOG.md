@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.2 - Clipboard Paste Bug Fix
+- Fixed `Cmd+V` / `Ctrl+V` paste bug.
+
 ## v2.0.1 - Chinese Language Support & Language Switcher
 - Added Chinese (Simplified) localization across XLSX, CSV, TSV, and Markdown editors.
 - Added a header language switcher button for all 4 file types with instant toggling.

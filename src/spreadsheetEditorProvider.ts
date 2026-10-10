@@ -1547,6 +1547,19 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 return;
             }
 
+            if (message?.command === 'requestPaste') {
+                try {
+                    const text = await vscode.env.clipboard.readText();
+                    webview.postMessage({
+                        command: 'pasteFromClipboard',
+                        text: text || ''
+                    });
+                } catch (err) {
+                    console.error('Failed to read clipboard from extension host:', err);
+                }
+                return;
+            }
+
             if (message?.command === 'cancelVersionPreview') {
                 if (previewVersionId) {
                     previewVersionId = null;

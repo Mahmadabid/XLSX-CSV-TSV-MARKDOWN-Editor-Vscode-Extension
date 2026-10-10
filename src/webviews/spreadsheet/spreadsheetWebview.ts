@@ -1208,9 +1208,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         return Math.min(Math.max(low, 0), Math.max(totalRows - 1, 0));
     }
 
-    function rerenderCurrentSheetFromLocalState() {
+    function rerenderCurrentSheetFromLocalState(preservedScrollTop?: number, preservedScrollLeft?: number) {
         const container = document.getElementById('tableContainer');
         if (!container) return;
+
+        const scrollTarget = getTableContainer();
+        const savedScrollTop = typeof preservedScrollTop === 'number' ? preservedScrollTop : (scrollTarget ? scrollTarget.scrollTop : 0);
+        const savedScrollLeft = typeof preservedScrollLeft === 'number' ? preservedScrollLeft : (scrollTarget ? scrollTarget.scrollLeft : 0);
 
         currentVisibleStart = 0;
         currentVisibleEnd = 0;
@@ -1228,6 +1232,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 scrollTarget: '#content',
                 onLayoutApplied: initializeVirtualScrolling
             });
+        }
+
+        const restoredTarget = getTableContainer();
+        if (restoredTarget && (savedScrollTop > 0 || savedScrollLeft > 0)) {
+            restoredTarget.scrollTop = savedScrollTop;
+            restoredTarget.scrollLeft = savedScrollLeft;
+            void updateVisibleRows();
         }
     }
 
@@ -1858,22 +1869,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
         });
         appendAction(I18n.t('context.paste', 'Paste'), async () => {
             hideHeaderContextMenu();
-            if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-                try {
-                    const text = await navigator.clipboard.readText();
-                    pasteTextAtSelection(text);
-                } catch (err) {
-                    const text = prompt(I18n.t('context.pastePrompt', 'Paste content:'));
-                    if (text !== null) {
-                        pasteTextAtSelection(text);
-                    }
-                }
-            } else {
-                const text = prompt(I18n.t('context.pastePrompt', 'Paste content:'));
-                if (text !== null) {
-                    pasteTextAtSelection(text);
-                }
-            }
+            await triggerPaste();
         });
 
         const isWrapped = cell.style.whiteSpace === 'pre-wrap';
@@ -5743,8 +5739,45 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             const afterSnapshot = captureWorksheetStateSnapshot();
             pushSheetUndoEntry(beforeSnapshot, afterSnapshot);
 
-            // Trigger a complete table redraw
-            rerenderCurrentSheetFromLocalState();
+            // Update visible DOM cells directly to preserve scroll position and avoid redraw reset
+            for (const edit of editsList) {
+                const r = edit.row - 1;
+                const c = edit.col - 1;
+                const domCell = document.querySelector(`td[data-row="${r}"][data-col="${c}"]`) as HTMLElement | null;
+                if (domCell) {
+                    const cellData = getOrCreateRowCellData(r, c);
+                    const cellType = cellData.cellType || 'text';
+                    if (cellType === 'checkbox') {
+                        const checked = parseBooleanCellValue(edit.value);
+                        domCell.innerHTML = `<span class="cell-content cell-checkbox-content"><input type="checkbox" class="xlsx-cell-checkbox" aria-label="Cell checkbox"${checked ? ' checked' : ''} /><span class="checkbox-value">${checked ? 'TRUE' : 'FALSE'}</span></span>`;
+                        applyInteractiveControlState(domCell);
+                    } else if (cellType === 'rating') {
+                        const rating = normalizeRatingValue(edit.value);
+                        let stars = '';
+                        for (let i = 1; i <= 5; i++) {
+                            stars += `<button type="button" class="xlsx-rating-star${i <= rating ? ' active' : ''}" data-rating-value="${i}" aria-label="Rate ${i} of 5">★</button>`;
+                        }
+                        domCell.innerHTML = `<span class="cell-content cell-rating-content" data-rating-value="${rating}">${stars}<span class="rating-value">${rating || ''}</span></span>`;
+                        applyInteractiveControlState(domCell);
+                    } else if (cellType === 'date') {
+                        const dateVal = normalizeDateInputValue(edit.value);
+                        domCell.innerHTML = `<span class="cell-content cell-date-content"><input type="date" class="xlsx-cell-date" aria-label="Cell date" value="${dateVal}" /></span>`;
+                        applyInteractiveControlState(domCell);
+                    } else if (cellType === 'dropdown') {
+                        const options = cellData.dropdownOptions || [];
+                        domCell.innerHTML = renderDropdownCellContent({
+                            options,
+                            selectedValue: edit.value,
+                            allowInteractiveControls: areInteractiveControlsEnabled(),
+                            showEditButton: isEditMode
+                        });
+                        updateDropdownCellPresentation(domCell, edit.value);
+                        applyInteractiveControlState(domCell);
+                    } else {
+                        setPlainCellContent(domCell, edit.value);
+                    }
+                }
+            }
 
             // Re-select the pasted range
             const endRow = Math.min(totalRows - 1, startRow + grid.length - 1);
@@ -5771,6 +5804,28 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 }
             }
         }
+    }
+
+    async function triggerPaste() {
+        if (isVersionPreviewMode) {
+            showToast('Version preview is read-only');
+            return;
+        }
+
+        if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (typeof text === 'string' && text.length > 0) {
+                    pasteTextAtSelection(text);
+                    return;
+                }
+            } catch {
+                // Clipboard read permission might be blocked in webview iframe;
+                // fall through to requesting from the extension host.
+            }
+        }
+
+        vscode.postMessage({ command: 'requestPaste' });
     }
 
     function invertColor(color: string) {
@@ -6479,6 +6534,12 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     return;
                 }
 
+                if (isCmdOrCtrl && key === 'v') {
+                    e.preventDefault();
+                    showToast('Version preview is read-only');
+                    return;
+                }
+
                 if (!allowNavigation) {
                     e.preventDefault();
                     showToast('Version preview is read-only');
@@ -6604,14 +6665,20 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                     applyStrikeThrough();
                     return;
                 }
-
-                return;
             }
 
             if (isCmdOrCtrl && e.key.toLowerCase() === 'c') {
                 e.preventDefault();
                 copySelectionToClipboard();
                 return;
+            }
+
+            if (isCmdOrCtrl && e.key.toLowerCase() === 'v') {
+                if (!isCellEditing) {
+                    e.preventDefault();
+                    void triggerPaste();
+                    return;
+                }
             }
 
             if (isCmdOrCtrl && e.key.toLowerCase() === 'a') {
@@ -7780,6 +7847,13 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
             } else {
                 const isAutosaveResult = !!message.isAutosave;
                 showToast(isAutosaveResult ? I18n.t('toast.autosaveFailed', 'Autosave failed') : I18n.t('toast.errorSaving', 'Error saving'), isAutosaveResult, 1000);
+            }
+            return;
+        }
+
+        if (message.command === 'pasteFromClipboard') {
+            if (typeof message.text === 'string' && message.text) {
+                pasteTextAtSelection(message.text);
             }
             return;
         }
