@@ -12,6 +12,7 @@ export interface XlsxCopyContext {
     showToast: (message: string) => void;
     requestAllRows: () => Promise<any[]>;
     normalizeCellText: (text: string | null | undefined) => string;
+    getLogicalBounds?: () => { minRow: number, maxRow: number, minCol: number, maxCol: number } | null;
 }
 
 function yieldToMain() {
@@ -152,21 +153,45 @@ export async function copySelectionToClipboard(ctx: XlsxCopyContext): Promise<vo
             return;
         }
 
-        const cellsArray = Array.from(ctx.selectedCells);
-        const rowSet = new Set<number>();
-        const colSet = new Set<number>();
+        const logicalBounds = ctx.getLogicalBounds ? ctx.getLogicalBounds() : null;
+        let sortedRows: number[] = [];
+        let sortedCols: number[] = [];
 
-        cellsArray.forEach(td => {
-            const r = parseInt(td.dataset.row || '-1', 10);
-            const c = parseInt(td.dataset.col || '-1', 10);
-            if (!isNaN(r) && !isNaN(c)) {
-                rowSet.add(r);
-                colSet.add(c);
+        if (logicalBounds) {
+            for (let r = logicalBounds.minRow; r <= logicalBounds.maxRow; r++) {
+                sortedRows.push(r);
             }
-        });
+            for (let c = logicalBounds.minCol; c <= logicalBounds.maxCol; c++) {
+                sortedCols.push(c);
+            }
+        } else {
+            const cellsArray = Array.from(ctx.selectedCells);
+            const rowSet = new Set<number>();
+            const colSet = new Set<number>();
 
-        const sortedRows = Array.from(rowSet).sort((a, b) => a - b);
-        const sortedCols = Array.from(colSet).sort((a, b) => a - b);
+            cellsArray.forEach(td => {
+                const r = parseInt(td.dataset.row || '-1', 10);
+                const c = parseInt(td.dataset.col || '-1', 10);
+                if (!isNaN(r) && !isNaN(c)) {
+                    rowSet.add(r);
+                    colSet.add(c);
+                }
+            });
+
+            sortedRows = Array.from(rowSet).sort((a, b) => a - b);
+            sortedCols = Array.from(colSet).sort((a, b) => a - b);
+        }
+
+        // If any rows in the selection are not in rowCache, fetch all rows
+        const hasMissingRows = sortedRows.some(r => !ctx.rowCache.has(r));
+        if (hasMissingRows) {
+            const allRows = await ctx.requestAllRows();
+            if (Array.isArray(allRows) && allRows.length > 0) {
+                allRows.forEach((row, i) => {
+                    ctx.rowCache.set(i, row);
+                });
+            }
+        }
 
         // Pre-compile a nested Map of 0-based rowIndex -> 0-based colIndex -> cell value
         const cacheMap = new Map<number, Map<number, string>>();
@@ -198,7 +223,8 @@ export async function copySelectionToClipboard(ctx: XlsxCopyContext): Promise<vo
         ctx.selectedCells.forEach(cell => cell.classList.add('copying'));
         setTimeout(() => ctx.selectedCells.forEach(cell => cell.classList.remove('copying')), 300);
 
-        ctx.showToast('Copied ' + cellsArray.length + ' cells');
+        const totalCopiedCount = sortedRows.length * sortedCols.length;
+        ctx.showToast('Copied ' + totalCopiedCount + ' cells');
     } catch (err) {
         console.error('Copy operation failed:', err);
         ctx.showToast('Copy failed');

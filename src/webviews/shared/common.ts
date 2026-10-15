@@ -11,8 +11,9 @@ export const vscode = (function () {
 
 export const VirtualScrollConfig = {
     ROW_HEIGHT: 28,
-    BUFFER_ROWS: 20,
-    CHUNK_SIZE: 100
+    BUFFER_ROWS: 40,
+    CHUNK_SIZE: 100,
+    PREFETCH_ROWS: 40
 };
 
 export function debounce(func: Function, wait: number) {
@@ -21,5 +22,18 @@ export function debounce(func: Function, wait: number) {
         const context = this;
         clearTimeout(timeout);
         timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+}
+
+export function throttleRAF(fn: () => void): () => void {
+    let ticking = false;
+    return () => {
+        if (!ticking) {
+            ticking = true;
+            requestAnimationFrame(() => {
+                fn();
+                ticking = false;
+            });
+        }
     };
 }

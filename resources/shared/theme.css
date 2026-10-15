@@ -1023,4 +1023,70 @@ body:not(.sticky-toolbar-enabled) #tableContainer {
     background-color: var(--accent-bg);
     border-color: var(--accent-color);
     color: var(--accent-color);
+}
+
+/* ===== Scroll to Top Button ===== */
+.scroll-to-top-btn {
+    position: fixed;
+    bottom: 44px;
+    right: 20px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--vscode-editorWidget-background, var(--panel-bg, #252526));
+    border: 1px solid var(--vscode-widget-border, var(--border-color, #454545));
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    color: var(--text-color, #cccccc);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(12px) scale(0.9);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+    z-index: 1000;
+    user-select: none;
+    -webkit-user-select: none;
+    padding: 0;
+    outline: none;
+    contain: paint;
+}
+
+.scroll-to-top-btn.visible {
+    opacity: 0.95;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+}
+
+.scroll-to-top-btn:hover {
+    opacity: 1;
+    background: var(--button-bg, #0071e3);
+    color: var(--button-text, #ffffff);
+    border-color: var(--button-bg, #0071e3);
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.2));
+}
+
+.scroll-to-top-btn:active {
+    transform: translateY(0) scale(0.95);
+}
+
+.scroll-to-top-btn svg {
+    width: 18px;
+    height: 18px;
+    pointer-events: none;
+    transition: transform 0.15s ease;
+}
+
+.scroll-to-top-btn:hover svg {
+    transform: translateY(-1px);
+}
+
+[dir="rtl"] .scroll-to-top-btn,
+.rtl-mode .scroll-to-top-btn {
+    right: auto;
+    left: 20px;
 }

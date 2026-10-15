@@ -333,8 +333,17 @@ export function createXlsxRowHtml(params: XlsxRowHtmlParams): string {
     html += '</th>';
 
     let virtualColIndex = 0;
+    const cellsArr = rowData.cells;
     for (let actualCol = 1; actualCol <= columnCount; actualCol++) {
-        const cellData = rowData.cells ? rowData.cells.find((cell: any) => cell.colNumber === actualCol) : null;
+        let cellData: any = null;
+        if (cellsArr && cellsArr.length > 0) {
+            const direct = cellsArr[actualCol - 1];
+            if (direct && direct.colNumber === actualCol) {
+                cellData = direct;
+            } else {
+                cellData = cellsArr.find((cell: any) => cell.colNumber === actualCol) || null;
+            }
+        }
 
         if (cellData && cellData.isMergeCovered) {
             virtualColIndex++;

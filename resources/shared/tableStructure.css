@@ -79,6 +79,29 @@ thead th:first-child {
     isolation: isolate;
 }
 
+/* Virtual scrolling spacers */
+tr.virtual-spacer {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+}
+
+tr.virtual-spacer td {
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    line-height: 0 !important;
+    font-size: 0 !important;
+    pointer-events: none !important;
+    overflow: hidden !important;
+    background: transparent !important;
+}
+
 /* Shared interaction visuals for CSV/TSV/XLSX */
 /* Create a pseudo-element for selection overlay and borders so we don't clobber inline styles */
 td.selected::before,

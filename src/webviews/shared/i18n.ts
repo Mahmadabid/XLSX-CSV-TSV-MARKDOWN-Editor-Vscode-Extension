@@ -60,6 +60,7 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'toolbar.convertTooltip': 'Convert this file to CSV, TSV, or XLSX',
         'toolbar.projects': 'Other Projects',
         'toolbar.help': 'Help & Feedback',
+        'toolbar.scrollToTop': 'Scroll to top',
         'toolbar.languageButton': '中文',
         'toolbar.languageTooltip': 'Switch Language (English / 中文)',
 
@@ -138,6 +139,8 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'settings.manualSavePopupTip': 'Display a small reminder to save manually when autosave is disabled.',
         'settings.showPopups': 'Show Notification Popups',
         'settings.showPopupsTip': 'Show popup notifications (such as save toasts) during editor usage. Uncheck to disable.',
+        'settings.showScrollToTop': 'Scroll to Top Button',
+        'settings.showScrollToTopTip': 'Display a button to scroll to the top when scrolling down.',
         'settings.wordWrap': 'Word Wrap',
         'settings.wordWrapTip': 'Wrap long lines in the Markdown preview to fit within the viewport.',
         'settings.syncScroll': 'Synchronize Scrolling',
@@ -314,6 +317,7 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'toolbar.convertTooltip': '转换此文件为 CSV、TSV 或 XLSX',
         'toolbar.projects': '其他开源项目',
         'toolbar.help': '帮助与反馈',
+        'toolbar.scrollToTop': '回到顶部',
         'toolbar.languageButton': 'English',
         'toolbar.languageTooltip': '切换语言 (English / 中文)',
 
@@ -392,6 +396,8 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'settings.manualSavePopupTip': '未启用自动保存时，编辑后显示手动保存提醒。',
         'settings.showPopups': '显示通知弹窗',
         'settings.showPopupsTip': '在编辑器使用期间显示浮窗通知（如保存提示）。取消勾选可禁用。',
+        'settings.showScrollToTop': '回到顶部按钮',
+        'settings.showScrollToTopTip': '向下滚动时显示回到顶部按钮。',
         'settings.wordWrap': '自动折行',
         'settings.wordWrapTip': '在 Markdown 预览中自动折行，使其适应视口宽度。',
         'settings.syncScroll': '同步滚动',

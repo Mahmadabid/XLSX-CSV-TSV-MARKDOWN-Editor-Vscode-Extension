@@ -201,6 +201,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 showLineNumbers: cfg.get('md.showLineNumbers', true),
                                 moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                                 showPopups: cfg.get('showPopups', true),
+                                showScrollToTop: cfg.get('md.showScrollToTop', cfg.get('showScrollToTop', true)),
                                 isMdEnabled: isMdEnabled,
                                 language: cfg.get('language', 'auto'),
                                 vscodeLanguage: vscode.env.language
@@ -279,6 +280,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await cfg.update('md.moveMdButtonsToEnd', !!s.moveMdButtonsToEnd, vscode.ConfigurationTarget.Global);
                             if (typeof s.showPopups === 'boolean') {
                                 await cfg.update('showPopups', !!s.showPopups, vscode.ConfigurationTarget.Global);
+                            }
+                            if (typeof s.showScrollToTop === 'boolean') {
+                                await cfg.update('showScrollToTop', !!s.showScrollToTop, vscode.ConfigurationTarget.Global);
                             }
                             if (typeof s.showOutline === 'boolean') {
                                 await cfg.update('md.showOutline', !!s.showOutline, vscode.ConfigurationTarget.Global);
@@ -842,6 +846,11 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             </div>
 
             <div class="status-info" id="statusInfo"></div>
+            <button id="scrollToTopBtn" class="scroll-to-top-btn" title="Scroll to top" aria-label="Scroll to top">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="18 15 12 9 6 15"></polyline>
+                </svg>
+            </button>
 
             <div id="lightboxOverlay" class="lightbox-overlay">
                 <button id="lightboxClose" class="lightbox-close">&times;</button>

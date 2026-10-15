@@ -9,6 +9,7 @@ export interface XlsxViewSettings {
     autoSaveMode: 'all' | 'controlsOnly';
     showManualSavePopup: boolean;
     showPopups: boolean;
+    showScrollToTop?: boolean;
     allowInteractiveControlsOutsideEditMode: boolean;
     hyperlinkPreview: boolean;
     spaciousCells: boolean;
@@ -27,6 +28,7 @@ export const defaultXlsxViewSettings: XlsxViewSettings = {
     autoSaveMode: 'all',
     showManualSavePopup: true,
     showPopups: true,
+    showScrollToTop: true,
     allowInteractiveControlsOutsideEditMode: true,
     hyperlinkPreview: true,
     spaciousCells: false,
@@ -46,6 +48,7 @@ export function normalizeXlsxSettings(next: any, previous: XlsxViewSettings): Xl
         autoSaveMode: next && (next.autoSaveMode === 'all' || next.autoSaveMode === 'controlsOnly') ? next.autoSaveMode : previous.autoSaveMode,
         showManualSavePopup: next && typeof next.showManualSavePopup === 'boolean' ? next.showManualSavePopup : previous.showManualSavePopup,
         showPopups: next && typeof next.showPopups === 'boolean' ? next.showPopups : (previous.showPopups !== undefined ? previous.showPopups : true),
+        showScrollToTop: next && typeof next.showScrollToTop === 'boolean' ? next.showScrollToTop : (previous.showScrollToTop !== undefined ? previous.showScrollToTop : true),
         allowInteractiveControlsOutsideEditMode: next && typeof next.allowInteractiveControlsOutsideEditMode === 'boolean' ? next.allowInteractiveControlsOutsideEditMode : previous.allowInteractiveControlsOutsideEditMode,
         hyperlinkPreview: next && typeof next.hyperlinkPreview === 'boolean' ? next.hyperlinkPreview : previous.hyperlinkPreview,
         spaciousCells: next && typeof next.spaciousCells === 'boolean' ? next.spaciousCells : previous.spaciousCells,
@@ -72,6 +75,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings, fileType?: st
     const radioAutoSaveControlsOnly = document.getElementById('radioAutoSaveControlsOnly') as HTMLInputElement | null;
     const chkManualSavePopup = document.getElementById('chkShowManualSavePopup') as HTMLInputElement | null;
     const chkShowPopups = document.getElementById('chkShowPopups') as HTMLInputElement | null;
+    const chkShowScrollToTop = document.getElementById('chkShowScrollToTop') as HTMLInputElement | null;
     const chkOutsideControls = document.getElementById('chkAllowInteractiveControlsOutsideEditMode') as HTMLInputElement | null;
     const chkHyperlink = document.getElementById('chkHyperlinkPreview') as HTMLInputElement | null;
     const chkSpacious = document.getElementById('chkSpaciousCells') as HTMLInputElement | null;
@@ -96,6 +100,7 @@ export function syncSettingsCheckboxes(settings: XlsxViewSettings, fileType?: st
     if (radioAutoSaveControlsOnly) radioAutoSaveControlsOnly.checked = settings.autoSaveMode === 'controlsOnly';
     if (chkManualSavePopup) chkManualSavePopup.checked = !!settings.showManualSavePopup;
     if (chkShowPopups) chkShowPopups.checked = settings.showPopups !== false;
+    if (chkShowScrollToTop) chkShowScrollToTop.checked = settings.showScrollToTop !== false;
     if (chkOutsideControls) chkOutsideControls.checked = !!settings.allowInteractiveControlsOutsideEditMode;
     if (chkHyperlink) chkHyperlink.checked = !!settings.hyperlinkPreview;
     if (chkSpacious) chkSpacious.checked = !!settings.spaciousCells;
@@ -290,6 +295,15 @@ export function createXlsxSettingsDefinitions(
                 applyAndPersist({ showPopups: val });
             },
             defaultValue: getSettings().showPopups !== false
+        },
+        {
+            id: 'chkShowScrollToTop',
+            label: I18n.t('settings.showScrollToTop', 'Scroll to Top Button'),
+            tooltip: I18n.t('settings.showScrollToTopTip', 'Show a button to scroll to the top when scrolling down.'),
+            onChange: (val: boolean) => {
+                applyAndPersist({ showScrollToTop: val });
+            },
+            defaultValue: getSettings().showScrollToTop !== false
         },
         {
             id: 'radioCsvSeparatorComma',

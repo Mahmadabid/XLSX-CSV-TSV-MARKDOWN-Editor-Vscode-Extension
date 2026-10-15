@@ -1171,6 +1171,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             autoSaveMode: 'all' | 'controlsOnly';
             showManualSavePopup: boolean;
             showPopups: boolean;
+            showScrollToTop: boolean;
             allowInteractiveControlsOutsideEditMode: boolean;
             hyperlinkPreview: boolean;
             spaciousCells: boolean;
@@ -1225,6 +1226,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 autoSaveMode: autoSaveModeSetting === 'controlsOnly' ? 'controlsOnly' : 'all',
                 showManualSavePopup: cfg.get('xlsx.showManualSavePopup', true),
                 showPopups: cfg.get('showPopups', true),
+                showScrollToTop: cfg.get('xlsx.showScrollToTop', cfg.get('showScrollToTop', true)),
                 allowInteractiveControlsOutsideEditMode: cfg.get('xlsx.allowInteractiveControlsOutsideEditMode', true),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
@@ -1248,6 +1250,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     autoSaveMode: 'all',
                     showManualSavePopup: false,
                     showPopups: cfg.get('showPopups', true),
+                    showScrollToTop: cfg.get(`${fileType}.showScrollToTop`, cfg.get('showScrollToTop', true)),
                     allowInteractiveControlsOutsideEditMode: true,
                     hyperlinkPreview: true,
                     spaciousCells: cfg.get(`${fileType}.spaciousCells`, false),
@@ -1266,6 +1269,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 autoSaveMode: 'all',
                 showManualSavePopup: false,
                 showPopups: cfg.get('showPopups', true),
+                showScrollToTop: cfg.get('xlsx.showScrollToTop', cfg.get('showScrollToTop', true)),
                 allowInteractiveControlsOutsideEditMode: cfg.get('xlsx.allowInteractiveControlsOutsideEditMode', true),
                 hyperlinkPreview: cfg.get('xlsx.hyperlinkPreview', true),
                 spaciousCells: cfg.get('xlsx.spaciousCells', false),
@@ -1328,9 +1332,11 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     mergedCells: ws.data.mergedCells,
                     rowHeights: ws.data.rows.map((row: any) => row.height || 21)
                 }));
+                const initialRows = (worksheetsData[0]?.data?.rows || []).slice(0, 100);
                 webview.postMessage({
                     command: 'initVirtualTable',
                     worksheets: worksheetsMeta,
+                    initialRows,
                     rowHeaderWidth,
                     fileType: currentFileType,
                     isPlainView: currentIsPlainView,
@@ -1627,6 +1633,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
 
                     if (typeof s.showPopups === 'boolean') {
                         await cfg.update('showPopups', !!s.showPopups, vscode.ConfigurationTarget.Global);
+                    }
+                    if (typeof s.showScrollToTop === 'boolean') {
+                        await cfg.update('showScrollToTop', !!s.showScrollToTop, vscode.ConfigurationTarget.Global);
                     }
 
                     if (scope === 'plain') {

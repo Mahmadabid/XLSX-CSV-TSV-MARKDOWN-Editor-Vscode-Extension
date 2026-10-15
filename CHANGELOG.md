@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.0.3 - Scroll to Top Button, Setting & Spreadsheet Virtualization Overhaul
+- Added scroll-to-top button and an option to disable it.
+- **Spreadsheet Virtualization Overhaul**:
+  - Replaced debounced scroll handling with `requestAnimationFrame` (`throttleRAF`) for smooth 60fps/120fps scrolling without delay or frozen rows.
+  - Implemented proactive background pre-fetching in the scroll direction, pre-caching upcoming chunks before the viewport reaches them to eliminate blank screen flashes.
+  - Added initial row streaming (`initialRows`) directly in the startup payload to guarantee instantaneous first paint without empty cell skeletons.
+  - Eliminated column width shifting/jitter during scroll by preventing dynamic width recalculation from running on virtualized row updates.
+  - Added dedicated CSS for virtual spacer rows to prevent height distortion and scroll jumps caused by table cell line-height clamps.
+  - Enabled multi-chunk selection copying using logical bounds so offscreen rows are preserved when copying to clipboard.
+  - Optimized cell lookup from O(N) to O(1) in the row renderer, speeding up multi-column grid rendering.
+  - Fixed drag-selection auto-scroll `NaN` bug when cursor reaches virtual spacer elements.
+
 ## v2.0.2 - Clipboard Paste Bug Fix
 - Fixed `Cmd+V` / `Ctrl+V` paste bug.
 

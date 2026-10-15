@@ -208,6 +208,7 @@ let currentSettings = {
     showLineNumbers: true,
     moveMdButtonsToEnd: false,
     showPopups: true,
+    showScrollToTop: true,
     isMdEnabled: true,
     textDirection: 'auto' as 'auto' | 'ltr' | 'rtl'
 };
@@ -1643,7 +1644,60 @@ function updateScrollSpy() {
 const throttledScrollSpy = throttleRAF(() => {
     updateScrollSpy();
     updateProgressBar();
+    updateMdScrollToTopVisibility();
 });
+
+function updateMdScrollToTopVisibility() {
+    const btn = $('scrollToTopBtn');
+    if (!btn) return;
+    if ((currentSettings as any).showScrollToTop === false) {
+        if (btn.classList.contains('visible')) {
+            btn.classList.remove('visible');
+        }
+        return;
+    }
+    const preview = $('markdownPreview');
+    const editor = $('markdownEditor');
+    const previewScroll = preview ? preview.scrollTop : 0;
+    const editorScroll = editor ? editor.scrollTop : 0;
+    const maxScroll = Math.max(previewScroll, editorScroll);
+    const shouldBeVisible = maxScroll > 200;
+    const isCurrentlyVisible = btn.classList.contains('visible');
+
+    if (shouldBeVisible !== isCurrentlyVisible) {
+        btn.classList.toggle('visible', shouldBeVisible);
+    }
+}
+
+function initMdScrollToTop() {
+    let btn = $('scrollToTopBtn') as HTMLButtonElement | null;
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'scrollToTopBtn';
+        btn.className = 'scroll-to-top-btn';
+        btn.setAttribute('aria-label', I18n.t('toolbar.scrollToTop', 'Scroll to top'));
+        btn.title = I18n.t('toolbar.scrollToTop', 'Scroll to top');
+        btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
+        document.body.appendChild(btn);
+    }
+
+    btn.addEventListener('click', () => {
+        const preview = $('markdownPreview');
+        const editor = $('markdownEditor');
+        if (preview) {
+            preview.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        if (editor) {
+            editor.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    });
+
+    const editor = $('markdownEditor');
+    if (editor) {
+        editor.addEventListener('scroll', throttledScrollSpy, { passive: true });
+    }
+    updateMdScrollToTopVisibility();
+}
 
 function initScrollSpy() {
     const preview = $('markdownPreview');
@@ -1967,6 +2021,9 @@ function applySettings(settings: any, persist = false) {
     if (chkPreviewLeft) chkPreviewLeft.checked = currentSettings.previewPosition === 'left';
     if (chkShowOutline) chkShowOutline.checked = currentSettings.showOutline;
     if (chkShowLineNumbers) chkShowLineNumbers.checked = currentSettings.showLineNumbers;
+    const chkShowScrollToTop = $('chkShowScrollToTop') as HTMLInputElement | null;
+    if (chkShowScrollToTop) chkShowScrollToTop.checked = (currentSettings as any).showScrollToTop !== false;
+    updateMdScrollToTopVisibility();
 
     // Line numbers
     document.body.classList.toggle('show-line-numbers', !!currentSettings.showLineNumbers);
@@ -2080,6 +2137,16 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
             defaultValue: (currentSettings as any).showPopups !== false,
             onChange: (val: boolean) => {
                 (currentSettings as any).showPopups = val;
+                applySettings(currentSettings, true);
+            }
+        },
+        {
+            id: 'chkShowScrollToTop',
+            label: I18n.t('settings.showScrollToTop', 'Scroll to Top Button'),
+            tooltip: I18n.t('settings.showScrollToTopTip', 'Show a button to scroll to the top when scrolling down.'),
+            defaultValue: (currentSettings as any).showScrollToTop !== false,
+            onChange: (val: boolean) => {
+                (currentSettings as any).showScrollToTop = val;
                 applySettings(currentSettings, true);
             }
         },
@@ -2215,6 +2282,13 @@ function updateAllMdTranslations() {
     updateFormattingToolbarTranslations();
     updateSearchOverlayTranslations();
     updateTocTranslations();
+
+    const scrollBtn = $('scrollToTopBtn');
+    if (scrollBtn) {
+        const title = I18n.t('toolbar.scrollToTop', 'Scroll to top');
+        scrollBtn.title = title;
+        scrollBtn.setAttribute('aria-label', title);
+    }
 }
 
 function initializeSettings() {
@@ -4324,6 +4398,7 @@ wireTocPanel();
 initLightbox();
 initSearchOverlay();
 initScrollSpy();
+initMdScrollToTop();
 initResizeHandles();
 updateHeaderHeight();
 
