@@ -4,10 +4,11 @@ export interface ToolbarButton {
     icon: string; // SVG string
     label?: string;
     tooltip: string;
-    onClick: () => void;
+    onClick?: () => void;
     enabled?: boolean;
     hidden?: boolean;
     cls?: string; // Extra classes
+    groupButtons?: ToolbarButton[];
 }
 
 export class ToolbarManager {
@@ -111,13 +112,65 @@ export class ToolbarManager {
     }
 
     addButton(btn: ToolbarButton) {
+        if (btn.groupButtons && btn.groupButtons.length > 0) {
+            const groupWrapper = document.createElement('div');
+            groupWrapper.id = btn.id;
+            groupWrapper.className = `toggle-button-group ${btn.cls || ''}`;
+            if (btn.hidden) groupWrapper.classList.add('hidden');
+
+            btn.groupButtons.forEach(subBtn => {
+                const subWrap = document.createElement('div');
+                subWrap.className = `tooltip ${subBtn.cls || ''}`;
+                if (subBtn.hidden) subWrap.classList.add('hidden');
+
+                const buttonEl = document.createElement('button');
+                buttonEl.id = subBtn.id;
+                buttonEl.className = `toggle-button ${subBtn.cls || ''}`;
+                if (subBtn.enabled === false) buttonEl.disabled = true;
+
+                const tooltipText = document.createElement('span');
+                tooltipText.className = 'tooltiptext';
+                tooltipText.innerHTML = subBtn.tooltip;
+
+                if (subBtn.icon && subBtn.icon.trim().startsWith('<svg')) {
+                    buttonEl.innerHTML = subBtn.icon;
+                } else if (subBtn.icon) {
+                    buttonEl.innerHTML = subBtn.icon;
+                }
+
+                if (subBtn.label) {
+                    const labelSpan = document.createElement('span');
+                    labelSpan.className = 'btn-label';
+                    labelSpan.textContent = subBtn.label;
+                    if (subBtn.icon && subBtn.icon.trim().length > 0) {
+                        buttonEl.appendChild(document.createTextNode(' '));
+                    }
+                    buttonEl.appendChild(labelSpan);
+                }
+
+                if (subBtn.onClick) {
+                    buttonEl.addEventListener('click', () => {
+                        subBtn.onClick!();
+                    });
+                }
+
+                subWrap.appendChild(buttonEl);
+                subWrap.appendChild(tooltipText);
+                groupWrapper.appendChild(subWrap);
+                this.buttons.set(subBtn.id, buttonEl);
+            });
+
+            this.container.appendChild(groupWrapper);
+            return;
+        }
+
         const wrapper = document.createElement('div');
         wrapper.className = `tooltip ${btn.cls || ''}`;
         if (btn.hidden) wrapper.classList.add('hidden');
 
         const buttonEl = document.createElement('button');
         buttonEl.id = btn.id;
-        buttonEl.className = `toggle-button`;
+        buttonEl.className = `toggle-button ${btn.cls || ''}`;
         if (btn.enabled === false) buttonEl.disabled = true;
         
         const tooltipText = document.createElement('span');
@@ -134,13 +187,17 @@ export class ToolbarManager {
             const labelSpan = document.createElement('span');
             labelSpan.className = 'btn-label';
             labelSpan.textContent = btn.label;
-            buttonEl.appendChild(document.createTextNode(' '));
+            if (btn.icon && btn.icon.trim().length > 0) {
+                buttonEl.appendChild(document.createTextNode(' '));
+            }
             buttonEl.appendChild(labelSpan);
         }
 
-        buttonEl.addEventListener('click', () => {
-            btn.onClick();
-        });
+        if (btn.onClick) {
+            buttonEl.addEventListener('click', () => {
+                btn.onClick!();
+            });
+        }
 
         wrapper.appendChild(buttonEl);
         wrapper.appendChild(tooltipText);
@@ -160,6 +217,12 @@ export class ToolbarManager {
             const target = wrapper || btn;
             if (visible) target.classList.remove('hidden');
             else target.classList.add('hidden');
+        } else {
+            const el = document.getElementById(id);
+            if (el) {
+                if (visible) el.classList.remove('hidden');
+                else el.classList.add('hidden');
+            }
         }
     }
 
@@ -196,7 +259,10 @@ export class ToolbarManager {
                 labelSpan = document.createElement('span');
                 labelSpan.className = 'btn-label';
                 labelSpan.textContent = label;
-                btn.appendChild(document.createTextNode(' '));
+                const hasIcon = !!btn.querySelector('svg');
+                if (hasIcon) {
+                    btn.appendChild(document.createTextNode(' '));
+                }
                 btn.appendChild(labelSpan);
             }
         }

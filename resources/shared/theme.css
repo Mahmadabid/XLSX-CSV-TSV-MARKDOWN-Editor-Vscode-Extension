@@ -488,6 +488,87 @@ body.sticky-toolbar-enabled .toolbar {
     margin: 0;
 }
 
+/* Toggle Button Group (Segmented Controls) */
+.toggle-button-group {
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--button-bg);
+    border-radius: 6px;
+    height: 32px;
+    box-shadow: var(--button-shadow);
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.toggle-button-group .tooltip {
+    display: inline-flex;
+    height: 100%;
+}
+
+.toggle-button-group .toggle-button {
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    border: none;
+    color: var(--button-text);
+    height: 100%;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease;
+}
+
+.toggle-button-group .tooltip:not(:last-child) .toggle-button {
+    border-right: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.toggle-button-group .toggle-button:hover:not(:disabled) {
+    background-color: color-mix(in srgb, currentColor 18%, transparent);
+    transform: none;
+    box-shadow: none;
+}
+
+.toggle-button-group .toggle-button:active:not(:disabled) {
+    background-color: color-mix(in srgb, currentColor 28%, transparent);
+    transform: none;
+    box-shadow: none;
+}
+
+.toggle-button-group .toggle-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.toggle-button-group .toggle-button.icon-only {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+}
+
+.toggle-button-group .toggle-button.icon-only svg {
+    margin: 0;
+    width: 15px;
+    height: 15px;
+}
+
+.toggle-button-group .text-size-val-btn {
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 44px;
+    padding: 0 8px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    user-select: none;
+    cursor: pointer;
+}
+
+.toggle-button-group .text-size-val-btn .btn-label {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+}
+
 .toggle-button.theme-toggle-pill {
     border-radius: 999px;
     min-width: 62px;

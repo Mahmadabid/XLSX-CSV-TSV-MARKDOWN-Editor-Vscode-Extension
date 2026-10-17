@@ -209,9 +209,36 @@ let currentSettings = {
     moveMdButtonsToEnd: false,
     showPopups: true,
     showScrollToTop: true,
+    textSize: 100,
     isMdEnabled: true,
     textDirection: 'auto' as 'auto' | 'ltr' | 'rtl'
 };
+
+const MIN_TEXT_SIZE = 70;
+const MAX_TEXT_SIZE = 200;
+const TEXT_SIZE_STEP = 10;
+let currentTextSize = (() => {
+    try {
+        const stored = localStorage.getItem('xlsx_viewer_md_text_size');
+        if (stored) {
+            const val = parseInt(stored, 10);
+            if (Number.isFinite(val) && val >= MIN_TEXT_SIZE && val <= MAX_TEXT_SIZE) {
+                return val;
+            }
+        }
+    } catch {}
+    return 100;
+})();
+
+function applyTextSizeToDom(size: number) {
+    const scale = size / 100;
+    const previewFontSize = (14 * scale).toFixed(1) + 'px';
+    const editorFontSize = (13 * scale).toFixed(1) + 'px';
+    document.documentElement.style.setProperty('--md-font-scale', String(scale));
+    document.documentElement.style.setProperty('--md-preview-font-size', previewFontSize);
+    document.documentElement.style.setProperty('--md-editor-font-size', editorFontSize);
+}
+applyTextSizeToDom(currentTextSize);
 
 let isFocusMode = false;
 let searchMatches: Element[] = [];
@@ -1955,6 +1982,13 @@ function applySettings(settings: any, persist = false) {
 
     Utils.showPopupsEnabled = (currentSettings as any).showPopups !== false;
 
+    if (typeof (currentSettings as any).textSize === 'number') {
+        setTextSize((currentSettings as any).textSize, false, false);
+    } else {
+        applyTextSizeToDom(currentTextSize);
+        updateTextSizeButtonsState();
+    }
+
     updateTextDirection();
 
     const container = $('markdownContainer');
@@ -2045,6 +2079,139 @@ function applySettings(settings: any, persist = false) {
 
     if (persist) {
         vscode.postMessage({ command: 'updateSettings', settings: currentSettings });
+    }
+}
+
+function updateTextSizeButtonsState() {
+    if (!toolbarManager) return;
+    const decBtn = toolbarManager.getButton('decreaseTextSizeButton');
+    const incBtn = toolbarManager.getButton('increaseTextSizeButton');
+    const resetBtn = toolbarManager.getButton('resetTextSizeButton');
+
+    if (decBtn) {
+        decBtn.disabled = currentTextSize <= MIN_TEXT_SIZE;
+        decBtn.style.opacity = currentTextSize <= MIN_TEXT_SIZE ? '0.4' : '1';
+        decBtn.style.cursor = currentTextSize <= MIN_TEXT_SIZE ? 'not-allowed' : 'pointer';
+    }
+    if (incBtn) {
+        incBtn.disabled = currentTextSize >= MAX_TEXT_SIZE;
+        incBtn.style.opacity = currentTextSize >= MAX_TEXT_SIZE ? '0.4' : '1';
+        incBtn.style.cursor = currentTextSize >= MAX_TEXT_SIZE ? 'not-allowed' : 'pointer';
+    }
+    if (resetBtn) {
+        toolbarManager.setButtonLabel('resetTextSizeButton', I18n.t('toolbar.reset', 'Reset'));
+        toolbarManager.setButtonTooltip('resetTextSizeButton', `${I18n.t('toolbar.resetTextSize', 'Reset Text Size (Ctrl+0)')} (${currentTextSize}%)`);
+        resetBtn.disabled = currentTextSize === 100;
+        resetBtn.style.opacity = currentTextSize === 100 ? '0.6' : '1';
+        resetBtn.style.cursor = currentTextSize === 100 ? 'default' : 'pointer';
+    }
+
+    const fmtVal = document.querySelector('.fmt-text-size-val');
+    if (fmtVal) {
+        fmtVal.textContent = `${currentTextSize}%`;
+    }
+}
+
+function setTextSize(size: number, persist: boolean = true, notify: boolean = true) {
+    const clamped = Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, Math.round(size / 5) * 5));
+    currentTextSize = clamped;
+    currentSettings.textSize = clamped;
+
+    applyTextSizeToDom(clamped);
+    updateTextSizeButtonsState();
+
+    cachedEditorLineMap = [];
+    cachedPreviewLineMap = [];
+
+    try {
+        localStorage.setItem('xlsx_viewer_md_text_size', String(clamped));
+    } catch {}
+
+    if (persist) {
+        vscode.postMessage({ command: 'updateSettings', settings: currentSettings });
+    }
+
+    if (notify) {
+        showToast(I18n.t('toast.textSize', 'Text Size: {0}%').replace('{0}', String(clamped)));
+    }
+}
+
+function increaseTextSize() {
+    if (currentTextSize >= MAX_TEXT_SIZE) return;
+    setTextSize(currentTextSize + TEXT_SIZE_STEP, true, true);
+}
+
+function decreaseTextSize() {
+    if (currentTextSize <= MIN_TEXT_SIZE) return;
+    setTextSize(currentTextSize - TEXT_SIZE_STEP, true, true);
+}
+
+function resetTextSize() {
+    if (currentTextSize === 100) return;
+    setTextSize(100, true, true);
+}
+
+function adjustHeadingLevel(editor: HTMLTextAreaElement, delta: number) {
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const value = editor.value;
+
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    let lineEnd = value.indexOf('\n', end);
+    if (lineEnd === -1) lineEnd = value.length;
+
+    const lineText = value.substring(lineStart, lineEnd);
+    const match = lineText.match(/^(#{1,6})\s*(.*)$/);
+    let newText = lineText;
+
+    if (match) {
+        const currentLevel = match[1].length;
+        const targetLevel = currentLevel - delta;
+        if (targetLevel <= 0) {
+            newText = match[2];
+        } else if (targetLevel <= 6) {
+            newText = '#'.repeat(targetLevel) + ' ' + match[2];
+        }
+    } else {
+        if (delta > 0) {
+            newText = '# ' + lineText;
+        } else {
+            newText = '### ' + lineText;
+        }
+    }
+
+    editor.focus();
+    editor.setRangeText(newText, lineStart, lineEnd, 'end');
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function adjustPreviewHeadingLevel(delta: number) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    let node = range.commonAncestorContainer as HTMLElement | null;
+    if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    const headingBlock = node ? (node.closest('h1, h2, h3, h4, h5, h6, p') as HTMLElement | null) : null;
+    if (!headingBlock) {
+        if (delta > 0) document.execCommand('formatBlock', false, 'H1');
+        return;
+    }
+
+    const tag = headingBlock.tagName.toUpperCase();
+    if (tag.startsWith('H')) {
+        const currentLevel = parseInt(tag.substring(1), 10);
+        const targetLevel = currentLevel - delta;
+        if (targetLevel <= 0) {
+            document.execCommand('formatBlock', false, 'P');
+        } else if (targetLevel <= 6) {
+            document.execCommand('formatBlock', false, 'H' + targetLevel);
+        }
+    } else if (tag === 'P') {
+        if (delta > 0) {
+            document.execCommand('formatBlock', false, 'H1');
+        } else {
+            document.execCommand('formatBlock', false, 'H3');
+        }
     }
 }
 
@@ -2258,7 +2425,10 @@ function updateAllMdTranslations() {
         toolbarManager.setButtonTooltip('cancelEditsButton', I18n.t('toolbar.cancelMdTooltip', 'Cancel Changes (Esc)'));
         toolbarManager.setButtonTooltip('toggleTocButton', I18n.t('toolbar.outline', 'Toggle Outline'));
         toolbarManager.setButtonLabel('toggleRtlButton', I18n.t('toolbar.rtl', 'RTL'));
-        toolbarManager.setButtonTooltip('toggleRtlButton', I18n.t('toolbar.rtlTooltip', 'Toggle Right-to-Left (RTL) / LTR text direction'));
+        toolbarManager.setButtonTooltip('increaseTextSizeButton', I18n.t('toolbar.increaseTextSize', 'Increase Text Size (Ctrl++)'));
+        toolbarManager.setButtonTooltip('decreaseTextSizeButton', I18n.t('toolbar.decreaseTextSize', 'Decrease Text Size (Ctrl+-)'));
+        toolbarManager.setButtonTooltip('resetTextSizeButton', `${I18n.t('toolbar.resetTextSize', 'Reset Text Size (Ctrl+0)')} (${currentTextSize}%)`);
+        toolbarManager.setButtonLabel('resetTextSizeButton', I18n.t('toolbar.reset', 'Reset'));
         toolbarManager.setButtonTooltip('searchButton', I18n.t('toolbar.searchMd', 'Search in Preview (Ctrl/Cmd+F)'));
         toolbarManager.setButtonTooltip('openSettingsButton', I18n.t('toolbar.settingsMd', 'Settings'));
         toolbarManager.setButtonTooltip('toggleBackgroundButton', I18n.t('toolbar.theme', 'Toggle Theme'));
@@ -2276,6 +2446,7 @@ function updateAllMdTranslations() {
         mdSettingsManager.updateTranslations(createMdSettingsDefinitions());
     }
     syncMdLanguageRadios();
+    updateTextSizeButtonsState();
 
     ProjectsModal.updateTranslations();
     FeedbackModal.updateTranslations();
@@ -2537,6 +2708,27 @@ function buildToolbarButtons() {
             }
         },
         {
+            id: 'increaseTextSizeButton',
+            icon: Icons.Plus,
+            tooltip: I18n.t('toolbar.increaseTextSize', 'Increase Text Size (Ctrl++)'),
+            cls: 'icon-only',
+            onClick: () => increaseTextSize()
+        },
+        {
+            id: 'decreaseTextSizeButton',
+            icon: Icons.Minus,
+            tooltip: I18n.t('toolbar.decreaseTextSize', 'Decrease Text Size (Ctrl+-)'),
+            cls: 'icon-only',
+            onClick: () => decreaseTextSize()
+        },
+        {
+            id: 'resetTextSizeButton',
+            icon: '',
+            label: I18n.t('toolbar.reset', 'Reset'),
+            tooltip: I18n.t('toolbar.resetTextSize', 'Reset Text Size (Ctrl+0)'),
+            onClick: () => resetTextSize()
+        },
+        {
             id: 'toggleRtlButton',
             icon: Icons.TextDirection,
             label: I18n.t('toolbar.rtl', 'RTL'),
@@ -2708,6 +2900,24 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
+    if (isCmdOrCtrl && (e.key === '=' || e.key === '+' || e.code === 'Equal' || e.code === 'NumpadAdd')) {
+        e.preventDefault();
+        increaseTextSize();
+        return;
+    }
+
+    if (isCmdOrCtrl && (e.key === '-' || e.key === '_' || e.code === 'Minus' || e.code === 'NumpadSubtract')) {
+        e.preventDefault();
+        decreaseTextSize();
+        return;
+    }
+
+    if (isCmdOrCtrl && (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
+        e.preventDefault();
+        resetTextSize();
+        return;
+    }
+
     if (isCmdOrCtrl && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleSearchOverlay();
@@ -2735,6 +2945,17 @@ document.addEventListener('keydown', (e) => {
         }
     }
 });
+
+window.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+            increaseTextSize();
+        } else if (e.deltaY > 0) {
+            decreaseTextSize();
+        }
+    }
+}, { passive: false });
 
 // ===== Formatting Utilities =====
 function wrapSelection(editor: HTMLTextAreaElement, before: string, after: string) {
@@ -3136,6 +3357,11 @@ function applyFormat(action: string) {
         case 'heading1': toggleLinePrefix(editor, '# '); break;
         case 'heading2': toggleLinePrefix(editor, '## '); break;
         case 'heading3': toggleLinePrefix(editor, '### '); break;
+        case 'decreaseHeading': adjustHeadingLevel(editor, -1); break;
+        case 'increaseHeading': adjustHeadingLevel(editor, 1); break;
+        case 'decreaseTextSize': decreaseTextSize(); break;
+        case 'resetTextSize': resetTextSize(); break;
+        case 'increaseTextSize': increaseTextSize(); break;
         case 'bulletList': toggleLinePrefix(editor, '- '); break;
         case 'orderedList': toggleLinePrefix(editor, '1. '); break;
         case 'checkbox': toggleCheckboxList(editor); break;
@@ -3718,6 +3944,11 @@ function applyWysiwygFormat(action: string) {
         case 'heading1': document.execCommand('formatBlock', false, 'H1'); break;
         case 'heading2': document.execCommand('formatBlock', false, 'H2'); break;
         case 'heading3': document.execCommand('formatBlock', false, 'H3'); break;
+        case 'decreaseHeading': adjustPreviewHeadingLevel(-1); break;
+        case 'increaseHeading': adjustPreviewHeadingLevel(1); break;
+        case 'decreaseTextSize': decreaseTextSize(); break;
+        case 'resetTextSize': resetTextSize(); break;
+        case 'increaseTextSize': increaseTextSize(); break;
         case 'bulletList': document.execCommand('insertUnorderedList'); break;
         case 'orderedList': document.execCommand('insertOrderedList'); break;
         case 'blockquote': document.execCommand('formatBlock', false, 'BLOCKQUOTE'); break;
@@ -4338,6 +4569,11 @@ const formatIconMap: Record<string, string> = {
     heading1: '<span class="fmt-text-icon">H1</span>',
     heading2: '<span class="fmt-text-icon">H2</span>',
     heading3: '<span class="fmt-text-icon">H3</span>',
+    decreaseHeading: '<span class="fmt-text-icon">H-</span>',
+    increaseHeading: '<span class="fmt-text-icon">H+</span>',
+    decreaseTextSize: Icons.TextDecrease,
+    resetTextSize: '',
+    increaseTextSize: Icons.TextIncrease,
     bulletList: Icons.ListBullet,
     orderedList: Icons.ListOrdered,
     checkbox: Icons.Checkbox,

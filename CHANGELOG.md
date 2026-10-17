@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.4 - Markdown Text Size Controls & Table Zoom
+- **Easy Text Resizing**: Added 3 quick buttons (`+`, `-`, and `Reset`) directly in the toolbar before the RTL button to easily enlarge, reduce, or reset text size.
+- **Full Document & Table Scaling**: Text resizing now smoothly scales everything in your document, including tables, code blocks, lists, and headings.
+- **Convenient Shortcuts**: Zoom in or out quickly with `Ctrl/Cmd` + `+` / `-`, reset with `Ctrl/Cmd` + `0`, or use `Ctrl/Cmd` + Mouse Scroll.
+
 ## v2.0.3 - Scroll to Top Button, Setting & Spreadsheet Virtualization Overhaul
 - Added scroll-to-top button and an option to disable it.
 - **Spreadsheet Virtualization Overhaul**:

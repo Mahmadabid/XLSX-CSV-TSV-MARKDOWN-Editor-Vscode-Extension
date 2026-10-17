@@ -63,6 +63,10 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'toolbar.scrollToTop': 'Scroll to top',
         'toolbar.languageButton': '中文',
         'toolbar.languageTooltip': 'Switch Language (English / 中文)',
+        'toolbar.decreaseTextSize': 'Decrease Text Size (Ctrl+-)',
+        'toolbar.resetTextSize': 'Reset Text Size (Ctrl+0)',
+        'toolbar.increaseTextSize': 'Increase Text Size (Ctrl++)',
+        'toolbar.reset': 'Reset',
 
         // Markdown Formatting Toolbar
         'fmt.bold': 'Bold (Ctrl+B)',
@@ -97,6 +101,11 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'fmt.sortLines': 'Sort Lines A-Z',
         'fmt.trimWhitespace': 'Trim Trailing Whitespace',
         'fmt.jumpToLine': 'Go to Line (Ctrl+G)',
+        'fmt.decreaseTextSize': 'Decrease Text Size (Ctrl+-)',
+        'fmt.resetTextSize': 'Reset Text Size (Ctrl+0)',
+        'fmt.increaseTextSize': 'Increase Text Size (Ctrl++)',
+        'fmt.decreaseHeading': 'Decrease Heading Level',
+        'fmt.increaseHeading': 'Increase Heading Level',
 
         // Search & Find
         'find.placeholder': 'Find',
@@ -155,6 +164,13 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'settings.moveMdButtonsToEndTip': 'Place the Enable/Disable MD buttons just before Help & Feedback instead of at the start of the toolbar.',
         'settings.rtlTextDirection': 'RTL Text Direction',
         'settings.rtlTextDirectionTip': 'Force Right-to-Left (RTL) text direction for Markdown preview and editor.',
+        'settings.textSize': 'Text Size',
+        'settings.textSizeTip': 'Adjust the font size of the Markdown preview and editor.',
+        'settings.textSizeSmall': 'Text Size: Small (80%)',
+        'settings.textSizeDefault': 'Text Size: Default (100%)',
+        'settings.textSizeMedium': 'Text Size: Medium (120%)',
+        'settings.textSizeLarge': 'Text Size: Large (140%)',
+        'settings.textSizeXLarge': 'Text Size: Extra Large (160%)',
         'settings.language': 'Language',
         'settings.languageTip': 'Select the interface language for the editor (Auto, English, or 中文).',
         'settings.langAuto': 'Auto (Detect)',
@@ -261,6 +277,7 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'toast.cannotRemoveLastCol': 'Cannot remove the last column',
         'toast.copied': 'Copied',
         'toast.linkCopied': 'Link copied',
+        'toast.textSize': 'Text Size: {0}%',
         'toc.empty': 'No headings found'
     },
     zh: {
@@ -320,6 +337,10 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'toolbar.scrollToTop': '回到顶部',
         'toolbar.languageButton': 'English',
         'toolbar.languageTooltip': '切换语言 (English / 中文)',
+        'toolbar.decreaseTextSize': '减小字号 (Ctrl+-)',
+        'toolbar.resetTextSize': '重置字号 (Ctrl+0)',
+        'toolbar.increaseTextSize': '增大字号 (Ctrl++)',
+        'toolbar.reset': '重置',
 
         // Markdown Formatting Toolbar
         'fmt.bold': '加粗 (Ctrl+B)',
@@ -354,6 +375,11 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'fmt.sortLines': '按字母排序行',
         'fmt.trimWhitespace': '去除行尾空格',
         'fmt.jumpToLine': '跳转到行 (Ctrl+G)',
+        'fmt.decreaseTextSize': '减小字号 (Ctrl+-)',
+        'fmt.resetTextSize': '重置字号 (Ctrl+0)',
+        'fmt.increaseTextSize': '增大字号 (Ctrl++)',
+        'fmt.decreaseHeading': '降低标题级别',
+        'fmt.increaseHeading': '提高标题级别',
 
         // Search & Find
         'find.placeholder': '查找',
@@ -412,6 +438,13 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'settings.moveMdButtonsToEndTip': '将启用/禁用 MD 按钮放置在帮助与反馈之前，而不是工具栏开头。',
         'settings.rtlTextDirection': 'RTL 文本方向',
         'settings.rtlTextDirectionTip': '强制 Markdown 预览和编辑器使用从右到左 (RTL) 文本方向。',
+        'settings.textSize': '字号大小',
+        'settings.textSizeTip': '调整 Markdown 预览与编辑器的字号大小。',
+        'settings.textSizeSmall': '字号：较小 (80%)',
+        'settings.textSizeDefault': '字号：默认 (100%)',
+        'settings.textSizeMedium': '字号：中等 (120%)',
+        'settings.textSizeLarge': '字号：较大 (140%)',
+        'settings.textSizeXLarge': '字号：超大 (160%)',
         'settings.language': '界面语言',
         'settings.languageTip': '选择编辑器的界面语言（自动、英文或中文）。',
         'settings.langAuto': '自动检测',
@@ -518,6 +551,7 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
         'toast.cannotRemoveLastCol': '无法删除最后一列',
         'toast.copied': '已复制',
         'toast.linkCopied': '链接已复制',
+        'toast.textSize': '字号大小：{0}%',
         'toc.empty': '未找到标题'
     }
 };

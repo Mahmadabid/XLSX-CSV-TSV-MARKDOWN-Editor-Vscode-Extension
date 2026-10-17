@@ -2,6 +2,9 @@
     --formatting-height: 0px;
     --toc-indent: 20px;
     --toc-guide-color: rgba(0, 0, 0, 0.14);
+    --md-font-scale: 1;
+    --md-preview-font-size: 14px;
+    --md-editor-font-size: 13px;
 }
 
 body.dark-mode,
@@ -649,7 +652,7 @@ body.resizing * {
     outline: none;
     resize: none;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: var(--md-editor-font-size, 13px);
     line-height: 1.6;
     padding: 16px;
     background: var(--bg-color);
@@ -669,6 +672,7 @@ body.resizing * {
     max-width: 100%;
     color: var(--text-color);
     background: var(--bg-color);
+    font-size: var(--md-preview-font-size, 14px);
 }
 
 .markdown-preview.hidden {
@@ -928,21 +932,23 @@ body.show-line-numbers .markdown-preview pre {
     width: max-content;
     max-width: 100%;
     border-collapse: collapse;
-    margin: 16px 0;
-    font-size: 13px;
+    margin: calc(16px * var(--md-font-scale, 1)) 0;
+    font-size: calc(13px * var(--md-font-scale, 1));
     overflow: auto;
     display: block;
 }
 
 .markdown-preview table.md-table th,
 .markdown-preview table.md-table td {
-    padding: 6px 13px;
+    padding: calc(6px * var(--md-font-scale, 1)) calc(13px * var(--md-font-scale, 1));
     border: 1px solid var(--border-color);
+    line-height: 1.5;
 }
 
 body.preview-edit-mode .markdown-preview table.md-table th,
 body.preview-edit-mode .markdown-preview table.md-table td {
-    height: 36px;
+    min-height: calc(36px * var(--md-font-scale, 1));
+    height: auto;
     vertical-align: top;
 }
 
@@ -1302,6 +1308,18 @@ body.sticky-toolbar-enabled .formatting-toolbar {
     font-weight: 700;
     letter-spacing: -0.5px;
     line-height: 1;
+    font-family: var(--font-mono);
+}
+
+
+.fmt-btn.fmt-text-size-val {
+    font-size: 10px;
+    font-weight: 600;
+    min-width: 36px;
+    padding: 0 4px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    user-select: none;
     font-family: var(--font-mono);
 }
 

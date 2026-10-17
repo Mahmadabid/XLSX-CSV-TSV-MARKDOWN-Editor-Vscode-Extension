@@ -202,6 +202,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                                 showPopups: cfg.get('showPopups', true),
                                 showScrollToTop: cfg.get('md.showScrollToTop', cfg.get('showScrollToTop', true)),
+                                textSize: cfg.get('md.textSize', 100),
                                 isMdEnabled: isMdEnabled,
                                 language: cfg.get('language', 'auto'),
                                 vscodeLanguage: vscode.env.language
@@ -289,6 +290,9 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             }
                             if (typeof s.showLineNumbers === 'boolean') {
                                 await cfg.update('md.showLineNumbers', !!s.showLineNumbers, vscode.ConfigurationTarget.Global);
+                            }
+                            if (typeof s.textSize === 'number') {
+                                await cfg.update('md.textSize', s.textSize, vscode.ConfigurationTarget.Global);
                             }
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
@@ -677,6 +681,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         showOutline: cfg.get('md.showOutline', true),
                         showLineNumbers: cfg.get('md.showLineNumbers', true),
                         moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
+                        textSize: cfg.get('md.textSize', 100),
                         isMdEnabled: isMdEnabled,
                         language: cfg.get('language', 'auto'),
                         vscodeLanguage: vscode.env.language
@@ -775,6 +780,14 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     <button class="fmt-btn" data-format="heading1" title="Heading 1 (Ctrl+1)"></button>
                     <button class="fmt-btn" data-format="heading2" title="Heading 2 (Ctrl+2)"></button>
                     <button class="fmt-btn" data-format="heading3" title="Heading 3 (Ctrl+3)"></button>
+                    <button class="fmt-btn" data-format="decreaseHeading" title="Decrease Heading Level"></button>
+                    <button class="fmt-btn" data-format="increaseHeading" title="Increase Heading Level"></button>
+                </div>
+                <div class="fmt-sep"></div>
+                <div class="fmt-group">
+                    <button class="fmt-btn" data-format="decreaseTextSize" title="Decrease Text Size (Ctrl+-)"></button>
+                    <button class="fmt-btn fmt-text-size-val" data-format="resetTextSize" title="Reset Text Size (Ctrl+0)">100%</button>
+                    <button class="fmt-btn" data-format="increaseTextSize" title="Increase Text Size (Ctrl++)"></button>
                 </div>
                 <div class="fmt-sep"></div>
                 <div class="fmt-group">
