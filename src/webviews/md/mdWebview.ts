@@ -79,6 +79,72 @@ function markdownItMermaid(md: any) {
     };
 }
 
+// Enhanced task list plugin that reliably detects both empty and populated task items (- [ ], - [x])
+function customTaskLists(md: any, options?: { enabled?: boolean }) {
+    const disableCheckboxes = options && options.enabled !== undefined ? !options.enabled : false;
+
+    md.core.ruler.after('inline', 'github-task-lists', function (state: any) {
+        const tokens = state.tokens;
+        for (let i = 2; i < tokens.length; i++) {
+            if (isTodoItem(tokens, i)) {
+                todoify(tokens[i], state.Token, disableCheckboxes);
+                attrSet(tokens[i - 2], 'class', 'task-list-item' + (!disableCheckboxes ? ' enabled' : ''));
+                const pIdx = parentToken(tokens, i - 2);
+                if (pIdx >= 0) {
+                    attrSet(tokens[pIdx], 'class', 'contains-task-list');
+                }
+            }
+        }
+    });
+}
+
+function attrSet(token: any, name: string, value: string) {
+    const index = token.attrIndex(name);
+    const attr = [name, value];
+    if (index < 0) {
+        token.attrPush(attr);
+    } else {
+        token.attrs[index] = attr;
+    }
+}
+
+function parentToken(tokens: any[], index: number) {
+    const targetLevel = tokens[index].level - 1;
+    for (let i = index - 1; i >= 0; i--) {
+        if (tokens[i].level === targetLevel) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+function isTodoItem(tokens: any[], index: number) {
+    return tokens[index].type === 'inline' &&
+        tokens[index - 1].type === 'paragraph_open' &&
+        tokens[index - 2].type === 'list_item_open' &&
+        startsWithTodoMarkdown(tokens[index]);
+}
+
+function startsWithTodoMarkdown(token: any) {
+    const c = token.content || '';
+    return c === '[ ]' || c === '[x]' || c === '[X]' ||
+        c.startsWith('[ ] ') || c.startsWith('[x] ') || c.startsWith('[X] ');
+}
+
+function todoify(token: any, TokenConstructor: any, disableCheckboxes: boolean) {
+    const isChecked = token.content.startsWith('[x]') || token.content.startsWith('[X]');
+
+    const checkbox = new TokenConstructor('html_inline', '', 0);
+    const disabledAttr = disableCheckboxes ? ' disabled=""' : '';
+    checkbox.content = '<input class="task-list-item-checkbox"' + (isChecked ? ' checked=""' : '') + disabledAttr + ' type="checkbox">';
+
+    token.children.unshift(checkbox);
+    if (token.children[1]) {
+        token.children[1].content = token.children[1].content.slice(3);
+    }
+    token.content = token.content.slice(3);
+}
+
 // ===== Throttle Utility =====
 function throttleRAF(fn: () => void): () => void {
     let ticking = false;
@@ -119,6 +185,74 @@ const turndownService = new TurndownService({
     strongDelimiter: '**',
 });
 turndownService.use(gfm);
+
+// Custom Turndown escaping: avoid escaping underscores inside words (e.g. snake_case or file_name.md)
+const turndownEscapes: Array<[RegExp, string]> = [
+    [/\\/g, '\\\\'],
+    [/\*/g, '\\*'],
+    [/^-/g, '\\-'],
+    [/^\+ /g, '\\+ '],
+    [/^(=+)/g, '\\$1'],
+    [/^(#{1,6}) /g, '\\$1 '],
+    [/`/g, '\\`'],
+    [/^~~~/g, '\\~~~'],
+    [/\[/g, '\\['],
+    [/\]/g, '\\]'],
+    [/^>/g, '\\>'],
+    [/^(\d+)\. /g, '$1\\. ']
+];
+
+turndownService.escape = function (string: string): string {
+    return turndownEscapes.reduce((accumulator, escape) => {
+        return accumulator.replace(escape[0], escape[1]);
+    }, string)
+    .replace(/(?<![a-zA-Z0-9])_|_(?![a-zA-Z0-9])/gu, '\\_')
+    .replace(/\\\[([ xX]?)\\\]/g, '[$1]')
+    .replace(/^\\([*+-]) \[([ xX]?)\]/g, '$1 [$2]');
+};
+
+// Custom listItem rule: single space after list marker (- instead of -   ) and normalize task checkboxes
+turndownService.addRule('listItem', {
+    filter: 'li',
+    replacement: function (content, node, options) {
+        let prefix = (options.bulletListMarker || '-') + ' ';
+        const parent = node.parentNode as HTMLElement | null;
+        if (parent && parent.nodeName === 'OL') {
+            const start = parent.getAttribute('start');
+            const index = Array.prototype.indexOf.call(parent.children, node);
+            prefix = (start ? Number(start) + index : index + 1) + '. ';
+        }
+        content = content.replace(/^(\[[ xX]\])\s+/, '$1 ');
+        const isParagraph = /\n$/.test(content);
+        let contentStr = content.replace(/^\n+/, '').replace(/\n+$/, '') + (isParagraph ? '\n' : '');
+        contentStr = contentStr.replace(/\n/gm, '\n' + ' '.repeat(prefix.length));
+        return prefix + contentStr + (node.nextSibling ? '\n' : '');
+    }
+});
+
+// Custom taskListItems rule: support task checkboxes in both tight and loose lists
+turndownService.addRule('taskListItems', {
+    filter: function (node) {
+        return (node as HTMLInputElement).type === 'checkbox' && Boolean(
+            (node.parentNode && node.parentNode.nodeName === 'LI') ||
+            (node.parentNode && node.parentNode.nodeName === 'P' && node.parentNode.parentNode && node.parentNode.parentNode.nodeName === 'LI')
+        );
+    },
+    replacement: function (_content, node) {
+        return ((node as HTMLInputElement).checked ? '[x]' : '[ ]') + ' ';
+    }
+});
+
+// Custom tableCell rule: remove aggressive 1\. escaping at the start of table cells
+turndownService.addRule('tableCell', {
+    filter: ['th', 'td'],
+    replacement: function (content, node) {
+        const cleanContent = content.replace(/^(\s*)(\d+)\\\./gm, '$1$2.');
+        const parent = node.parentNode as HTMLElement | null;
+        const isFirst = parent ? (!node.previousElementSibling || Array.prototype.indexOf.call(parent.childNodes, node) === 0) : true;
+        return (isFirst ? '| ' : ' ') + cleanContent + ' |';
+    }
+});
 
 function decodeStoredFenceCode(encoded: string | null): string | null {
     if (!encoded) {
@@ -464,7 +598,7 @@ function capturePreviewMutation(beforeSnapshot: string) {
 const md = new MarkdownIt({
     html: true,
     linkify: true,
-    typographer: true,
+    typographer: false,
     breaks: true, // GFM style line breaks
     highlight: function (str, lang) {
         if (lang && hljs.getLanguage(lang)) {
@@ -475,7 +609,7 @@ const md = new MarkdownIt({
         return ''; // use external default escaping
     }
 });
-md.use(taskLists, { enabled: false, label: true, labelAfter: true });
+md.use(customTaskLists, { enabled: true });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 md.use(container as any, 'warning');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1171,6 +1305,12 @@ function ensureVersionPreviewBanner(): HTMLElement {
 function setVersionPreviewMode(enabled: boolean, label?: string) {
     isVersionPreviewMode = enabled;
     document.body.classList.toggle('version-preview-mode', enabled);
+    const preview = $('markdownPreview');
+    if (preview) {
+        preview.querySelectorAll('input.task-list-item-checkbox').forEach(cb => {
+            (cb as HTMLInputElement).disabled = enabled;
+        });
+    }
     if (enabled) {
         isPreviewView = true;
         setEditMode(false);
@@ -1264,6 +1404,16 @@ function performSave(exitAfterSave = false) {
         // Convert preview HTML back to markdown
         const preview = $('markdownPreview');
         if (preview) {
+            // Sync checkbox checked state to attributes before cloning for Turndown
+            preview.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                const input = cb as HTMLInputElement;
+                if (input.checked) {
+                    input.setAttribute('checked', '');
+                } else {
+                    input.removeAttribute('checked');
+                }
+            });
+
             const clone = preview.cloneNode(true) as HTMLElement;
             clone.querySelectorAll('.table-hover-tools').forEach(node => node.remove());
             clone.querySelectorAll('.heading-anchor').forEach(node => node.remove());
@@ -2555,7 +2705,9 @@ window.addEventListener('message', (event) => {
             isSaving = false;
             setButtonsEnabled(true);
             if (m.ok) {
-                showToast(I18n.t('toast.saved', 'Saved'));
+                if (!m.silent) {
+                    showToast(I18n.t('toast.saved', 'Saved'));
+                }
                 originalContent = currentContent;
                 if (shouldExitEditMode) {
                     if (isPreviewEditMode) {
@@ -2896,6 +3048,8 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         if (isEditMode) {
             performSave(false);
+        } else if (currentContent !== originalContent) {
+            vscode.postMessage({ command: 'saveMarkdown', text: currentContent });
         }
         return;
     }
@@ -3979,7 +4133,7 @@ function applyWysiwygFormat(action: string) {
             break;
         }
         case 'checkbox': {
-            const html = '<ul><li class="task-item"><input type="checkbox" /> Task item</li></ul>';
+            const html = '<ul class="contains-task-list"><li class="task-list-item enabled"><input class="task-list-item-checkbox" type="checkbox" /> Task item</li></ul>';
             document.execCommand('insertHTML', false, html);
             break;
         }
@@ -4303,12 +4457,73 @@ function wireEditor() {
 }
 
 // ===== Preview Interactions =====
+function toggleTaskListItemByIndex(index: number, isChecked: boolean) {
+    const editor = $('markdownEditor') as HTMLTextAreaElement | null;
+    const source = (isEditMode && !isPreviewEditMode && editor) ? editor.value : currentContent;
+    const lines = source.split('\n');
+    let taskIndex = 0;
+    let found = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const match = line.match(/^([ \t>]*(?:[-*+]|\d+\.)[ \t]+\[)([ xX])(\](?:[ \t]+.*)?)$/);
+        if (match) {
+            if (taskIndex === index) {
+                const newMark = isChecked ? 'x' : ' ';
+                lines[i] = `${match[1]}${newMark}${match[3]}`;
+                found = true;
+                break;
+            }
+            taskIndex++;
+        }
+    }
+
+    if (found) {
+        currentContent = lines.join('\n');
+        if (editor && editor.value !== currentContent) {
+            editor.value = currentContent;
+        }
+        updateStatusInfo();
+    }
+}
+
 function wirePreviewInteractions() {
     const preview = $('markdownPreview');
     if (!preview) return;
     const wired = (preview as any)._wired;
     if (wired) return;
     (preview as any)._wired = true;
+
+    // Checkbox toggling in preview mode and preview edit mode
+    preview.addEventListener('change', (e) => {
+        const target = e.target as HTMLElement;
+        if (!target || !target.matches('input.task-list-item-checkbox')) {
+            return;
+        }
+
+        const checkbox = target as HTMLInputElement;
+
+        if (isVersionPreviewMode) {
+            checkbox.checked = !checkbox.checked;
+            return;
+        }
+
+        if (isPreviewEditMode) {
+            if (checkbox.checked) {
+                checkbox.setAttribute('checked', '');
+            } else {
+                checkbox.removeAttribute('checked');
+            }
+            schedulePreviewHistoryCapture();
+            return;
+        }
+
+        const allCheckboxes = Array.from(preview.querySelectorAll('input.task-list-item-checkbox'));
+        const index = allCheckboxes.indexOf(checkbox);
+        if (index >= 0) {
+            toggleTaskListItemByIndex(index, checkbox.checked);
+        }
+    });
 
     // WYSIWYG keyboard shortcuts when preview is contenteditable
     preview.addEventListener('keydown', (e) => {

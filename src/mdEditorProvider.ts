@@ -337,7 +337,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await vscode.workspace.fs.writeFile(document.uri, Buffer.from(text, 'utf8'));
                             currentContent = text;
                             saveVersionSnapshot(text);
-                            webviewPanel.webview.postMessage({ command: 'saveResult', ok: true });
+                            webviewPanel.webview.postMessage({ command: 'saveResult', ok: true, silent: !!message.silent });
                         } catch (err) {
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: String(err) });
                         } finally {

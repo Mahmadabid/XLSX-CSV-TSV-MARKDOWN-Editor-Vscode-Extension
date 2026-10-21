@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.5 - Checkbox & Formatting Fixes
+- **Interactive Checkboxes**: Checkboxes can now be clicked and toggled in preview mode.
+- **Preserved Straight Quotes**: Quotes (`"` and `'`) stay straight and are no longer converted to curly quotes on save.
+- **Standard List Spacing**: Lists now use clean standard single spacing (`- `) instead of triple spaces.
+
 ## v2.0.4 - Markdown Text Size Controls & Table Zoom
 - **Easy Text Resizing**: Added 3 quick buttons (`+`, `-`, and `Reset`) directly in the toolbar before the RTL button to easily enlarge, reduce, or reset text size.
 - **Full Document & Table Scaling**: Text resizing now smoothly scales everything in your document, including tables, code blocks, lists, and headings.

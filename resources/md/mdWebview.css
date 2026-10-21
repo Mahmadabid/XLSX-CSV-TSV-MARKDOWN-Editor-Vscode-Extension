@@ -839,14 +839,26 @@ body.show-line-numbers .markdown-preview pre {
 }
 
 /* Task lists */
-.markdown-preview .task-item {
+.markdown-preview .contains-task-list {
+    list-style: none;
+    padding-left: 1.5em;
+}
+
+.markdown-preview .task-item,
+.markdown-preview .task-list-item {
     list-style: none;
     margin-left: -1.5em;
 }
 
-.markdown-preview .task-item input[type="checkbox"] {
+.markdown-preview .task-item input[type="checkbox"],
+.markdown-preview .task-list-item-checkbox {
     margin-right: 8px;
     vertical-align: middle;
+    cursor: pointer;
+}
+
+.markdown-preview .task-list-item-checkbox:disabled {
+    cursor: default;
 }
 
 /* Blockquotes */
