@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.6 - Large Document Preview & Performance Improvements
+- **Reliable Image Loading**: Fixed images failing to load in large documents by resolving paths in smooth, prioritized batches.
+- **Smoother Editing**: Dynamic preview updates prevent typing lag in large files while keeping previews instant for regular files.
+- **Protected History & Sync**: Capped version history size and debounced file reloading to prevent freezes and save disk space.
+
 ## v2.0.5 - Checkbox & Formatting Fixes
 - **Interactive Checkboxes**: Checkboxes can now be clicked and toggled in preview mode.
 - **Preserved Straight Quotes**: Quotes (`"` and `'`) stay straight and are no longer converted to curly quotes on save.

@@ -791,79 +791,207 @@ md.renderer.rules.image = function (tokens: any, idx: number, options: any, env:
     return defaultImageRender(tokens, idx, options, env, self);
 };
 
-function requestLocalImageResolution() {
+// Local image path resolution: batching, viewport prioritization & concurrency control
+const IMAGE_BATCH_SIZE = 100;
+const MAX_CONCURRENT_IMAGE_BATCHES = 3;
+
+const inFlightImageSources = new Set<string>();
+const failedImageSources = new Set<string>();
+let pendingImageBatches: string[][] = [];
+let activeImageBatchRequests = 0;
+let imageResolutionDebounceTimer: any = null;
+
+function isElementNearPreviewViewport(el: Element, margin: number = 800): boolean {
     const preview = $('markdownPreview');
-    if (!preview) return;
-
-    const pending = new Set<string>();
-
-    preview.querySelectorAll('img[data-md-src]').forEach((node) => {
-        const src = (node.getAttribute('data-md-src') || '').trim();
-        if (!src) return;
-        const cached = resolvedImageUriCache.get(src) || resolvedImageUriCache.get(decodeURIComponentSafe(src));
-        if (cached) {
-            node.setAttribute('src', cached);
-            node.removeAttribute('data-md-src');
-            return;
-        }
-        pending.add(src);
-    });
-
-    preview.querySelectorAll('img:not([data-md-src])').forEach((node) => {
-        const rawSrc = (node.getAttribute('src') || '').trim();
-        if (!rawSrc || !shouldResolveLocalImage(rawSrc)) return;
-        const cached = resolvedImageUriCache.get(rawSrc) || resolvedImageUriCache.get(decodeURIComponentSafe(rawSrc));
-        if (cached) {
-            node.setAttribute('src', cached);
-            return;
-        }
-        node.setAttribute('data-md-src', rawSrc);
-        pending.add(rawSrc);
-    });
-
-    if (pending.size === 0) {
-        return;
+    if (!preview) {
+        return false;
     }
-
-    vscode.postMessage({
-        command: 'resolveImageUris',
-        sources: Array.from(pending)
-    });
+    const rect = el.getBoundingClientRect();
+    const previewRect = preview.getBoundingClientRect();
+    return rect.bottom >= (previewRect.top - margin) && rect.top <= (previewRect.bottom + margin);
 }
 
-function applyResolvedImageUris(resolved: Record<string, string>) {
-    if (!resolved || typeof resolved !== 'object') {
+function resetImageResolutionState() {
+    resolvedImageUriCache.clear();
+    inFlightImageSources.clear();
+    failedImageSources.clear();
+    pendingImageBatches = [];
+    activeImageBatchRequests = 0;
+    if (imageResolutionDebounceTimer) {
+        clearTimeout(imageResolutionDebounceTimer);
+        imageResolutionDebounceTimer = null;
+    }
+}
+
+function requestLocalImageResolution(immediate: boolean = false) {
+    if (!immediate) {
+        if (imageResolutionDebounceTimer) {
+            clearTimeout(imageResolutionDebounceTimer);
+        }
+        imageResolutionDebounceTimer = setTimeout(() => {
+            imageResolutionDebounceTimer = null;
+            executeLocalImageResolution();
+        }, 20);
         return;
     }
+    executeLocalImageResolution();
+}
 
-    Object.entries(resolved).forEach(([source, uri]) => {
-        if (!source || !uri) {
-            return;
-        }
-        resolvedImageUriCache.set(source, uri);
-        const decoded = decodeURIComponentSafe(source);
-        if (decoded !== source) {
-            resolvedImageUriCache.set(decoded, uri);
-        }
-    });
-
+function executeLocalImageResolution() {
     const preview = $('markdownPreview');
     if (!preview) {
         return;
     }
 
-    preview.querySelectorAll('img[data-md-src]').forEach((node) => {
-        const source = (node.getAttribute('data-md-src') || '').trim();
-        const uri = resolvedImageUriCache.get(source) || resolvedImageUriCache.get(decodeURIComponentSafe(source));
-        if (!uri) {
+    const prioritySources = new Set<string>();
+    const regularSources = new Set<string>();
+
+    const checkAndCollect = (node: Element, rawSrc: string) => {
+        const trimmed = (rawSrc || '').trim();
+        if (!trimmed || !shouldResolveLocalImage(trimmed)) {
             return;
         }
-        node.addEventListener('load', refreshDataLineCache, { once: true });
-        node.setAttribute('src', uri);
-        node.removeAttribute('data-md-src');
+
+        const cached = resolvedImageUriCache.get(trimmed) || resolvedImageUriCache.get(decodeURIComponentSafe(trimmed));
+        if (cached) {
+            node.setAttribute('src', cached);
+            node.removeAttribute('data-md-src');
+            return;
+        }
+
+        if (failedImageSources.has(trimmed) || failedImageSources.has(decodeURIComponentSafe(trimmed))) {
+            return;
+        }
+
+        if (!node.hasAttribute('data-md-src')) {
+            node.setAttribute('data-md-src', trimmed);
+        }
+
+        if (inFlightImageSources.has(trimmed) || inFlightImageSources.has(decodeURIComponentSafe(trimmed))) {
+            return;
+        }
+
+        if (isElementNearPreviewViewport(node)) {
+            prioritySources.add(trimmed);
+        } else {
+            regularSources.add(trimmed);
+        }
+    };
+
+    preview.querySelectorAll('img[data-md-src]').forEach((node) => {
+        const src = node.getAttribute('data-md-src') || '';
+        checkAndCollect(node, src);
     });
 
+    preview.querySelectorAll('img:not([data-md-src])').forEach((node) => {
+        const src = node.getAttribute('src') || '';
+        checkAndCollect(node, src);
+    });
+
+    prioritySources.forEach(src => regularSources.delete(src));
+
+    const alreadyQueued = new Set<string>();
+    for (const b of pendingImageBatches) {
+        for (const s of b) {
+            alreadyQueued.add(s);
+        }
+    }
+
+    const newPriority: string[] = [];
+    prioritySources.forEach(src => {
+        if (!alreadyQueued.has(src)) {
+            newPriority.push(src);
+        }
+    });
+
+    const newRegular: string[] = [];
+    regularSources.forEach(src => {
+        if (!alreadyQueued.has(src)) {
+            newRegular.push(src);
+        }
+    });
+
+    if (newPriority.length > 0) {
+        const priorityChunks: string[][] = [];
+        for (let i = 0; i < newPriority.length; i += IMAGE_BATCH_SIZE) {
+            priorityChunks.push(newPriority.slice(i, i + IMAGE_BATCH_SIZE));
+        }
+        pendingImageBatches.unshift(...priorityChunks);
+    }
+
+    if (newRegular.length > 0) {
+        for (let i = 0; i < newRegular.length; i += IMAGE_BATCH_SIZE) {
+            pendingImageBatches.push(newRegular.slice(i, i + IMAGE_BATCH_SIZE));
+        }
+    }
+
+    processNextImageBatches();
+}
+
+function processNextImageBatches() {
+    while (activeImageBatchRequests < MAX_CONCURRENT_IMAGE_BATCHES && pendingImageBatches.length > 0) {
+        const batch = pendingImageBatches.shift();
+        if (!batch || batch.length === 0) {
+            continue;
+        }
+
+        for (const src of batch) {
+            inFlightImageSources.add(src);
+        }
+        activeImageBatchRequests++;
+
+        vscode.postMessage({
+            command: 'resolveImageUris',
+            sources: batch
+        });
+    }
+}
+
+function applyResolvedImageUris(resolved: Record<string, string>, requestedSources?: string[]) {
+    activeImageBatchRequests = Math.max(0, activeImageBatchRequests - 1);
+
+    if (resolved && typeof resolved === 'object') {
+        Object.entries(resolved).forEach(([source, uri]) => {
+            if (!source || !uri) {
+                return;
+            }
+            resolvedImageUriCache.set(source, uri);
+            inFlightImageSources.delete(source);
+            const decoded = decodeURIComponentSafe(source);
+            if (decoded !== source) {
+                resolvedImageUriCache.set(decoded, uri);
+                inFlightImageSources.delete(decoded);
+            }
+        });
+    }
+
+    if (Array.isArray(requestedSources)) {
+        for (const req of requestedSources) {
+            inFlightImageSources.delete(req);
+            const decoded = decodeURIComponentSafe(req);
+            inFlightImageSources.delete(decoded);
+            if (!resolved || (!resolved[req] && !resolved[decoded])) {
+                failedImageSources.add(req);
+            }
+        }
+    }
+
+    const preview = $('markdownPreview');
+    if (preview) {
+        preview.querySelectorAll('img[data-md-src]').forEach((node) => {
+            const source = (node.getAttribute('data-md-src') || '').trim();
+            const uri = resolvedImageUriCache.get(source) || resolvedImageUriCache.get(decodeURIComponentSafe(source));
+            if (!uri) {
+                return;
+            }
+            node.addEventListener('load', refreshDataLineCache, { once: true });
+            node.setAttribute('src', uri);
+            node.removeAttribute('data-md-src');
+        });
+    }
+
     refreshDataLineCache();
+    processNextImageBatches();
 }
 
 // Fence (code blocks) needs special handling as it's a self-closing block token in terms of rendering
@@ -1023,6 +1151,9 @@ function renderMermaidFlowcharts() {
     const mermaidLib = (md as any).mermaid;
     if (!mermaidLib) return;
 
+    const nodes = document.querySelectorAll('.mermaid');
+    if (nodes.length === 0) return;
+
     const isDark = document.body.classList.contains('dark-mode') ||
         document.body.classList.contains('dark-theme') ||
         document.body.classList.contains('vscode-dark') ||
@@ -1033,14 +1164,11 @@ function renderMermaidFlowcharts() {
         theme: isDark ? 'dark' : 'default'
     });
 
-    const nodes = document.querySelectorAll('.mermaid');
-    if (nodes.length > 0) {
-        mermaidLib.run({
-            nodes: Array.from(nodes) as any
-        }).catch((err: any) => {
-            console.error('Mermaid render error:', err);
-        });
-    }
+    mermaidLib.run({
+        nodes: Array.from(nodes) as any
+    }).catch((err: any) => {
+        console.error('Mermaid render error:', err);
+    });
 }
 
 let isRenderingMarkdown = false;
@@ -1099,10 +1227,14 @@ function renderMarkdown(content: string) {
     }
 }
 
+let lastTocHtml = '';
 function updateToc(tokens: any[]) {
     const tocBody = $('tocBody');
     if (!tocBody) return;
-    tocBody.innerHTML = buildToc(tokens);
+    const newHtml = buildToc(tokens);
+    if (newHtml === lastTocHtml) return;
+    lastTocHtml = newHtml;
+    tocBody.innerHTML = newHtml;
 }
 
 function updateFormattingToolbarHeight() {
@@ -1386,6 +1518,7 @@ function restorePreviewEditScroll(scrollState: { top: number; left: number } | n
 
 function performSave(exitAfterSave = false) {
     if (isSaving || !isEditMode) return;
+    flushLivePreviewRender();
     isSaving = true;
     shouldExitEditMode = exitAfterSave;
     setButtonsEnabled(false);
@@ -1442,6 +1575,10 @@ function performSave(exitAfterSave = false) {
 }
 
 function cancelEdit() {
+    if (livePreviewTimer) {
+        clearTimeout(livePreviewTimer);
+        livePreviewTimer = null;
+    }
     currentContent = originalContent;
     const editor = $('markdownEditor') as HTMLTextAreaElement;
     if (editor) {
@@ -1458,9 +1595,39 @@ function cancelEdit() {
 }
 
 // ===== Live Preview =====
-const debouncedRender = debounce((content: string) => {
-    renderMarkdown(content);
-}, 150);
+let livePreviewTimer: any = null;
+
+function getAdaptiveRenderDebounceMs(contentLength: number): number {
+    if (contentLength > 1_500_000) { // > 1.5MB (~40k+ lines)
+        return 1000;
+    }
+    if (contentLength > 400_000) { // > 400KB (~10k+ lines)
+        return 500;
+    }
+    if (contentLength > 100_000) { // > 100KB (~2.5k lines)
+        return 300;
+    }
+    return 150; // Snappy default for normal files
+}
+
+function scheduleLivePreviewRender(content: string) {
+    if (livePreviewTimer) {
+        clearTimeout(livePreviewTimer);
+    }
+    const delay = getAdaptiveRenderDebounceMs(content.length);
+    livePreviewTimer = setTimeout(() => {
+        livePreviewTimer = null;
+        renderMarkdown(content);
+    }, delay);
+}
+
+function flushLivePreviewRender() {
+    if (livePreviewTimer) {
+        clearTimeout(livePreviewTimer);
+        livePreviewTimer = null;
+        renderMarkdown(currentContent);
+    }
+}
 
 function onEditorInput() {
     const editor = $('markdownEditor') as HTMLTextAreaElement;
@@ -1472,8 +1639,8 @@ function onEditorInput() {
 
     currentContent = editor.value;
 
-    // Debounced live preview
-    debouncedRender(currentContent);
+    // Adaptive debounced live preview (scales with document size)
+    scheduleLivePreviewRender(currentContent);
 
     updateStatusInfo();
 }
@@ -1822,6 +1989,9 @@ const throttledScrollSpy = throttleRAF(() => {
     updateScrollSpy();
     updateProgressBar();
     updateMdScrollToTopVisibility();
+    if (pendingImageBatches.length > 0 || document.querySelector('img[data-md-src]')) {
+        requestLocalImageResolution(false);
+    }
 });
 
 function updateMdScrollToTopVisibility() {
@@ -2678,7 +2848,7 @@ window.addEventListener('message', (event) => {
             documentUri = m.documentUri || '';
             documentDirUri = m.documentDirUri || '';
             workspaceFolderUri = m.workspaceFolderUri || null;
-            resolvedImageUriCache.clear();
+            resetImageResolutionState();
             renderMarkdown(currentContent);
             if (wasPreviewEditMode) {
                 const preview = $('markdownPreview');
@@ -2752,7 +2922,7 @@ window.addEventListener('message', (event) => {
             break;
 
         case 'resolvedImageUris':
-            applyResolvedImageUris(m.resolved || {});
+            applyResolvedImageUris(m.resolved || {}, m.requestedSources);
             break;
     }
 });
@@ -4269,6 +4439,7 @@ function wireEditor() {
     if (!editor) return;
 
     editor.addEventListener('input', onEditorInput);
+    editor.addEventListener('blur', flushLivePreviewRender);
 
     editor.addEventListener('scroll', throttledSyncEditorToPreview, { passive: true });
 

@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 
 export const VERSION_HISTORY_RETENTION_MS = 48 * 60 * 60 * 1000;
 export const VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS = 1000;
+export const MAX_VERSION_HISTORY_ENTRIES = 30;
+export const MAX_VERSION_HISTORY_TOTAL_CHARS = 35 * 1024 * 1024;
 
 function getHistoryKey(filePath: string): string {
     return createHash('sha1').update(filePath).digest('hex');

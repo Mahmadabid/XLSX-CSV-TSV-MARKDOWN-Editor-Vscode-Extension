@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { IncomingMessage } from 'http';
-import { VERSION_HISTORY_RETENTION_MS, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS, buildGroupedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryFile } from './shared/versionHistory';
+import { VERSION_HISTORY_RETENTION_MS, VERSION_HISTORY_SNAPSHOT_DEBOUNCE_MS, MAX_VERSION_HISTORY_ENTRIES, MAX_VERSION_HISTORY_TOTAL_CHARS, buildGroupedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryFile } from './shared/versionHistory';
 
 export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
     constructor(private readonly context: vscode.ExtensionContext) { }
@@ -64,13 +64,35 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
             const saveHistory = async (entries: VersionHistoryEntry[]) => {
                 await ensureHistoryDir();
-                await fs.promises.writeFile(getHistoryFilePath(), JSON.stringify(entries), 'utf8');
+                const historyFile = getHistoryFilePath();
+                const tmpFile = `${historyFile}.${Date.now()}-${Math.random().toString(36).slice(2, 6)}.tmp`;
+                const serialized = JSON.stringify(entries);
+                await fs.promises.writeFile(tmpFile, serialized, 'utf8');
+                try {
+                    await fs.promises.rename(tmpFile, historyFile);
+                } catch {
+                    await fs.promises.copyFile(tmpFile, historyFile);
+                    await fs.promises.unlink(tmpFile).catch(() => {});
+                }
             };
 
             const pruneHistory = async (entries?: VersionHistoryEntry[]) => {
                 const now = Date.now();
                 const source = entries ?? await loadHistory();
-                const kept = source.filter(entry => now - entry.timestamp <= VERSION_HISTORY_RETENTION_MS);
+                let kept = source.filter(entry => now - entry.timestamp <= VERSION_HISTORY_RETENTION_MS);
+
+                // Enforce max snapshot count cap (keep most recent)
+                if (kept.length > MAX_VERSION_HISTORY_ENTRIES) {
+                    kept = kept.slice(-MAX_VERSION_HISTORY_ENTRIES);
+                }
+
+                // Enforce max total byte/char size cap (prune oldest first)
+                let totalChars = kept.reduce((sum, e) => sum + (e.charCount || e.content?.length || 0), 0);
+                while (kept.length > 1 && totalChars > MAX_VERSION_HISTORY_TOTAL_CHARS) {
+                    const removed = kept.shift();
+                    totalChars -= (removed?.charCount || removed?.content?.length || 0);
+                }
+
                 if (kept.length !== source.length) {
                     await saveHistory(kept);
                 }
@@ -94,6 +116,17 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     charCount: content.length,
                     content
                 });
+
+                // Immediately enforce bounds before saving
+                if (history.length > MAX_VERSION_HISTORY_ENTRIES) {
+                    history.splice(0, history.length - MAX_VERSION_HISTORY_ENTRIES);
+                }
+                let totalChars = history.reduce((sum, e) => sum + (e.charCount || e.content?.length || 0), 0);
+                while (history.length > 1 && totalChars > MAX_VERSION_HISTORY_TOTAL_CHARS) {
+                    const removed = history.shift();
+                    totalChars -= (removed?.charCount || removed?.content?.length || 0);
+                }
+
                 await saveHistory(history);
             };
 
@@ -126,22 +159,56 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 ...workspaceFolders
             ];
 
+            const isPathUnder = (subPath: string, parentPath: string): boolean => {
+                const sub = path.normalize(subPath).toLowerCase();
+                const parent = path.normalize(parentPath).toLowerCase();
+                if (sub === parent) {
+                    return true;
+                }
+                const parentWithSep = parent.endsWith(path.sep) ? parent : parent + path.sep;
+                return sub.startsWith(parentWithSep);
+            };
+
+            const knownRootPaths = new Set(initialRoots.map(r => path.normalize(r.fsPath).toLowerCase()));
+
             const ensureResourceRoots = (targetUris: vscode.Uri[]) => {
                 try {
                     const currentRoots = [...(webviewPanel.webview.options.localResourceRoots || [])];
                     const toAdd: vscode.Uri[] = [];
 
-                    for (const targetUri of targetUris) {
-                        const targetDir = vscode.Uri.file(path.dirname(targetUri.fsPath));
-                        const targetRoot = vscode.Uri.file(path.parse(targetUri.fsPath).root);
+                    for (const root of currentRoots) {
+                        knownRootPaths.add(path.normalize(root.fsPath).toLowerCase());
+                    }
 
-                        if (!currentRoots.some(r => r.fsPath.toLowerCase() === targetRoot.fsPath.toLowerCase()) &&
-                            !toAdd.some(r => r.fsPath.toLowerCase() === targetRoot.fsPath.toLowerCase())) {
-                            toAdd.push(targetRoot);
+                    for (const targetUri of targetUris) {
+                        const targetFsPath = targetUri.fsPath;
+                        const targetRoot = vscode.Uri.file(path.parse(targetFsPath).root);
+                        const targetRootNorm = path.normalize(targetRoot.fsPath).toLowerCase();
+
+                        if (knownRootPaths.has(targetRootNorm)) {
+                            continue;
                         }
-                        if (!currentRoots.some(r => r.fsPath.toLowerCase() === targetDir.fsPath.toLowerCase()) &&
-                            !toAdd.some(r => r.fsPath.toLowerCase() === targetDir.fsPath.toLowerCase())) {
-                            toAdd.push(targetDir);
+
+                        let isCovered = false;
+                        for (const known of knownRootPaths) {
+                            if (isPathUnder(targetFsPath, known)) {
+                                isCovered = true;
+                                break;
+                            }
+                        }
+
+                        if (!isCovered) {
+                            if (targetRootNorm && !knownRootPaths.has(targetRootNorm)) {
+                                knownRootPaths.add(targetRootNorm);
+                                toAdd.push(targetRoot);
+                            } else {
+                                const targetDir = vscode.Uri.file(path.dirname(targetFsPath));
+                                const targetDirNorm = path.normalize(targetDir.fsPath).toLowerCase();
+                                if (!knownRootPaths.has(targetDirNorm)) {
+                                    knownRootPaths.add(targetDirNorm);
+                                    toAdd.push(targetDir);
+                                }
+                            }
                         }
                     }
 
@@ -222,49 +289,59 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                     case 'resolveImageUris':
                         try {
                             const requestedSources = Array.isArray(message.sources) ? message.sources : [];
-                            const resolved: Record<string, string> = {};
-                            const targetFileUris: vscode.Uri[] = [];
-
-                            for (const source of requestedSources) {
-                                if (typeof source !== 'string') {
-                                    continue;
-                                }
-
-                                const trimmed = source.trim();
-                                if (!trimmed) {
-                                    continue;
-                                }
-
-                                const target = this.resolveMarkdownImageTarget(trimmed, document.uri);
-                                if (target) {
-                                    targetFileUris.push(target.targetUri);
-                                }
+                            if (requestedSources.length === 0) {
+                                break;
                             }
 
-                            if (targetFileUris.length > 0) {
-                                ensureResourceRoots(targetFileUris);
+                            // Defensively chunk into batches of at most 200 (strictly below the 256 limit)
+                            const BACKEND_CHUNK_SIZE = 200;
+                            for (let i = 0; i < requestedSources.length; i += BACKEND_CHUNK_SIZE) {
+                                const chunk = requestedSources.slice(i, i + BACKEND_CHUNK_SIZE);
+                                const resolved: Record<string, string> = {};
+                                const targetFileUris: vscode.Uri[] = [];
+
+                                for (const source of chunk) {
+                                    if (typeof source !== 'string') {
+                                        continue;
+                                    }
+
+                                    const trimmed = source.trim();
+                                    if (!trimmed) {
+                                        continue;
+                                    }
+
+                                    const target = this.resolveMarkdownImageTarget(trimmed, document.uri);
+                                    if (target) {
+                                        targetFileUris.push(target.targetUri);
+                                    }
+                                }
+
+                                if (targetFileUris.length > 0) {
+                                    ensureResourceRoots(targetFileUris);
+                                }
+
+                                for (const source of chunk) {
+                                    if (typeof source !== 'string') {
+                                        continue;
+                                    }
+
+                                    const trimmed = source.trim();
+                                    if (!trimmed) {
+                                        continue;
+                                    }
+
+                                    const resolvedUri = this.resolveMarkdownImageUri(trimmed, document.uri, webviewPanel.webview);
+                                    if (resolvedUri) {
+                                        resolved[trimmed] = resolvedUri;
+                                    }
+                                }
+
+                                webviewPanel.webview.postMessage({
+                                    command: 'resolvedImageUris',
+                                    resolved,
+                                    requestedSources: chunk
+                                });
                             }
-
-                            for (const source of requestedSources) {
-                                if (typeof source !== 'string') {
-                                    continue;
-                                }
-
-                                const trimmed = source.trim();
-                                if (!trimmed) {
-                                    continue;
-                                }
-
-                                const resolvedUri = this.resolveMarkdownImageUri(trimmed, document.uri, webviewPanel.webview);
-                                if (resolvedUri) {
-                                    resolved[trimmed] = resolvedUri;
-                                }
-                            }
-
-                            webviewPanel.webview.postMessage({
-                                command: 'resolvedImageUris',
-                                resolved
-                            });
                         } catch (err) {
                             console.error('Failed resolving markdown image URIs:', err);
                         }
@@ -702,25 +779,42 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 } catch { }
             });
 
+            let watcherDebounceTimer: NodeJS.Timeout | null = null;
             const watcher = vscode.workspace.createFileSystemWatcher(
                 new vscode.RelativePattern(vscode.Uri.file(path.dirname(filePath)), path.basename(filePath))
             );
-            const watcherDisposable = watcher.onDidChange(async () => {
+            const watcherDisposable = watcher.onDidChange(() => {
                 if (isSaving) {
                     return;
                 }
-                try {
-                    const content = await fs.promises.readFile(filePath, 'utf-8');
-                    currentContent = content;
-                    webviewPanel.webview.postMessage(buildInitMarkdownPayload(content));
-                } catch {
-                    // ignore reload errors
+                if (watcherDebounceTimer) {
+                    clearTimeout(watcherDebounceTimer);
                 }
+                watcherDebounceTimer = setTimeout(async () => {
+                    watcherDebounceTimer = null;
+                    if (isSaving) {
+                        return;
+                    }
+                    try {
+                        const content = await fs.promises.readFile(filePath, 'utf-8');
+                        if (content === currentContent) {
+                            return; // Content unchanged, skip reload
+                        }
+                        currentContent = content;
+                        webviewPanel.webview.postMessage(buildInitMarkdownPayload(content));
+                    } catch {
+                        // ignore reload errors
+                    }
+                }, 250);
             });
 
             webviewPanel.onDidDispose(() => {
                 configChangeDisposable.dispose();
                 themeChangeDisposable.dispose();
+                if (watcherDebounceTimer) {
+                    clearTimeout(watcherDebounceTimer);
+                    watcherDebounceTimer = null;
+                }
                 watcherDisposable.dispose();
                 watcher.dispose();
                 if (versionSnapshotDebounceTimer) {
