@@ -161,7 +161,8 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
 
     const defaultPlainViewSettings: XlsxViewSettings = {
         ...defaultXlsxViewSettings,
-        autoSave: true,
+        autoSave: false,
+        autoSaveDelay: 1000,
         autoSaveMode: 'all',
         showManualSavePopup: false
     };
@@ -4590,7 +4591,7 @@ import { copySelectionToClipboard as copySelectionToClipboardHelper, writeToClip
                 return;
             }
             saveEdits(false, true);
-        }, 1100);
+        }, Math.max(0, Number.isFinite(Number(currentSettings.autoSaveDelay)) ? Number(currentSettings.autoSaveDelay) : 1000));
     }
 
     // ===== Virtual Scrolling Core =====

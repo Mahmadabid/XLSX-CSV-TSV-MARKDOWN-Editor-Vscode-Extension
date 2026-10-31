@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.7 – Automatic Saving & Settings UI Rework
+- Added optional **Auto Save** for each supported file type (disabled by default).
+- Added a configurable save delay in Editor Settings.
+- Added an **“Autosaved”** status indicator after automatic saving.
+- Updated the Settings UI to accommodate the new Auto Save options.
+
 ## v2.0.6 - Large Document Preview & Performance Improvements
 - **Reliable Image Loading**: Fixed images failing to load in large documents by resolving paths in smooth, prioritized batches.
 - **Smoother Editing**: Dynamic preview updates prevent typing lag in large files while keeping previews instant for regular files.

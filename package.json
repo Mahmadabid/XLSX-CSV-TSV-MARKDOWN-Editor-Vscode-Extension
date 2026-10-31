@@ -2,7 +2,7 @@
     "name": "xlsx-viewer",
     "displayName": "XLSX, CSV, TSV & Markdown Editor",
     "description": "View and edit xlsx files with colors, fonts and styles (supporting in-table editing), and view and edit CSV, TSV & Markdown files in VS Code. This is an open-source project.",
-    "version": "2.0.6",
+    "version": "2.0.7",
     "publisher": "muhammad-ahmad",
     "engines": {
         "vscode": "^1.60.0"
@@ -169,8 +169,8 @@
                 },
                 "xlsxViewer.csv.autoSave": {
                     "type": "boolean",
-                    "default": true,
-                    "description": "Automatically save CSV edits after a short debounce."
+                    "default": false,
+                    "description": "When enabled, save CSV edits after typing stops. Set the delay in the file viewer's Settings panel."
                 },
                 "xlsxViewer.csv.spaciousCells": {
                     "type": "boolean",
@@ -212,8 +212,8 @@
                 },
                 "xlsxViewer.tsv.autoSave": {
                     "type": "boolean",
-                    "default": true,
-                    "description": "Automatically save TSV edits after a short debounce."
+                    "default": false,
+                    "description": "When enabled, save TSV edits after typing stops. Set the delay in the file viewer's Settings panel."
                 },
                 "xlsxViewer.tsv.spaciousCells": {
                     "type": "boolean",
@@ -243,7 +243,7 @@
                 "xlsxViewer.xlsx.autoSave": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Automatically save XLSX edits shortly after text, checkbox, dropdown, formatting, or structure changes."
+                    "description": "When enabled, save XLSX edits after typing stops. Set the delay in the file viewer's Settings panel."
                 },
                 "xlsxViewer.xlsx.autoSaveMode": {
                     "type": "string",
@@ -288,6 +288,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Keep the Markdown toolbar sticky at the top of the editor."
+                },
+                "xlsxViewer.md.autoSave": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, save Markdown edits after typing stops. Set the delay in the file viewer's Settings panel."
                 },
                 "xlsxViewer.md.wordWrap": {
                     "type": "boolean",

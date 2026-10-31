@@ -345,8 +345,14 @@ let currentSettings = {
     showScrollToTop: true,
     textSize: 100,
     isMdEnabled: true,
-    textDirection: 'auto' as 'auto' | 'ltr' | 'rtl'
+    textDirection: 'auto' as 'auto' | 'ltr' | 'rtl',
+    autoSave: false,
+    autoSaveDelay: 1000,
+    autoSaveDelayOverride: 0,
+    editorAutoSaveDelay: 1000
 };
+let autoSaveTimer: any = null;
+let lastSaveContent = '';
 
 const MIN_TEXT_SIZE = 70;
 const MAX_TEXT_SIZE = 200;
@@ -1516,7 +1522,7 @@ function restorePreviewEditScroll(scrollState: { top: number; left: number } | n
     });
 }
 
-function performSave(exitAfterSave = false) {
+function performSave(exitAfterSave = false, silent = false) {
     if (isSaving || !isEditMode) return;
     flushLivePreviewRender();
     isSaving = true;
@@ -1571,7 +1577,20 @@ function performSave(exitAfterSave = false) {
         editorEl.value = currentContent;
     }
 
-    vscode.postMessage({ command: 'saveMarkdown', text: currentContent });
+    lastSaveContent = currentContent;
+    vscode.postMessage({ command: 'saveMarkdown', text: currentContent, silent });
+}
+
+function scheduleMarkdownAutoSave() {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    if (!currentSettings.autoSave || !isEditMode || isVersionPreviewMode) return;
+    const configuredDelay = Number(currentSettings.autoSaveDelay);
+    const delay = Number.isFinite(configuredDelay) ? Math.max(0, configuredDelay) : 1000;
+    autoSaveTimer = setTimeout(() => {
+        autoSaveTimer = null;
+        if (isSaving) { scheduleMarkdownAutoSave(); return; }
+        if (isPreviewEditMode || currentContent !== originalContent) performSave(false, true);
+    }, delay);
 }
 
 function cancelEdit() {
@@ -1638,6 +1657,7 @@ function onEditorInput() {
     scrollTimeout = setTimeout(() => { activeScrollSource = null; }, 300);
 
     currentContent = editor.value;
+    scheduleMarkdownAutoSave();
 
     // Adaptive debounced live preview (scales with document size)
     scheduleLivePreviewRender(currentContent);
@@ -2364,6 +2384,8 @@ function applySettings(settings: any, persist = false) {
     // Update checkbox UI
     const chkWordWrap = $('chkWordWrap') as HTMLInputElement;
     const chkStickyToolbar = $('chkStickyToolbar') as HTMLInputElement;
+    const chkAutoSave = $('chkAutoSave') as HTMLInputElement;
+    const numAutoSaveDelay = $('numAutoSaveDelay') as HTMLInputElement;
     const chkSyncScroll = $('chkSyncScroll') as HTMLInputElement;
     const chkPreviewLeft = $('chkPreviewLeft') as HTMLInputElement;
     const chkShowOutline = $('chkShowOutline') as HTMLInputElement;
@@ -2371,6 +2393,10 @@ function applySettings(settings: any, persist = false) {
 
     if (chkWordWrap) chkWordWrap.checked = currentSettings.wordWrap;
     if (chkStickyToolbar) chkStickyToolbar.checked = currentSettings.stickyToolbar;
+    if (chkAutoSave) chkAutoSave.checked = currentSettings.autoSave;
+    if (numAutoSaveDelay) {
+        numAutoSaveDelay.value = String(currentSettings.autoSaveDelayOverride ?? 0);
+    }
     if (chkSyncScroll) chkSyncScroll.checked = currentSettings.syncScroll;
     if (chkPreviewLeft) chkPreviewLeft.checked = currentSettings.previewPosition === 'left';
     if (chkShowOutline) chkShowOutline.checked = currentSettings.showOutline;
@@ -2539,6 +2565,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
     return [
         {
             id: 'chkWordWrap',
+            section: I18n.t('settings.sectionEditing', 'Editing'),
             label: I18n.t('settings.wordWrap', 'Word Wrap'),
             tooltip: I18n.t('settings.wordWrapTip', 'Wrap long lines in the Markdown preview/editor instead of horizontal scrolling.'),
             defaultValue: currentSettings.wordWrap,
@@ -2549,6 +2576,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkStickyToolbar',
+            section: I18n.t('settings.sectionAppearance', 'Appearance'),
             label: I18n.t('settings.stickyToolbar', 'Sticky Toolbar'),
             tooltip: I18n.t('settings.stickyToolbarTip', 'Keep the Markdown toolbar pinned at the top while you scroll.'),
             defaultValue: currentSettings.stickyToolbar,
@@ -2558,7 +2586,36 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
             }
         },
         {
+            id: 'chkAutoSave',
+            section: I18n.t('settings.sectionEditing', 'Editing'),
+            label: I18n.t('settings.autoSave', 'Auto Save'),
+            tooltip: I18n.t('settings.autoSaveMdTip', 'Save Markdown edits after typing stops. Off by default.'),
+            defaultValue: currentSettings.autoSave,
+            onChange: (val: boolean) => {
+                currentSettings.autoSave = val;
+                applySettings(currentSettings, true);
+            }
+        },
+        {
+            id: 'numAutoSaveDelay',
+            section: I18n.t('settings.sectionEditing', 'Editing'),
+            label: I18n.t('settings.autoSaveDelay', 'Save delay (ms)'),
+            tooltip: I18n.t('settings.autoSaveDelayTip', 'Use 0 to follow this editor’s Auto Save delay. Enter a number to use a custom delay for Markdown.'),
+            inputType: 'number',
+            min: 0,
+            max: 30000,
+            step: 100,
+            onChange: (val: number) => {
+                const override = Math.max(0, Math.min(30000, Math.round(Number.isFinite(val) ? val : 0)));
+                currentSettings.autoSaveDelayOverride = override;
+                currentSettings.autoSaveDelay = override > 0 ? override : (currentSettings.editorAutoSaveDelay || 1000);
+                applySettings(currentSettings, true);
+            },
+            defaultValue: currentSettings.autoSaveDelayOverride ?? 0
+        },
+        {
             id: 'chkSyncScroll',
+            section: I18n.t('settings.sectionPreview', 'Preview'),
             label: I18n.t('settings.syncScroll', 'Sync Scrolling'),
             tooltip: I18n.t('settings.syncScrollTip', 'Synchronize editor and preview scroll positions in split mode.'),
             defaultValue: currentSettings.syncScroll,
@@ -2569,6 +2626,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkPreviewLeft',
+            section: I18n.t('settings.sectionPreview', 'Preview'),
             label: I18n.t('settings.previewLeft', 'Preview on Left'),
             tooltip: I18n.t('settings.previewLeftTip', 'Show preview on the left side instead of the right in split mode.'),
             defaultValue: currentSettings.previewPosition === 'left',
@@ -2579,6 +2637,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkShowOutline',
+            section: I18n.t('settings.sectionPreview', 'Preview'),
             label: I18n.t('settings.showOutline', 'Show Outline'),
             tooltip: I18n.t('settings.showOutlineTip', 'Display the document outline panel for heading navigation.'),
             defaultValue: currentSettings.showOutline,
@@ -2589,6 +2648,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkShowLineNumbers',
+            section: I18n.t('settings.sectionPreview', 'Preview'),
             label: I18n.t('settings.lineNumbers', 'Line Numbers'),
             tooltip: I18n.t('settings.lineNumbersTip', 'Show line numbers in fenced code block previews.'),
             defaultValue: currentSettings.showLineNumbers,
@@ -2599,6 +2659,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkMoveMdButtonsToEnd',
+            section: I18n.t('settings.sectionAppearance', 'Appearance'),
             label: I18n.t('settings.moveMdButtonsToEnd', 'Move Enable/Disable MD Buttons Near Help'),
             tooltip: I18n.t('settings.moveMdButtonsToEndTip', 'Place the Enable/Disable MD buttons just before Help & Feedback instead of at the start of the toolbar.'),
             defaultValue: currentSettings.moveMdButtonsToEnd,
@@ -2609,6 +2670,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkRTLTextDirection',
+            section: I18n.t('settings.sectionAppearance', 'Appearance'),
             label: I18n.t('settings.rtlTextDirection', 'RTL Text Direction'),
             tooltip: I18n.t('settings.rtlTextDirectionTip', 'Force Right-to-Left (RTL) text direction for Markdown preview and editor.'),
             defaultValue: currentSettings.textDirection === 'rtl',
@@ -2619,6 +2681,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkShowPopups',
+            section: I18n.t('settings.sectionGeneral', 'General'),
             label: I18n.t('settings.showPopups', 'Show Notification Popups'),
             tooltip: I18n.t('settings.showPopupsTip', 'Show popup notifications (such as save toasts) during editor usage. Uncheck to disable.'),
             defaultValue: (currentSettings as any).showPopups !== false,
@@ -2629,6 +2692,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'chkShowScrollToTop',
+            section: I18n.t('settings.sectionGeneral', 'General'),
             label: I18n.t('settings.showScrollToTop', 'Scroll to Top Button'),
             tooltip: I18n.t('settings.showScrollToTopTip', 'Show a button to scroll to the top when scrolling down.'),
             defaultValue: (currentSettings as any).showScrollToTop !== false,
@@ -2639,6 +2703,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'radioLangAuto',
+            section: I18n.t('settings.sectionGeneral', 'General'),
             label: I18n.t('settings.langAuto', 'Auto (Detect)'),
             tooltip: I18n.t('settings.languageTip', 'Auto-detect language'),
             inputType: 'radio' as const,
@@ -2651,6 +2716,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'radioLangEn',
+            section: I18n.t('settings.sectionGeneral', 'General'),
             label: I18n.t('settings.langEn', 'English'),
             tooltip: 'English',
             inputType: 'radio' as const,
@@ -2663,6 +2729,7 @@ function createMdSettingsDefinitions(): SettingDefinition[] {
         },
         {
             id: 'radioLangZh',
+            section: I18n.t('settings.sectionGeneral', 'General'),
             label: I18n.t('settings.langZh', '中文 (Simplified Chinese)'),
             tooltip: '简体中文',
             inputType: 'radio' as const,
@@ -2845,6 +2912,7 @@ window.addEventListener('message', (event) => {
 
             currentContent = m.content || '';
             originalContent = currentContent;
+            lastSaveContent = currentContent;
             documentUri = m.documentUri || '';
             documentDirUri = m.documentDirUri || '';
             workspaceFolderUri = m.workspaceFolderUri || null;
@@ -2875,10 +2943,13 @@ window.addEventListener('message', (event) => {
             isSaving = false;
             setButtonsEnabled(true);
             if (m.ok) {
-                if (!m.silent) {
+                if (m.silent) {
+                    Utils.showToast(I18n.t('toast.autosaved', 'Autosaved'), true, 1000);
+                } else {
                     showToast(I18n.t('toast.saved', 'Saved'));
                 }
-                originalContent = currentContent;
+                originalContent = lastSaveContent || currentContent;
+                if (currentContent !== originalContent) scheduleMarkdownAutoSave();
                 if (shouldExitEditMode) {
                     if (isPreviewEditMode) {
                         setPreviewEditMode(false);
@@ -4686,6 +4757,7 @@ function wirePreviewInteractions() {
                 checkbox.removeAttribute('checked');
             }
             schedulePreviewHistoryCapture();
+            scheduleMarkdownAutoSave();
             return;
         }
 
@@ -4848,6 +4920,7 @@ function wirePreviewInteractions() {
 
     preview.addEventListener('input', () => {
         schedulePreviewHistoryCapture();
+        scheduleMarkdownAutoSave();
     });
 
     preview.addEventListener('mouseover', (e) => {

@@ -1168,6 +1168,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             stickyToolbar: boolean;
             stickyHeader: boolean;
             autoSave: boolean;
+            autoSaveDelay: number;
+            autoSaveDelayOverride: number;
+            editorAutoSaveDelay: number;
             autoSaveMode: 'all' | 'controlsOnly';
             showManualSavePopup: boolean;
             showPopups: boolean;
@@ -1213,9 +1216,24 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             return associations[directPattern] === associationConfig.viewType || associations[recursivePattern] === associationConfig.viewType;
         };
 
+        const getAutoSaveDelaySettings = (fileType: TabularFileType) => {
+            const cfg = vscode.workspace.getConfiguration('xlsxViewer');
+            const filesCfg = vscode.workspace.getConfiguration('files');
+            const storedOverride = this.context.globalState.get<number>(`autoSaveDelayOverride.${fileType}`);
+            const legacyOverride = cfg.get<number>('autoSaveDelay', 0);
+            const override = Math.max(0, Math.min(30000, storedOverride ?? legacyOverride));
+            const editorDelay = Math.max(0, filesCfg.get<number>('autoSaveDelay', 1000));
+            return {
+                autoSaveDelayOverride: override,
+                editorAutoSaveDelay: editorDelay,
+                autoSaveDelay: override > 0 ? override : editorDelay
+            };
+        };
+
         const getStyledSettings = (): PersistedSpreadsheetSettings => {
             const cfg = vscode.workspace.getConfiguration('xlsxViewer');
             const globalCfg = vscode.workspace.getConfiguration('workbench');
+            const autoSaveDelaySettings = getAutoSaveDelaySettings('xlsx');
             const associations: any = globalCfg.get('editorAssociations');
             const autoSaveModeSetting = cfg.get<string>('xlsx.autoSaveMode', 'all');
             return {
@@ -1223,6 +1241,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
                 autoSave: cfg.get('xlsx.autoSave', false),
+                ...autoSaveDelaySettings,
                 autoSaveMode: autoSaveModeSetting === 'controlsOnly' ? 'controlsOnly' : 'all',
                 showManualSavePopup: cfg.get('xlsx.showManualSavePopup', true),
                 showPopups: cfg.get('showPopups', true),
@@ -1239,6 +1258,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         const getPlainSettings = (fileType: TabularFileType): PersistedSpreadsheetSettings => {
             const cfg = vscode.workspace.getConfiguration('xlsxViewer');
             const globalCfg = vscode.workspace.getConfiguration('workbench');
+            const autoSaveDelaySettings = getAutoSaveDelaySettings(fileType);
             const associations: any = globalCfg.get('editorAssociations');
 
             if (fileType === 'csv' || fileType === 'tsv') {
@@ -1246,7 +1266,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     firstRowIsHeader: cfg.get(`${fileType}.firstRowIsHeader`, true),
                     stickyToolbar: cfg.get(`${fileType}.stickyToolbar`, true),
                     stickyHeader: cfg.get(`${fileType}.stickyHeader`, false),
-                    autoSave: cfg.get(`${fileType}.autoSave`, true),
+                    autoSave: cfg.get(`${fileType}.autoSave`, false),
+                    ...autoSaveDelaySettings,
                     autoSaveMode: 'all',
                     showManualSavePopup: false,
                     showPopups: cfg.get('showPopups', true),
@@ -1265,7 +1286,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 firstRowIsHeader: cfg.get('xlsx.firstRowIsHeader', true),
                 stickyToolbar: cfg.get('xlsx.stickyToolbar', true),
                 stickyHeader: cfg.get('xlsx.stickyHeader', false),
-                autoSave: cfg.get('xlsx.autoSave', true),
+                autoSave: cfg.get('xlsx.autoSave', false),
+                ...autoSaveDelaySettings,
                 autoSaveMode: 'all',
                 showManualSavePopup: false,
                 showPopups: cfg.get('showPopups', true),
@@ -1637,6 +1659,10 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     if (typeof s.showScrollToTop === 'boolean') {
                         await cfg.update('showScrollToTop', !!s.showScrollToTop, vscode.ConfigurationTarget.Global);
                     }
+                    if (typeof s.autoSaveDelayOverride === 'number') {
+                        const override = Math.max(0, Math.min(30000, Math.round(s.autoSaveDelayOverride)));
+                        await this.context.globalState.update(`autoSaveDelayOverride.${currentFileType}`, override);
+                    }
 
                     if (scope === 'plain') {
                         // Plain mode settings: limited set matching CSV/TSV plain mode defaults
@@ -1668,6 +1694,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         await cfg.update('xlsx.mergeWarningEnabled', !!s.mergeWarningEnabled, vscode.ConfigurationTarget.Global);
                         await cfg.update('xlsx.textWrap', !!s.textWrap, vscode.ConfigurationTarget.Global);
                     }
+                    trySendSettings();
                 } catch (err) {
                     console.error('Failed to persist XLSX settings:', err);
                 }
@@ -2388,7 +2415,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
 
         // Forward settings changes made outside the webview
         const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('xlsxViewer.xlsx') || e.affectsConfiguration('xlsxViewer') || e.affectsConfiguration('workbench.editorAssociations')) {
+            if (e.affectsConfiguration('xlsxViewer.xlsx') || e.affectsConfiguration('xlsxViewer') || e.affectsConfiguration('workbench.editorAssociations') || e.affectsConfiguration('files.autoSave') || e.affectsConfiguration('files.autoSaveDelay')) {
                 try {
                     const persisted = getPersistedSettings();
                     webview.postMessage({ command: 'settingsUpdated', ...persisted });

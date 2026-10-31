@@ -41,6 +41,19 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
             let restoredVersionId: string | null = null;
             let isSaving = false;
 
+            const getAutoSaveDelaySettings = () => {
+                const cfg = vscode.workspace.getConfiguration('xlsxViewer');
+                const storedOverride = this.context.globalState.get<number>('autoSaveDelayOverride.md');
+                const legacyOverride = cfg.get<number>('autoSaveDelay', 0);
+                const override = Math.max(0, Math.min(30000, storedOverride ?? legacyOverride));
+                const editorDelay = Math.max(0, vscode.workspace.getConfiguration('files').get<number>('autoSaveDelay', 1000));
+                return {
+                    autoSaveDelayOverride: override,
+                    editorAutoSaveDelay: editorDelay,
+                    autoSaveDelay: override > 0 ? override : editorDelay
+                };
+            };
+
             const getHistoryFilePath = () => {
                 return getVersionHistoryFile(this.context.globalStorageUri.fsPath, filePath, 'md');
             };
@@ -270,6 +283,8 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                 showPopups: cfg.get('showPopups', true),
                                 showScrollToTop: cfg.get('md.showScrollToTop', cfg.get('showScrollToTop', true)),
                                 textSize: cfg.get('md.textSize', 100),
+                                autoSave: cfg.get('md.autoSave', false),
+                                ...getAutoSaveDelaySettings(),
                                 isMdEnabled: isMdEnabled,
                                 language: cfg.get('language', 'auto'),
                                 vscodeLanguage: vscode.env.language
@@ -351,7 +366,12 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         try {
                             const s = message.settings || {};
                             const cfg = vscode.workspace.getConfiguration('xlsxViewer');
+                            if (typeof s.autoSaveDelayOverride === 'number') {
+                                const override = Math.max(0, Math.min(30000, Math.round(s.autoSaveDelayOverride)));
+                                await this.context.globalState.update('autoSaveDelayOverride.md', override);
+                            }
                             await cfg.update('md.stickyToolbar', !!s.stickyToolbar, vscode.ConfigurationTarget.Global);
+                            await cfg.update('md.autoSave', !!s.autoSave, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.wordWrap', !!s.wordWrap, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.syncScroll', !!s.syncScroll, vscode.ConfigurationTarget.Global);
                             await cfg.update('md.previewPosition', s.previewPosition || 'right', vscode.ConfigurationTarget.Global);
@@ -371,6 +391,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             if (typeof s.textSize === 'number') {
                                 await cfg.update('md.textSize', s.textSize, vscode.ConfigurationTarget.Global);
                             }
+                            webviewPanel.webview.postMessage({ command: 'settingsUpdated', settings: getAutoSaveDelaySettings() });
                         } catch (err) {
                             console.error('Failed to persist settings:', err);
                         }
@@ -414,7 +435,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                             await vscode.workspace.fs.writeFile(document.uri, Buffer.from(text, 'utf8'));
                             currentContent = text;
                             saveVersionSnapshot(text);
-                            webviewPanel.webview.postMessage({ command: 'saveResult', ok: true, silent: !!message.silent });
+                                    webviewPanel.webview.postMessage({ command: 'saveResult', ok: true, silent: !!message.silent });
                         } catch (err) {
                             webviewPanel.webview.postMessage({ command: 'saveResult', ok: false, error: String(err) });
                         } finally {
@@ -718,6 +739,8 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                                  showLineNumbers: cfg.get('md.showLineNumbers', true),
                                  moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                                  isMdEnabled: true,
+                                 autoSave: cfg.get('md.autoSave', false),
+                                 ...getAutoSaveDelaySettings(),
                                  language: cfg.get('language', 'auto'),
                                  vscodeLanguage: vscode.env.language
                              };
@@ -736,7 +759,7 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
             // Forward settings changes
             const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
-                if (e.affectsConfiguration('xlsxViewer.md') || e.affectsConfiguration('xlsxViewer') || e.affectsConfiguration('workbench.editorAssociations')) {
+                if (e.affectsConfiguration('xlsxViewer.md') || e.affectsConfiguration('xlsxViewer') || e.affectsConfiguration('workbench.editorAssociations') || e.affectsConfiguration('files.autoSave') || e.affectsConfiguration('files.autoSaveDelay')) {
                     const cfg = vscode.workspace.getConfiguration('xlsxViewer');
                     const globalCfg = vscode.workspace.getConfiguration('workbench');
                     const associations: any = globalCfg.get('editorAssociations');
@@ -759,6 +782,8 @@ export class MDEditorProvider implements vscode.CustomReadonlyEditorProvider {
                         showLineNumbers: cfg.get('md.showLineNumbers', true),
                         moveMdButtonsToEnd: cfg.get('md.moveMdButtonsToEnd', false),
                         textSize: cfg.get('md.textSize', 100),
+                        autoSave: cfg.get('md.autoSave', false),
+                        ...getAutoSaveDelaySettings(),
                         isMdEnabled: isMdEnabled,
                         language: cfg.get('language', 'auto'),
                         vscodeLanguage: vscode.env.language
