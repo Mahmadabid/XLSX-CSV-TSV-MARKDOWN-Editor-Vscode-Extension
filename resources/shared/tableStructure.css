@@ -29,6 +29,37 @@
     color: var(--text-color);
 }
 
+#csv-table td[contenteditable="true"],
+#xlsxTable td[contenteditable="true"],
+#csv-table td.cell-editing,
+#xlsxTable td.cell-editing {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: pre !important;
+    max-width: none !important;
+    min-width: 100% !important;
+    z-index: 100 !important;
+    cursor: text !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
+#csv-table td[contenteditable="true"] .cell-content,
+#xlsxTable td[contenteditable="true"] .cell-content,
+#csv-table td.cell-editing .cell-content,
+#xlsxTable td.cell-editing .cell-content {
+    display: inline !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: pre !important;
+    max-width: none !important;
+    width: auto !important;
+    min-width: 100% !important;
+    pointer-events: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
 tbody th:first-child,
 tbody td:first-child,
 thead th:first-child {

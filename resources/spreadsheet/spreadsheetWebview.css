@@ -428,7 +428,8 @@ body.edit-mode td.editable-cell {
     -webkit-user-select: text;
     overflow: visible;
     text-overflow: clip;
-    white-space: nowrap;
+    white-space: pre;
+    max-width: none;
 }
 
 body.edit-mode td.editable-cell:focus {
@@ -437,10 +438,33 @@ body.edit-mode td.editable-cell:focus {
 }
 
 body.edit-mode #xlsxTable td.editable-cell .cell-content,
-body.edit-mode #xlsxTable td[contenteditable="true"] .cell-content {
+body.edit-mode #xlsxTable td[contenteditable="true"] .cell-content,
+body.edit-mode #xlsxTable td.cell-editing .cell-content,
+#xlsxTable td[contenteditable="true"] .cell-content,
+#xlsxTable td.cell-editing .cell-content {
+    display: inline !important;
     overflow: visible !important;
     text-overflow: clip !important;
-    white-space: nowrap !important;
+    white-space: pre !important;
+    max-width: none !important;
+    width: auto !important;
+    pointer-events: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
+#xlsxTable td[contenteditable="true"],
+#xlsxTable td.cell-editing,
+body.edit-mode #xlsxTable td[contenteditable="true"],
+body.edit-mode #xlsxTable td.cell-editing {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: pre !important;
+    max-width: none !important;
+    z-index: 100 !important;
+    cursor: text !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
 }
 
 #content {
@@ -943,12 +967,28 @@ body.image-preview-open {
     overflow: hidden;
 }
 
-body:not(.edit-mode) #xlsxTable td .cell-content {
+body:not(.edit-mode) #xlsxTable td:not(.active-cell) .cell-content {
     display: block;
     max-width: 100%;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
+}
+
+/* Active (selected) cell: show full text like Google Sheets, no truncation */
+body:not(.edit-mode) #xlsxTable td.active-cell .cell-content:not(.cell-checkbox-content):not(.cell-dropdown-content):not(.cell-date-content):not(.cell-rating-content):not(.cell-image-content) {
+    display: block;
+    max-width: none !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: pre !important;
+    position: relative;
+    z-index: 10;
+}
+
+#xlsxTable td.active-cell {
+    overflow: visible !important;
+    z-index: 10 !important;
 }
 
 body:not(.edit-mode) #xlsxTable td .cell-content.cell-checkbox-content,
@@ -1056,7 +1096,7 @@ body:not(.edit-mode) #xlsxTable td .cell-content.cell-date-content {
     gap: 8px;
 }
 
-body:not(.edit-mode) #xlsxTable td {
+body:not(.edit-mode) #xlsxTable td:not([contenteditable="true"]):not(.cell-editing):not(.active-cell) {
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;

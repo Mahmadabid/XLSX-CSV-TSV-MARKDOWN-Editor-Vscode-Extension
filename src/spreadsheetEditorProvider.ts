@@ -841,7 +841,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             }
         };
 
-        const saveDelimitedFileAndStyles = async (sourceType: TabularFileType, edits: any[], richEdits: any[], styleEdits: any[], operations: any[], isAutosave: boolean) => {
+        const saveDelimitedFileAndStyles = async (sourceType: TabularFileType, edits: any[], richEdits: any[], styleEdits: any[], operations: any[], isAutosave: boolean, saveRequestId?: any) => {
             const requiresWorkbookRefresh = edits.length > 0 || operations.length > 0 || styleEdits.length > 0 || richEdits.length > 0;
             const { workbook: tabularData } = await readTabularFile(document.uri.fsPath, sourceType);
             const rows = tabularData.sheets[0]?.rows ? tabularData.sheets[0].rows.map(row => [...row]) : [];
@@ -1018,7 +1018,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             }
 
             try {
-                webview.postMessage({ command: 'saveResult', ok: true, isAutosave });
+                webview.postMessage({ command: 'saveResult', ok: true, isAutosave, saveRequestId });
             } catch {
                 // ignore
             }
@@ -1899,10 +1899,11 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
             }
 
             if (message?.command === 'saveXlsxEdits') {
+                const saveRequestId = message?.saveRequestId;
                 try {
                     isSaving = true;
                     if (previewVersionId) {
-                        webview.postMessage({ command: 'saveResult', ok: false, error: 'Preview mode is read-only' });
+                        webview.postMessage({ command: 'saveResult', ok: false, error: 'Preview mode is read-only', saveRequestId });
                         return;
                     }
 
@@ -1914,13 +1915,13 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     const isAutosave = !!message.isAutosave;
 
                     if (!edits.length && !operations.length && !styleEdits.length && !richEdits.length) {
-                        try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave }); } catch { }
+                        try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave, saveRequestId }); } catch { }
                         return;
                     }
 
                     const sourceType = detectTabularFileType(document.uri.fsPath) || 'xlsx';
                     if (sourceType === 'csv' || sourceType === 'tsv') {
-                        await saveDelimitedFileAndStyles(sourceType, edits, richEdits, styleEdits, operations, isAutosave);
+                        await saveDelimitedFileAndStyles(sourceType, edits, richEdits, styleEdits, operations, isAutosave, saveRequestId);
                         return;
                     }
 
@@ -2404,9 +2405,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                         // For pure text/style edits, update worksheetsData internally but don't force a full webview re-render
                         await loadWorkbookPayload();
                     }
-                    try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave }); } catch { }
+                    try { webview.postMessage({ command: 'saveResult', ok: true, isAutosave, saveRequestId }); } catch { }
                 } catch (err) {
-                    try { webview.postMessage({ command: 'saveResult', ok: false, error: String(err), isAutosave: !!message?.isAutosave }); } catch { }
+                    try { webview.postMessage({ command: 'saveResult', ok: false, error: String(err), isAutosave: !!message?.isAutosave, saveRequestId }); } catch { }
                 } finally {
                     isSaving = false;
                 }

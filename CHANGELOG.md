@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.8 - Spreadsheet Editing & Save Reliability
+- Improved spreadsheet cell editing for long text by preserving line breaks and allowing content to remain fully visible while editing.
+- Improved save reliability by tracking save requests and matching responses to the originating edit, including autosave operations.
+
 ## v2.0.7 – Automatic Saving & Settings UI Rework
 - Added optional **Auto Save** for each supported file type (disabled by default).
 - Added a configurable save delay in Editor Settings.
