@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.9 - WYSIWYG Split Editing
+- You can now edit the formatted Markdown preview directly while using split view.
+- Changes made on either side stay in sync.
+
 ## v2.0.8 - Spreadsheet Editing & Save Reliability
 - Improved spreadsheet cell editing for long text by preserving line breaks and allowing content to remain fully visible while editing.
 - Improved save reliability by tracking save requests and matching responses to the originating edit, including autosave operations.

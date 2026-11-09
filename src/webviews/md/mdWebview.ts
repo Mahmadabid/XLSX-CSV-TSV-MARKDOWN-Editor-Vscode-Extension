@@ -393,6 +393,15 @@ let previewUndoStack: string[] = [];
 let previewRedoStack: string[] = [];
 let previewHistoryTimer: number | null = null;
 
+// Split Edit: which side the user last clicked, and the debounce timer for pushing
+// rendered-side (WYSIWYG) edits back into the plain-markdown textarea.
+let activePane: 'editor' | 'preview' = 'editor';
+let previewToEditorTimer: number | null = null;
+
+function isPreviewWysiwygTarget(): boolean {
+    return isPreviewEditMode || (isEditMode && activePane === 'preview');
+}
+
 // ===== Utilities =====
 const $ = Utils.$;
 
@@ -502,14 +511,14 @@ function pushPreviewUndoSnapshot(snapshot: string, clearRedo = true) {
 }
 
 function capturePreviewHistory() {
-    if (!isPreviewEditMode) {
+    if (!isEditMode) {
         return;
     }
     pushPreviewUndoSnapshot(getPreviewSnapshot(), true);
 }
 
 function schedulePreviewHistoryCapture() {
-    if (!isPreviewEditMode) {
+    if (!isEditMode) {
         return;
     }
 
@@ -547,10 +556,15 @@ function restorePreviewSnapshot(snapshot: string) {
         reapplySearch();
         requestLocalImageResolution();
     });
+
+    // In Split Edit, mirror the restored rendered side back into the markdown textarea
+    if (!isPreviewEditMode) {
+        schedulePreviewToEditorSync();
+    }
 }
 
 function performPreviewUndo() {
-    if (!isPreviewEditMode || previewUndoStack.length <= 1) {
+    if (!isEditMode || previewUndoStack.length <= 1) {
         return;
     }
 
@@ -569,7 +583,7 @@ function performPreviewUndo() {
 }
 
 function performPreviewRedo() {
-    if (!isPreviewEditMode || previewRedoStack.length === 0) {
+    if (!isEditMode || previewRedoStack.length === 0) {
         return;
     }
 
@@ -583,7 +597,7 @@ function performPreviewRedo() {
 }
 
 function capturePreviewMutation(beforeSnapshot: string) {
-    if (!isPreviewEditMode) {
+    if (!isEditMode) {
         return;
     }
 
@@ -1221,6 +1235,15 @@ function renderMarkdown(content: string) {
         });
         updateToc(tokens);
         requestAnimationFrame(() => {
+            // Any edit mode: keep the rendered side editable (WYSIWYG) with table tools
+            if (isEditMode) {
+                preview.contentEditable = 'true';
+                enhancePreviewTablesForEditing();
+                if (!isPreviewEditMode) {
+                    // Render came from the markdown textarea: reset rendered-side undo history
+                    initializePreviewHistory();
+                }
+            }
             updateScrollSpy();
             updateProgressBar();
             reapplySearch();
@@ -1285,11 +1308,12 @@ function setEditMode(enabled: boolean) {
     if (fmtToolbar) fmtToolbar.classList.toggle('hidden', !enabled);
     updateFormattingToolbarHeight();
 
-    // Ensure preview is not contenteditable
-    if (preview) preview.contentEditable = 'false';
+    // In Split Edit the rendered side is editable too (WYSIWYG)
+    if (preview) preview.contentEditable = enabled ? 'true' : 'false';
 
     if (enabled) {
         originalContent = currentContent;
+        activePane = 'editor';
 
         container?.classList.add('split-view');
         container?.classList.remove('preview-edit');
@@ -1306,6 +1330,9 @@ function setEditMode(enabled: boolean) {
         requestAnimationFrame(() => {
             updateCachedLineHeight();
             updateFormattingToolbarHeight();
+
+            enhancePreviewTablesForEditing();
+            initializePreviewHistory();
 
             // Lock outer scroll containers completely
             window.scrollTo(0, 0);
@@ -1333,6 +1360,12 @@ function setEditMode(enabled: boolean) {
         });
     } else {
         // Exit edit mode
+        previewUndoStack = [];
+        previewRedoStack = [];
+        if (previewToEditorTimer !== null) {
+            window.clearTimeout(previewToEditorTimer);
+            previewToEditorTimer = null;
+        }
         container?.classList.remove('split-view');
         container?.classList.remove('preview-edit');
         container?.classList.remove('preview-left');
@@ -1522,9 +1555,87 @@ function restorePreviewEditScroll(scrollState: { top: number; left: number } | n
     });
 }
 
+// ===== Rendered side (HTML) -> Markdown =====
+function previewToMarkdown(): string {
+    const preview = $('markdownPreview');
+    if (!preview) {
+        return currentContent;
+    }
+
+    // Sync checkbox checked state to attributes before cloning for Turndown
+    preview.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        const input = cb as HTMLInputElement;
+        if (input.checked) {
+            input.setAttribute('checked', '');
+        } else {
+            input.removeAttribute('checked');
+        }
+    });
+
+    const clone = preview.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('.table-hover-tools').forEach(node => node.remove());
+    clone.querySelectorAll('.heading-anchor').forEach(node => node.remove());
+    clone.querySelectorAll('.code-block-header').forEach(node => node.remove());
+    clone.querySelectorAll('.code-copy').forEach(node => node.remove());
+    clone.querySelectorAll('td, th').forEach((cellNode) => {
+        const cell = cellNode as HTMLTableCellElement;
+        if ((cell.textContent || '').replace(/\u00a0/g, '').trim() === '') {
+            cell.innerHTML = '';
+        }
+    });
+    return turndownService.turndown(clone.innerHTML);
+}
+
+// Split Edit: schedule pushing rendered-side edits into the markdown textarea
+function schedulePreviewToEditorSync() {
+    if (!isEditMode || isPreviewEditMode) {
+        return;
+    }
+    if (previewToEditorTimer !== null) {
+        window.clearTimeout(previewToEditorTimer);
+    }
+    previewToEditorTimer = window.setTimeout(pushPreviewEditsToEditor, 250);
+}
+
+// Split Edit: write the rendered side back into the textarea WITHOUT re-rendering the preview
+// (re-rendering would reset the caret while the user is typing there).
+function pushPreviewEditsToEditor() {
+    if (previewToEditorTimer !== null) {
+        window.clearTimeout(previewToEditorTimer);
+        previewToEditorTimer = null;
+    }
+    if (!isEditMode || isPreviewEditMode) {
+        return;
+    }
+    const editor = $('markdownEditor') as HTMLTextAreaElement | null;
+    if (!editor) {
+        return;
+    }
+
+    const markdown = sanitizeMarkdownCopyLinkArtifacts(previewToMarkdown());
+    if (markdown === editor.value) {
+        return;
+    }
+
+    // Let Ctrl+Z in the text side undo this change
+    pushUndoState(editor);
+
+    // Stop scroll-sync from moving the preview while the user types there
+    activeScrollSource = 'preview';
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => { activeScrollSource = null; }, 400);
+
+    editor.value = markdown; // programmatic set: no 'input' event, so no re-render
+    currentContent = markdown;
+    refreshEditorLineCache();
+    updateStatusInfo();
+    scheduleMarkdownAutoSave();
+}
+
 function performSave(exitAfterSave = false, silent = false) {
     if (isSaving || !isEditMode) return;
     flushLivePreviewRender();
+    pushPreviewEditsToEditor();
     isSaving = true;
     shouldExitEditMode = exitAfterSave;
     setButtonsEnabled(false);
@@ -1539,37 +1650,9 @@ function performSave(exitAfterSave = false, silent = false) {
 
     if (isPreviewEditMode) {
         rememberPreviewEditScroll();
-
-        // Convert preview HTML back to markdown
-        const preview = $('markdownPreview');
-        if (preview) {
-            // Sync checkbox checked state to attributes before cloning for Turndown
-            preview.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                const input = cb as HTMLInputElement;
-                if (input.checked) {
-                    input.setAttribute('checked', '');
-                } else {
-                    input.removeAttribute('checked');
-                }
-            });
-
-            const clone = preview.cloneNode(true) as HTMLElement;
-            clone.querySelectorAll('.table-hover-tools').forEach(node => node.remove());
-            clone.querySelectorAll('.heading-anchor').forEach(node => node.remove());
-            clone.querySelectorAll('.code-block-header').forEach(node => node.remove());
-            clone.querySelectorAll('.code-copy').forEach(node => node.remove());
-            clone.querySelectorAll('td, th').forEach((cellNode) => {
-                const cell = cellNode as HTMLTableCellElement;
-                if ((cell.textContent || '').replace(/\u00a0/g, '').trim() === '') {
-                    cell.innerHTML = '';
-                }
-            });
-            currentContent = turndownService.turndown(clone.innerHTML);
-        }
-    } else {
-        if (editorEl) {
-            currentContent = editorEl.value;
-        }
+        currentContent = previewToMarkdown();
+    } else if (editorEl) {
+        currentContent = editorEl.value;
     }
 
     currentContent = sanitizeMarkdownCopyLinkArtifacts(currentContent);
@@ -1597,6 +1680,10 @@ function cancelEdit() {
     if (livePreviewTimer) {
         clearTimeout(livePreviewTimer);
         livePreviewTimer = null;
+    }
+    if (previewToEditorTimer !== null) {
+        window.clearTimeout(previewToEditorTimer);
+        previewToEditorTimer = null;
     }
     currentContent = originalContent;
     const editor = $('markdownEditor') as HTMLTextAreaElement;
@@ -3273,13 +3360,16 @@ function buildToolbarButtons() {
 document.addEventListener('keydown', (e) => {
     const isCmdOrCtrl = e.ctrlKey || e.metaKey;
 
-    if (isPreviewEditMode && isCmdOrCtrl && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    // True in Preview Edit mode, or in Split Edit while the rendered side has focus
+    const previewEditing = isPreviewEditMode || (isEditMode && document.activeElement === $('markdownPreview'));
+
+    if (previewEditing && isCmdOrCtrl && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
         performPreviewUndo();
         return;
     }
 
-    if (isPreviewEditMode && isCmdOrCtrl && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+    if (previewEditing && isCmdOrCtrl && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
         e.preventDefault();
         performPreviewRedo();
         return;
@@ -3726,8 +3816,8 @@ function trimTrailingWhitespace(editor: HTMLTextAreaElement) {
 
 // Apply formatting from external call (toolbar buttons)
 function applyFormat(action: string) {
-    // WYSIWYG preview-edit mode: use execCommand
-    if (isPreviewEditMode) {
+    // WYSIWYG: Preview Edit mode, or Split Edit while the rendered side was last clicked
+    if (isPreviewWysiwygTarget()) {
         applyWysiwygFormat(action);
         return;
     }
@@ -3912,7 +4002,7 @@ function createTableHoverControls(): HTMLElement {
 
 function enhancePreviewTablesForEditing() {
     const preview = $('markdownPreview');
-    if (!preview || !isPreviewEditMode) {
+    if (!preview || !isEditMode) {
         return;
     }
 
@@ -4405,6 +4495,11 @@ function applyWysiwygFormat(action: string) {
     if (needsManualHistoryCapture) {
         capturePreviewMutation(beforeSnapshot);
     }
+
+    // Split Edit: DOM-only changes (tables, inline code) fire no 'input' event, so sync explicitly
+    if (!isPreviewEditMode) {
+        schedulePreviewToEditorSync();
+    }
 }
 
 // ===== Resizable Panels =====
@@ -4511,6 +4606,13 @@ function wireEditor() {
 
     editor.addEventListener('input', onEditorInput);
     editor.addEventListener('blur', flushLivePreviewRender);
+
+    // Track which side of Split Edit the user last clicked (drives toolbar behavior)
+    editor.addEventListener('focus', () => { activePane = 'editor'; });
+    if (preview) {
+        preview.addEventListener('focus', () => { activePane = 'preview'; });
+        preview.addEventListener('blur', pushPreviewEditsToEditor);
+    }
 
     editor.addEventListener('scroll', throttledSyncEditorToPreview, { passive: true });
 
@@ -4768,9 +4870,9 @@ function wirePreviewInteractions() {
         }
     });
 
-    // WYSIWYG keyboard shortcuts when preview is contenteditable
+    // WYSIWYG keyboard shortcuts when preview is contenteditable (Preview Edit and Split Edit)
     preview.addEventListener('keydown', (e) => {
-        if (!isPreviewEditMode) return;
+        if (!isEditMode) return;
         const isMod = e.ctrlKey || e.metaKey;
 
         if (isMod && e.key.toLowerCase() === 's') {
@@ -4921,6 +5023,8 @@ function wirePreviewInteractions() {
     preview.addEventListener('input', () => {
         schedulePreviewHistoryCapture();
         scheduleMarkdownAutoSave();
+        // Split Edit: mirror rendered-side edits into the markdown textarea (no-op in Preview Edit mode)
+        schedulePreviewToEditorSync();
     });
 
     preview.addEventListener('mouseover', (e) => {

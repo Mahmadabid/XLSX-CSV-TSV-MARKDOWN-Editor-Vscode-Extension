@@ -550,6 +550,16 @@ body.preview-edit-mode .markdown-container {
     box-sizing: border-box !important;
 }
 
+/* Split Edit: the rendered side is editable (WYSIWYG) */
+body.edit-mode .markdown-container.split-view .markdown-preview {
+    cursor: text;
+}
+
+body.edit-mode .markdown-container.split-view .markdown-preview:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: -2px;
+}
+
 /* ===== Preview Edit Mode (WYSIWYG) ===== */
 .markdown-container.preview-edit .editor-wrapper {
     display: none;
@@ -575,8 +585,8 @@ body.preview-edit-mode .markdown-preview:focus {
     outline-offset: -2px;
 }
 
-/* Hide heading anchor links in preview-edit mode to reduce clutter */
-body.preview-edit-mode .markdown-preview .heading-anchor {
+/* Hide heading anchor links while editing (Preview Edit and Split Edit) to reduce clutter */
+body.edit-mode .markdown-preview .heading-anchor {
     display: none;
 }
 
@@ -957,8 +967,8 @@ body.show-line-numbers .markdown-preview pre {
     line-height: 1.5;
 }
 
-body.preview-edit-mode .markdown-preview table.md-table th,
-body.preview-edit-mode .markdown-preview table.md-table td {
+body.edit-mode .markdown-preview table.md-table th,
+body.edit-mode .markdown-preview table.md-table td {
     min-height: calc(36px * var(--md-font-scale, 1));
     height: auto;
     vertical-align: top;
@@ -973,19 +983,19 @@ body.preview-edit-mode .markdown-preview table.md-table td {
     background: var(--header-bg);
 }
 
-/* Hover controls under editable tables (preview-edit mode only) */
-body.preview-edit-mode .markdown-preview .table-edit-wrap {
+/* Hover controls under editable tables (Preview Edit and Split Edit) */
+body.edit-mode .markdown-preview .table-edit-wrap {
     position: relative;
     display: inline-block;
     margin: 16px 0;
     max-width: 100%;
 }
 
-body.preview-edit-mode .markdown-preview .table-edit-wrap table.md-table {
+body.edit-mode .markdown-preview .table-edit-wrap table.md-table {
     margin: 0;
 }
 
-body.preview-edit-mode .markdown-preview .table-hover-tools {
+body.edit-mode .markdown-preview .table-hover-tools {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -1001,15 +1011,15 @@ body.preview-edit-mode .markdown-preview .table-hover-tools {
     transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
-body.preview-edit-mode .markdown-preview .table-edit-wrap:hover .table-hover-tools,
-body.preview-edit-mode .markdown-preview .table-edit-wrap:focus-within .table-hover-tools,
-body.preview-edit-mode .markdown-preview .table-hover-tools:hover {
+body.edit-mode .markdown-preview .table-edit-wrap:hover .table-hover-tools,
+body.edit-mode .markdown-preview .table-edit-wrap:focus-within .table-hover-tools,
+body.edit-mode .markdown-preview .table-hover-tools:hover {
     opacity: 1;
     transform: translateY(0);
     pointer-events: auto;
 }
 
-body.preview-edit-mode .markdown-preview .table-tool-btn {
+body.edit-mode .markdown-preview .table-tool-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1027,23 +1037,23 @@ body.preview-edit-mode .markdown-preview .table-tool-btn {
     transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-body.preview-edit-mode .markdown-preview .table-tool-btn:hover {
+body.edit-mode .markdown-preview .table-tool-btn:hover {
     background: var(--hover-bg);
     border-color: var(--border-color);
     color: var(--text-primary);
 }
 
-body.preview-edit-mode .markdown-preview .table-tool-btn:active {
+body.edit-mode .markdown-preview .table-tool-btn:active {
     background: var(--active-bg);
 }
 
-body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveRow"],
-body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveColumn"] {
+body.edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveRow"],
+body.edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveColumn"] {
     min-width: 70px;
 }
 
-body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveRow"]:hover,
-body.preview-edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveColumn"]:hover {
+body.edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveRow"]:hover,
+body.edit-mode .markdown-preview .table-tool-btn[data-table-action="tableRemoveColumn"]:hover {
     color: var(--error-color);
     border-color: color-mix(in srgb, var(--error-color) 35%, var(--border-color));
 }
@@ -1652,4 +1662,3 @@ body:not(.show-line-numbers) .markdown-preview .code-line::before {
 #saveToast {
     pointer-events: none !important;
 }
-
