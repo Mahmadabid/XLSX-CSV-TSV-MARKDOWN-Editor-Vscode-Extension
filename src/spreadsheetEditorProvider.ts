@@ -2,6 +2,7 @@ import { getWebviewContent } from './spreadsheet/spreadsheetHtmlRenderer';
 import * as vscode from 'vscode';
 import * as Excel from 'exceljs';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { VERSION_HISTORY_RETENTION_MS, buildGroupedVersionHistoryItems as buildSharedVersionHistoryItems, formatVersionHistoryTimestamp, getVersionHistoryDir } from './shared/versionHistory';
@@ -235,6 +236,33 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                 vscode.Uri.joinPath(this.context.extensionUri, 'dist')
             ]
         };
+
+        // Diff sides (git:, cline-diff:, etc.) never load the spreadsheet.
+        // Show a working button instead of a dead "Opening diff..." message.
+        if (document.uri.scheme !== 'file') {
+            webview.html = `<!DOCTYPE html>
+                <html><body style="padding:24px;font-family:var(--vscode-font-family);color:var(--vscode-foreground)">
+                <p>This is a diff of a spreadsheet file. The spreadsheet viewer can't render diffs.</p>
+                <button id="open" style="padding:6px 14px;cursor:pointer;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:none">Open text diff</button>
+                <script>
+                    const vscode = acquireVsCodeApi();
+                    document.getElementById('open').addEventListener('click', () => vscode.postMessage({ command: 'openTextDiff' }));
+                </script>
+                </body></html>`;
+
+            webview.onDidReceiveMessage(async (m) => {
+                if (m?.command === 'openTextDiff') {
+                    try {
+                        await vscode.commands.executeCommand('workbench.action.compareEditor.openTextDiff');
+                    } catch (err) {
+                        vscode.window.showWarningMessage(
+                            'Could not switch to the text diff. Right-click the tab and choose "Reopen Editor With… > Text Editor".'
+                        );
+                    }
+                }
+            });
+            return;
+        }
 
         // Set the webview shell immediately; it will show its own loading overlay.
         webview.html = getWebviewContent(webviewPanel, this.context);
@@ -2427,23 +2455,144 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         });
         webviewPanel.onDidDispose(() => configChangeDisposable.dispose());
 
+        const dbg = vscode.window.createOutputChannel('XLSX Viewer Debug');
+        const stamp = () => new Date().toISOString().slice(11, 23);
+        const sameFile = (uri: vscode.Uri) => uri.scheme === 'file' && uri.fsPath.toLowerCase() === filePath.toLowerCase();
+        dbg.appendLine(`[${stamp()}] opened ${filePath}`);
+        webviewPanel.onDidDispose(() => dbg.dispose());
+
+        let reloadTimer: NodeJS.Timeout | undefined;
+        let isReloading = false;
+        const scheduleReload = (reason: string, bufferText?: string) => {
+            if (reloadTimer) {
+                clearTimeout(reloadTimer);
+            }
+            reloadTimer = setTimeout(async () => {
+                if (previewVersionId) {
+                    return;
+                }
+                if (isSaving || Date.now() - lastSaveTime < 1000 || isReloading) {
+                    scheduleReload(reason, bufferText);
+                    return;
+                }
+                isReloading = true;
+                let tempDir: string | undefined;
+                let tempFile: string | undefined;
+                try {
+                    dbg.appendLine(`[${stamp()}] reload: ${reason}`);
+                    if (bufferText !== undefined && (currentFileType === 'csv' || currentFileType === 'tsv')) {
+                        const hash = createHash('sha1').update(filePath).digest('hex');
+                        tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `xlsx-viewer-buffer-${hash}-`));
+                        tempFile = path.join(tempDir, `buffer.${currentFileType}`);
+                        await fs.promises.writeFile(tempFile, bufferText, 'utf8');
+                        await loadWorkbookPayload(tempFile, currentFileType);
+                    } else {
+                        await loadWorkbookPayload();
+                    }
+                    trySendInit();
+                } catch (err) {
+                    dbg.appendLine(`[${stamp()}] reload failed: ${String(err)}`);
+                } finally {
+                    if (tempFile) {
+                        try {
+                            await fs.promises.unlink(tempFile);
+                        } catch (err) {
+                            dbg.appendLine(`[${stamp()}] temporary file cleanup failed: ${String(err)}`);
+                        }
+                    }
+                    if (tempDir) {
+                        try {
+                            await fs.promises.rmdir(tempDir);
+                        } catch (err) {
+                            dbg.appendLine(`[${stamp()}] temporary directory cleanup failed: ${String(err)}`);
+                        }
+                    }
+                    isReloading = false;
+                }
+            }, 250);
+        };
+
         const watcher = vscode.workspace.createFileSystemWatcher(
             new vscode.RelativePattern(vscode.Uri.file(path.dirname(filePath)), path.basename(filePath))
         );
-        const watcherDisposable = watcher.onDidChange(async () => {
-            if (isSaving || Date.now() - lastSaveTime < 1000) {
+        dbg.appendLine(`[${stamp()}] watcher created`);
+        const disposables = [
+            watcher,
+            watcher.onDidChange(() => {
+                dbg.appendLine(`[${stamp()}] watcher: change`);
+                scheduleReload('disk change');
+            }),
+            watcher.onDidCreate(() => {
+                dbg.appendLine(`[${stamp()}] watcher: create`);
+                scheduleReload('disk create');
+            }),
+            watcher.onDidDelete(() => dbg.appendLine(`[${stamp()}] watcher: delete`)),
+            vscode.workspace.onDidSaveTextDocument(doc => {
+                if (sameFile(doc.uri)) {
+                    dbg.appendLine(`[${stamp()}] text document saved`);
+                    scheduleReload('text document saved');
+                }
+            }),
+            vscode.workspace.onDidChangeTextDocument(event => {
+                if (sameFile(event.document.uri)) {
+                    dbg.appendLine(`[${stamp()}] buffer change, dirty=${event.document.isDirty}, changes=${event.contentChanges.length}`);
+                }
+                if (sameFile(event.document.uri) && event.contentChanges.length > 0) {
+                    scheduleReload('buffer change', event.document.getText());
+                }
+            }),
+            vscode.workspace.onDidOpenTextDocument(doc => {
+                if (sameFile(doc.uri)) {
+                    dbg.appendLine(`[${stamp()}] opened text doc: ${doc.uri.toString()}`);
+                }
+            })
+        ];
+
+        let lastSig = '';
+        let reloadPending = false;
+        let pollInProgress = false;
+        const poll = setInterval(async () => {
+            if (pollInProgress) {
                 return;
             }
+            pollInProgress = true;
             try {
-                await loadWorkbookPayload();
-                trySendInit();
-            } catch {
-                // ignore reload errors
+                const stat = await fs.promises.stat(filePath);
+                const sig = `${stat.mtimeMs}:${stat.size}`;
+                if (!lastSig) {
+                    lastSig = sig;
+                } else if (sig !== lastSig) {
+                    lastSig = sig;
+                    reloadPending = true;
+                    dbg.appendLine(`[${stamp()}] poll: file changed on disk`);
+                }
+
+                if (reloadPending && !isSaving && Date.now() - lastSaveTime > 1000 && !previewVersionId && !isReloading) {
+                    isReloading = true;
+                    try {
+                        await loadWorkbookPayload();
+                        trySendInit();
+                        reloadPending = false;
+                        dbg.appendLine(`[${stamp()}] poll: reload complete; init attempted (ready=${isWebviewReady}, worksheets=${worksheetsData.length})`);
+                    } catch (err) {
+                        dbg.appendLine(`[${stamp()}] poll reload failed: ${String(err)}`);
+                    } finally {
+                        isReloading = false;
+                    }
+                }
+            } catch (err) {
+                dbg.appendLine(`[${stamp()}] poll error: ${String(err)}`);
+            } finally {
+                pollInProgress = false;
             }
-        });
+        }, 1000);
+
         webviewPanel.onDidDispose(() => {
-            watcherDisposable.dispose();
-            watcher.dispose();
+            if (reloadTimer) {
+                clearTimeout(reloadTimer);
+            }
+            clearInterval(poll);
+            disposables.forEach(disposable => disposable.dispose());
         });
 
         try {
@@ -2905,7 +3054,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
         } else if (typeof value === 'string') {
             const raw = value.trim();
             if (!raw) return '';
-            
+
             // Try robustly parsing standard ISO (YYYY-MM-DD) or common US (MM/DD/YYYY) formats in UTC
             const ymdMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
             if (ymdMatch) {
@@ -2925,7 +3074,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomReadonlyEditorPro
                     const textualRegex2 = new RegExp(`^\\d{1,2} ${monthNames} \\d{4}$`, 'i');
                     const textualRegex3 = new RegExp(`^\\d{4} ${monthNames} \\d{1,2}$`, 'i');
                     const textualRegex4 = new RegExp(`^[a-z]{3},? \\d{1,2} ${monthNames} \\d{4}`, 'i');
-                    
+
                     if (isoRegex.test(raw) ||
                         textualRegex1.test(raw) ||
                         textualRegex2.test(raw) ||

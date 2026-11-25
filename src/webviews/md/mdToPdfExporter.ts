@@ -391,7 +391,7 @@ export class MdToPdfExporter {
                 pdf.setTextColor(33, 37, 41);
             }
 
-            // Table renderer with headers & borders
+            // Table renderer with word-wrapping headers & borders
             function renderTable(table: HTMLElement, spacingAfter = 10) {
                 const allRows = Array.from(table.querySelectorAll('tr'));
                 if (allRows.length === 0) return;
@@ -400,13 +400,53 @@ export class MdToPdfExporter {
 
                 const colW = CW / numCols;
                 const fs = 9;
+                const lineH = fs * 1.35;
                 const padX = 5;
                 const padY = 5;
-                const rowH = fs + padY * 2;
+
+                interface CellData {
+                    lines: string[];
+                    align: 'left' | 'center' | 'right';
+                }
 
                 allRows.forEach((row, ri) => {
-                    ensureSpace(rowH + 1);
                     const isHeader = !!row.closest('thead');
+                    const cells = Array.from(row.children) as HTMLElement[];
+
+                    applyFont(isHeader, false, false, fs);
+
+                    const cellDataList: CellData[] = [];
+                    for (let ci = 0; ci < numCols; ci++) {
+                        const cell = cells[ci];
+                        if (!cell) {
+                            cellDataList.push({ lines: [''], align: 'left' });
+                            continue;
+                        }
+
+                        let align: 'left' | 'center' | 'right' = 'left';
+                        const textAlign = (cell.style?.textAlign || cell.getAttribute('align') || '').toLowerCase();
+                        if (textAlign === 'center') align = 'center';
+                        else if (textAlign === 'right') align = 'right';
+
+                        const rawText = MdToPdfExporter.cleanPdfText(cell.textContent || '').trim();
+                        if (!rawText) {
+                            cellDataList.push({ lines: [''], align });
+                            continue;
+                        }
+
+                        const maxTextW = Math.max(10, colW - padX * 2);
+                        const lines: string[] = pdf.splitTextToSize(rawText, maxTextW);
+                        cellDataList.push({
+                            lines: lines && lines.length > 0 ? lines : [''],
+                            align
+                        });
+                    }
+
+                    const maxLines = Math.max(1, ...cellDataList.map((c) => c.lines.length));
+                    const rowH = padY * 2 + maxLines * lineH;
+
+                    ensureSpace(Math.min(rowH + 1, PH - M * 2 - 10));
+
                     pdf.setFillColor(
                         isHeader ? 45 : ri % 2 === 0 ? 255 : 248,
                         isHeader ? 50 : ri % 2 === 0 ? 255 : 249,
@@ -420,18 +460,24 @@ export class MdToPdfExporter {
                     applyFont(isHeader, false, false, fs);
                     pdf.setTextColor(isHeader ? 245 : 33, isHeader ? 245 : 37, isHeader ? 255 : 41);
 
-                    Array.from(row.children).forEach((cell, ci) => {
+                    cellDataList.forEach((cellData, ci) => {
                         if (ci > 0) {
                             pdf.setDrawColor(210, 213, 220);
                             pdf.line(M + ci * colW, y, M + ci * colW, y + rowH);
                         }
-                        let t = MdToPdfExporter.cleanPdfText(cell.textContent || '').trim();
-                        while (pdf.getTextWidth(t) > colW - padX * 2 && t.length > 1) {
-                            t = t.slice(0, -1);
-                        }
-                        if (t.length < (cell.textContent || '').trim().length) t += '...';
-                        pdf.text(t, M + ci * colW + padX, y + padY + fs);
+
+                        cellData.lines.forEach((lineText, li) => {
+                            const textY = y + padY + (li + 1) * lineH - (lineH - fs) * 0.5;
+                            if (cellData.align === 'center') {
+                                pdf.text(lineText, M + ci * colW + colW / 2, textY, { align: 'center' });
+                            } else if (cellData.align === 'right') {
+                                pdf.text(lineText, M + (ci + 1) * colW - padX, textY, { align: 'right' });
+                            } else {
+                                pdf.text(lineText, M + ci * colW + padX, textY);
+                            }
+                        });
                     });
+
                     y += rowH;
                 });
                 y += spacingAfter;

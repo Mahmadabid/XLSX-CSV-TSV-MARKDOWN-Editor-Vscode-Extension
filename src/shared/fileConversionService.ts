@@ -39,7 +39,7 @@ export interface TabularFileConverter {
     type: TabularFileType;
     label: string;
     extension: string;
-    read(filePath: string): Promise<TabularWorkbookData>;
+    read(filePathOrBuffer: string | Buffer): Promise<TabularWorkbookData>;
     write(filePath: string, workbook: TabularWorkbookData): Promise<void>;
 }
 
@@ -90,7 +90,7 @@ function normalizeWorkbook(workbook: TabularWorkbookData): TabularWorkbookData {
     };
 }
 
-function parseDelimitedText(content: string, delimiter: string): string[][] {
+export function parseDelimitedText(content: string, delimiter: string): string[][] {
     const rows: string[][] = [];
     let row: string[] = [];
     let field = '';
@@ -233,8 +233,10 @@ function createDelimitedConverter(type: string, label: string, defaultDelimiter:
         type,
         label,
         extension: type,
-        async read(filePath: string): Promise<TabularWorkbookData> {
-            const content = await fs.promises.readFile(filePath, 'utf8');
+        async read(filePathOrBuffer: string | Buffer): Promise<TabularWorkbookData> {
+            const content = typeof filePathOrBuffer === 'string'
+                ? await fs.promises.readFile(filePathOrBuffer, 'utf8')
+                : filePathOrBuffer.toString('utf8');
             let delimiter = defaultDelimiter;
             if (type === 'csv') {
                 delimiter = getCsvDelimiter();
@@ -264,9 +266,9 @@ function createXlsxConverter(): TabularFileConverter {
         type: 'xlsx',
         label: 'XLSX',
         extension: 'xlsx',
-        async read(filePath: string): Promise<TabularWorkbookData> {
+        async read(filePathOrBuffer: string | Buffer): Promise<TabularWorkbookData> {
             const workbook = new Excel.Workbook();
-            await loadExcelWorkbook(filePath, workbook);
+            await loadExcelWorkbook(filePathOrBuffer, workbook);
 
             const sheets = workbook.worksheets.map((worksheet, index) => {
                 let maxRow = 0;
@@ -376,16 +378,19 @@ export function getTargetTabularFileTypes(sourceType: TabularFileType): TabularF
     return getSupportedTabularFileTypes().filter(type => type !== sourceType);
 }
 
-export async function readTabularFile(filePath: string, sourceType?: TabularFileType): Promise<{ type: TabularFileType; workbook: TabularWorkbookData }> {
-    const type = sourceType ?? detectTabularFileType(filePath);
+export async function readTabularFile(
+    filePathOrBuffer: string | Buffer,
+    sourceType?: TabularFileType
+): Promise<{ type: TabularFileType; workbook: TabularWorkbookData }> {
+    const type = sourceType ?? (typeof filePathOrBuffer === 'string' ? detectTabularFileType(filePathOrBuffer) : undefined);
     if (!type) {
-        throw new Error(`Unsupported file extension for "${filePath}"`);
+        throw new Error(`Unsupported file extension or type`);
     }
 
     const converter = getConverterForType(type);
     return {
         type,
-        workbook: await converter.read(filePath)
+        workbook: await converter.read(filePathOrBuffer)
     };
 }
 

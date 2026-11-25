@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.1.0 - PDF Table Text Wrap & Git Diff Fix
+- **PDF Export Table Word-Wrapping**: Fixed long text cutting off in Markdown tables during PDF export; table cells now word-wrap across multiple lines with dynamic row heights and column alignment.
+- **Git Diff**: Removed the broken spreadsheet preview from Git changes.
+
 ## v2.0.9 - WYSIWYG Split Editing
 - You can now edit the formatted Markdown preview directly while using split view.
 - Changes made on either side stay in sync.

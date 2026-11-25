@@ -256,6 +256,14 @@ async function applyStoredStylesToXlsxFile(filePath: string, storedStyles: Recor
     await workbook.xlsx.writeFile(filePath);
 }
 
+const DIFF_FILE_RE = /\.(csv|tsv|xlsx)$/i;
+
+function describeTabInput(input: any): string {
+    const name = input?.constructor?.name ?? typeof input;
+    const fmt = (u: any) => (u instanceof vscode.Uri ? u.toString() : String(u));
+    return `${name} original=${fmt(input?.original)} modified=${fmt(input?.modified)} uri=${fmt(input?.uri)} viewType=${input?.viewType ?? ''}`;
+}
+
 export function activate(context: vscode.ExtensionContext) {
     const spreadsheetProvider = new SpreadsheetEditorProvider(context);
     const mdProvider = new MDEditorProvider(context);
@@ -300,6 +308,56 @@ export function activate(context: vscode.ExtensionContext) {
                 retainContextWhenHidden: true
             },
             supportsMultipleEditorsPerDocument: false
+        })
+    );
+
+    const diffLog = vscode.window.createOutputChannel('XLSX Viewer Diff');
+    context.subscriptions.push(diffLog);
+    const switching = new Set<string>();
+
+    context.subscriptions.push(
+        vscode.window.tabGroups.onDidChangeTabs(async (e) => {
+            for (const tab of e.opened) {
+                const input: any = tab.input;
+                diffLog.appendLine(`[opened] ${tab.label} :: ${describeTabInput(input)}`);
+
+                // Only diff tabs expose both original and modified.
+                const original = input?.original;
+                const modified = input?.modified;
+                if (!(original instanceof vscode.Uri) || !(modified instanceof vscode.Uri)) {
+                    continue;
+                }
+                if (!DIFF_FILE_RE.test(modified.path)) {
+                    continue;
+                }
+
+                const key = `${original.toString()}|${modified.toString()}`;
+                if (switching.has(key)) {
+                    continue;
+                }
+                switching.add(key);
+
+                try {
+                    // Give VS Code time to finish mounting both sides.
+                    await new Promise(r => setTimeout(r, 300));
+
+                    // Only act if the diff tab is still the active one and still
+                    // not a plain text diff (TabInputTextDiff means we're done).
+                    const active = vscode.window.tabGroups.activeTabGroup.activeTab;
+                    if (active?.input instanceof vscode.TabInputTextDiff) {
+                        diffLog.appendLine('[skip] already a text diff');
+                        continue;
+                    }
+
+                    // Automatic switching is disabled; only log detected diff tabs.
+                    // await vscode.commands.executeCommand('workbench.action.toggleEditorType');
+                    diffLog.appendLine(`[detected] ${key}`);
+                } catch (err) {
+                    diffLog.appendLine(`[error] ${String(err)}`);
+                } finally {
+                    setTimeout(() => switching.delete(key), 3000);
+                }
+            }
         })
     );
 
